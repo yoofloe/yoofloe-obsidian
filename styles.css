@@ -1,0 +1,13 @@
+.yoofloe-setting-note {
+  margin: 0.5rem 0 1rem;
+  color: var(--text-muted);
+}
+
+.yoofloe-setting-warning {
+  padding: 0.75rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
