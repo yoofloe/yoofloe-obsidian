@@ -1,16 +1,19 @@
 # Agent Direct Mode
 
-Agent Direct Mode lets Codex, Claude Code, Antigravity, or another filesystem-capable agent generate Yoofloe Markdown notes without calling the plugin runtime directly.
+Agent Direct Mode lets Codex, Claude Code, Antigravity, or another filesystem-capable agent generate grounded Yoofloe AI documents without calling the plugin runtime directly.
 
-This is separate from plugin BYOK. In Agent Direct Mode, the agent uses its own model path and writes Markdown directly into your vault.
+This is separate from plugin Gemini setup. In Agent Direct Mode, the agent uses its own model path and writes Markdown directly into your vault.
+
+Inside the plugin, `Settings -> Yoofloe -> Use With AI Agents` gives you copyable prompts, an MCP config snippet, the external guide link, and a vault note generator for sharing setup instructions.
 
 The flow is:
 
 1. Generate a Yoofloe `pat_yfl_...` token in the Yoofloe web app.
-2. Call `obsidian-data-api` or `obsidian-gardener-api`.
-3. Render the response into Markdown.
-4. Write the result into your Obsidian vault.
-5. Obsidian detects the new `.md` file automatically.
+2. Call `obsidian-data-api` and optionally `obsidian-gardener-api`.
+3. Build a document-specific prompt scaffold around the returned data.
+4. Let the agent's own model write the final Markdown.
+5. Write the result into your Obsidian vault.
+6. Obsidian detects the new `.md` file automatically.
 
 ## Requirements
 
@@ -24,23 +27,32 @@ The flow is:
 - File name: `YYYY-MM-DD__<surface>.md`
 - Conflict handling: add `__2`, `__3`, and so on
 
-Recommended frontmatter fields:
+Recommended frontmatter fields for AI documents:
 
 ```yaml
 source: yoofloe
-type: yoofloe-report
+type: ai-insight-brief
 domains:
   - finance
   - business
 range: 1M
 scope: personal
 generated_at: 2026-04-05T11:45:00.000Z
-provider: yoofloe-api
+provider: codex
 tags:
   - yoofloe
   - yoofloe/finance
   - yoofloe/business
 ```
+
+## Recommended document types
+
+- `ai-insight-brief`
+- `ai-decision-memo`
+- `ai-action-plan`
+- `ai-deep-dive`
+
+Each document should clearly separate evidence, interpretation, recommendations, and open questions.
 
 ## Data API example
 
@@ -68,7 +80,7 @@ curl -X POST "$YOOFLOE_FUNCTIONS_BASE_URL/obsidian-data-api" \
 
 ## Gardener API example
 
-Request a deterministic action brief:
+Request a deterministic signal brief:
 
 ```bash
 curl -X POST "$YOOFLOE_FUNCTIONS_BASE_URL/obsidian-gardener-api" \
@@ -90,18 +102,22 @@ Use a prompt like this with Codex, Claude Code, or Antigravity:
 ```text
 Use my Yoofloe PAT from the environment variable YOOFLOE_PAT.
 Call the Yoofloe obsidian-data-api for domains finance and business with range 1M.
-Generate a clean Markdown note with Yoofloe frontmatter.
-Write the file into my Obsidian vault under Yoofloe/YYYY-MM-DD__finance-business-report.md.
+Also call the Yoofloe obsidian-gardener-api brief endpoint for the same domains and range.
+Generate an AI Decision Memo grounded only in the returned data.
+Separate evidence, interpretation, recommended direction, and open questions.
+Write the file into my Obsidian vault under Yoofloe/YYYY-MM-DD__ai-decision-memo.md.
 If the file exists, add a numeric suffix.
 Do not modify any existing notes.
 ```
 
-For a Gardener-style document:
+For a focused deep dive:
 
 ```text
 Use my Yoofloe PAT from the environment variable YOOFLOE_PAT.
-Call the Yoofloe obsidian-gardener-api with surface brief for schedule, business, and finance over 1W.
-Save the rendered Markdown into my Obsidian vault under Yoofloe/YYYY-MM-DD__ai-brief.md.
+Call the Yoofloe obsidian-data-api for schedule, wellness, finance, and business over 1M.
+Optionally call the Yoofloe obsidian-gardener-api brief endpoint for the same request.
+Generate an AI Deep Dive focused on: "cash flow pressure, low-energy periods, and whether my schedule supports recovery."
+Write the file into my Obsidian vault under Yoofloe/YYYY-MM-DD__ai-deep-dive.md.
 ```
 
 ## Security notes
@@ -109,4 +125,4 @@ Save the rendered Markdown into my Obsidian vault under Yoofloe/YYYY-MM-DD__ai-b
 - Do not paste PATs directly into reusable prompts when an environment variable is available.
 - Treat the vault path and the PAT as local secrets.
 - Prefer writing only into the intended `Yoofloe/` folder instead of giving an agent unrestricted vault write instructions.
-- Agent Direct Mode is separate from the plugin runtime. If you want the plugin UX, use Plugin Mode instead.
+- Agent Direct Mode is separate from the plugin runtime. If you want the built-in Gemini UX, use Plugin Mode instead.

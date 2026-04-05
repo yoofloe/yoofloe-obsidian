@@ -9,14 +9,15 @@ export const YOOFLOE_DOMAINS = [
 ] as const;
 
 export const YOOFLOE_RANGES = ["1W", "1M", "6M", "1Y", "All"] as const;
+export const YOOFLOE_AI_DOCUMENT_TYPES = ["insight-brief", "decision-memo", "action-plan", "deep-dive"] as const;
 
 export type YoofloeDomain = (typeof YOOFLOE_DOMAINS)[number];
 export type YoofloeRange = (typeof YOOFLOE_RANGES)[number];
 export type YoofloeScope = "personal";
 export type YoofloeDateFormat = "YYYY-MM-DD" | "YYYYMMDD" | "YYYY.MM.DD";
 export type YoofloeGardenerSurface = "brief" | "plan" | "prompt" | "export";
-export type YoofloeAiProviderType = "none" | "gemini" | "openai" | "anthropic";
-export type YoofloeByokTaskType = "brief" | "action-plan" | "prompt-package";
+export type YoofloeAiProviderType = "none" | "gemini-google" | "gemini-vertex";
+export type YoofloeAiDocumentType = (typeof YOOFLOE_AI_DOCUMENT_TYPES)[number];
 
 export interface MarkdownRenderOptions {
   autoFrontmatter: boolean;
@@ -25,8 +26,14 @@ export interface MarkdownRenderOptions {
 
 export interface YoofloeByokSettings {
   type: YoofloeAiProviderType;
-  apiKey: string;
-  model: string;
+  clientId: string;
+  googleConnected: boolean;
+  googleLastConnectState: "idle" | "pending" | "success" | "error";
+  googleLastConnectMessage: string;
+  project: string;
+  location: string;
+  googleModel: string;
+  vertexModel: string;
 }
 
 export interface YoofloeEntitlement {

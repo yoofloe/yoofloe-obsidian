@@ -1,12 +1,17 @@
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { buildAgentDirectGuidePayload, buildAgentSetupNoteMarkdown } from "../agent-guidance";
+import { buildAiDocumentPrompt, getAiDocumentDefinition } from "../ai/prompts";
+import { renderAiNoteMarkdown } from "../generators/ai-note";
 import { renderReportMarkdown } from "../generators/markdown";
 import {
+  type YoofloeAiDocumentType,
   type YoofloeBundle,
   type YoofloeDateFormat,
   type YoofloeDomain,
+  YOOFLOE_AI_DOCUMENT_TYPES,
   type YoofloeRange,
   YOOFLOE_DOMAINS,
   YOOFLOE_RANGES
@@ -18,6 +23,7 @@ const DEFAULT_DATE_FORMAT: YoofloeDateFormat = "YYYY-MM-DD";
 const PAT_ENV_ERROR = "YOOFLOE_PAT environment variable is required and must contain a Yoofloe pat_yfl_ token.";
 const VAULT_ENV_ERROR = "YOOFLOE_VAULT_PATH environment variable is required and must point to your Obsidian vault root.";
 const DATE_FORMATS: YoofloeDateFormat[] = ["YYYY-MM-DD", "YYYYMMDD", "YYYY.MM.DD"];
+const AI_DOCUMENT_TYPES = YOOFLOE_AI_DOCUMENT_TYPES;
 
 type ReportPreset = {
   title: string;
@@ -35,6 +41,15 @@ const DOMAIN_PRESETS: Record<YoofloeDomain, ReportPreset> = {
   garden: { title: "Garden Status", type: "garden-status", surface: "garden-status" }
 };
 
+function suggestedAiDocumentTitle(documentType: YoofloeAiDocumentType, focusInstruction?: string) {
+  const document = getAiDocumentDefinition(documentType);
+  if (documentType === "deep-dive" && focusInstruction?.trim()) {
+    return `${document.title}: ${focusInstruction.trim()}`;
+  }
+
+  return document.title;
+}
+
 function comparablePath(value: string) {
   const resolved = path.resolve(value);
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
@@ -48,6 +63,10 @@ function isInsidePath(rootPath: string, candidatePath: string) {
 
 function asJsonText(value: unknown) {
   return JSON.stringify(value, null, 2);
+}
+
+function yamlString(value: string) {
+  return JSON.stringify(value);
 }
 
 function toolTextResponse<T extends Record<string, unknown>>(text: string, structuredContent?: T) {
@@ -261,7 +280,23 @@ function countMarkdownFiles(folderPath: string): number {
 }
 
 function resolveConfigVersion() {
-  return process.env.npm_package_version || "0.1.1";
+  if (process.env.npm_package_version?.trim()) {
+    return process.env.npm_package_version.trim();
+  }
+
+  try {
+    const packageJsonPath = path.join(process.cwd(), "package.json");
+    if (existsSync(packageJsonPath)) {
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version?: string };
+      if (typeof packageJson.version === "string" && packageJson.version.trim()) {
+        return packageJson.version.trim();
+      }
+    }
+  } catch {
+    // Fall through to the hard-coded safe default.
+  }
+
+  return "0.3.0";
 }
 
 function buildReportPayload(args: {
@@ -301,6 +336,163 @@ function buildReportPayload(args: {
   };
 }
 
+function defaultTags(domains: YoofloeDomain[]) {
+  return ["yoofloe", ...domains.map((domain) => `yoofloe/${domain}`)];
+}
+
+function normalizeNoteBody(markdownBody: string) {
+  let value = markdownBody.trim();
+
+  if (value.startsWith("---")) {
+    const closingMarker = value.indexOf("\n---", 3);
+    if (closingMarker >= 0) {
+      value = value.slice(closingMarker + 4).trim();
+    }
+  }
+
+  if (value.startsWith("# ")) {
+    const firstLineBreak = value.indexOf("\n");
+    value = firstLineBreak >= 0 ? value.slice(firstLineBreak + 1).trim() : "";
+  }
+
+  return value;
+}
+
+function renderAgentNoteMarkdown(args: {
+  title: string;
+  type: string;
+  domains: YoofloeDomain[];
+  range: YoofloeRange;
+  markdownBody: string;
+  provider: string;
+  tags?: string[];
+  config: YoofloeMcpConfig;
+}) {
+  const tags = args.tags?.length ? args.tags : defaultTags(args.domains);
+  const body = normalizeNoteBody(args.markdownBody);
+  const generatedAt = new Date().toISOString();
+  const frontmatter = [
+    "---",
+    `source: ${yamlString("yoofloe")}`,
+    `plugin_id: ${yamlString("yoofloe")}`,
+    `plugin_version: ${yamlString(args.config.pluginVersion)}`,
+    `type: ${yamlString(args.type)}`,
+    "domains:",
+    ...args.domains.map((domain) => `  - ${yamlString(domain)}`),
+    `range: ${yamlString(args.range)}`,
+    `scope: ${yamlString("personal")}`,
+    `generated_at: ${yamlString(generatedAt)}`,
+    `provider: ${yamlString(args.provider)}`,
+    "tags:",
+    ...tags.map((tag) => `  - ${yamlString(tag)}`),
+    "---"
+  ].join("\n");
+
+  return `${frontmatter}\n\n# ${args.title}\n\n${body}\n`;
+}
+
+async function tryFetchGardenerBriefMarkdown(
+  client: YoofloeMcpHttpClient,
+  domains: YoofloeDomain[],
+  range: YoofloeRange
+) {
+  try {
+    const response = await client.fetchGardenerBrief({
+      domains,
+      range,
+      format: "markdown"
+    });
+
+    return {
+      markdown: response.rendered?.trim() || null,
+      entitlement: response.entitlement
+    };
+  } catch {
+    return {
+      markdown: null,
+      entitlement: null
+    };
+  }
+}
+
+async function buildAiDocumentContext(args: {
+  client: YoofloeMcpHttpClient;
+  documentType: YoofloeAiDocumentType;
+  domains: YoofloeDomain[];
+  range: YoofloeRange;
+  includeRaw: boolean;
+  focusInstruction?: string;
+}) {
+  const response = await args.client.fetchBundle({
+    domains: args.domains,
+    range: args.range,
+    includeRaw: args.includeRaw,
+    includeFrontmatterHints: true
+  });
+  const gardener = await tryFetchGardenerBriefMarkdown(args.client, args.domains, args.range);
+  const definition = getAiDocumentDefinition(args.documentType);
+  const title = suggestedAiDocumentTitle(args.documentType, args.focusInstruction);
+
+  return {
+    documentType: args.documentType,
+    definition,
+    bundle: response.bundle,
+    entitlement: response.entitlement,
+    rateLimit: response.rateLimit,
+    gardenerBriefMarkdown: gardener.markdown,
+    gardenerEntitlement: gardener.entitlement,
+    focusInstruction: args.focusInstruction?.trim() || null,
+    suggestedOutput: {
+      title,
+      type: definition.type,
+      surface: definition.surface,
+      provider: "yoofloe-mcp",
+      tags: defaultTags(args.domains)
+    },
+    promptScaffold: buildAiDocumentPrompt({
+      bundle: response.bundle,
+      documentType: args.documentType,
+      gardenerBrief: gardener.markdown,
+      focusInstruction: args.focusInstruction
+    })
+  };
+}
+
+function renderAiDocumentMarkdown(args: {
+  title: string;
+  documentType: YoofloeAiDocumentType;
+  bundle: YoofloeBundle;
+  markdownBody: string;
+  provider: string;
+  pluginVersion: string;
+}) {
+  const definition = getAiDocumentDefinition(args.documentType);
+
+  return renderAiNoteMarkdown({
+    title: args.title,
+    type: definition.type,
+    bundle: args.bundle,
+    settings: {
+      autoFrontmatter: true,
+      includeRawData: false
+    },
+    pluginVersion: args.pluginVersion,
+    provider: args.provider,
+    body: args.markdownBody
+  });
+}
+
+function requireFocusInstruction(documentType: YoofloeAiDocumentType, focusInstruction?: string) {
+  const definition = getAiDocumentDefinition(documentType);
+  const normalized = focusInstruction?.trim() || "";
+
+  if (definition.requiresFocusInstruction && !normalized) {
+    throw new Error("focusInstruction is required for documentType deep-dive.");
+  }
+
+  return normalized || undefined;
+}
+
 export function readMcpConfig(env: NodeJS.ProcessEnv): YoofloeMcpConfig {
   const pat = trimEnv(env.YOOFLOE_PAT);
   if (!pat) {
@@ -325,6 +517,53 @@ export function readMcpConfig(env: NodeJS.ProcessEnv): YoofloeMcpConfig {
 
 export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig) {
   const client = new YoofloeMcpHttpClient(config);
+
+  server.tool(
+    "yoofloe_agent_direct_guide",
+    "Return the current Agent Direct and MCP workflow contract for external AI agents without fetching data or writing files.",
+    {},
+    async () => {
+      const guide = buildAgentDirectGuidePayload({
+        pluginVersion: config.pluginVersion,
+        saveFolder: config.saveFolder,
+        functionsBaseUrl: config.functionsBaseUrl
+      });
+
+      return toolTextResponse(
+        buildAgentSetupNoteMarkdown({
+          pluginVersion: config.pluginVersion,
+          saveFolder: config.saveFolder,
+          functionsBaseUrl: config.functionsBaseUrl
+        }),
+        guide
+      );
+    }
+  );
+
+  server.tool(
+    "yoofloe_ai_document_context",
+    "Fetch a grounded AI-document context package for Insight Brief, Decision Memo, Action Plan, or Deep Dive workflows.",
+    {
+      documentType: z.enum(AI_DOCUMENT_TYPES).describe("AI document type to prepare."),
+      domains: z.array(z.enum(YOOFLOE_DOMAINS)).min(1).describe("One or more Yoofloe domains to include."),
+      range: z.enum(YOOFLOE_RANGES).optional().describe("Time range. Defaults to 1M."),
+      includeRaw: z.boolean().optional().describe("Include raw evidence payloads in the canonical bundle. Defaults to false."),
+      focusInstruction: z.string().optional().describe("Required when documentType is deep-dive.")
+    },
+    async ({ documentType, domains, range, includeRaw, focusInstruction }) => {
+      const normalizedFocus = requireFocusInstruction(documentType, focusInstruction);
+      const context = await buildAiDocumentContext({
+        client,
+        documentType,
+        domains,
+        range: range ?? "1M",
+        includeRaw: includeRaw ?? false,
+        focusInstruction: normalizedFocus
+      });
+
+      return toolTextResponse(asJsonText(context), context);
+    }
+  );
 
   server.tool(
     "yoofloe_data_bundle",
@@ -372,7 +611,7 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
 
   server.tool(
     "yoofloe_generate_report",
-    "Generate Yoofloe Markdown from a data bundle and optionally write it into the configured vault folder.",
+    "Deprecated: generate report-style Yoofloe Markdown from a data bundle and optionally write it into the configured vault folder. Prefer yoofloe_ai_document_context plus yoofloe_write_ai_document for new workflows.",
     {
       domains: z.array(z.enum(YOOFLOE_DOMAINS)).min(1).describe("One or more Yoofloe domains to include."),
       range: z.enum(YOOFLOE_RANGES).optional().describe("Time range. Defaults to 1M."),
@@ -406,6 +645,102 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
         : report.markdown;
 
       return toolTextResponse(summary, report);
+    }
+  );
+
+  server.tool(
+    "yoofloe_write_ai_document",
+    "Write a normalized Yoofloe AI document into the configured vault folder using caller-supplied Markdown content.",
+    {
+      documentType: z.enum(AI_DOCUMENT_TYPES).describe("AI document type to write."),
+      title: z.string().min(1).describe("Document title rendered as the top-level heading."),
+      domains: z.array(z.enum(YOOFLOE_DOMAINS)).min(1).describe("One or more Yoofloe domains reflected in the document."),
+      range: z.enum(YOOFLOE_RANGES).describe("Time range that the document summarizes."),
+      markdownBody: z.string().min(1).describe("Markdown body content without YAML frontmatter."),
+      provider: z.string().optional().describe("Frontmatter provider label. Defaults to codex."),
+      focusInstruction: z.string().optional().describe("Required when documentType is deep-dive.")
+    },
+    async ({ documentType, title, domains, range, markdownBody, provider, focusInstruction }) => {
+      const normalizedFocus = requireFocusInstruction(documentType, focusInstruction);
+      const response = await client.fetchBundle({
+        domains,
+        range,
+        includeRaw: false,
+        includeFrontmatterHints: true
+      });
+      const definition = getAiDocumentDefinition(documentType);
+      const normalizedTitle = title.trim();
+      const normalizedProvider = provider?.trim() || "codex";
+      const markdown = renderAiDocumentMarkdown({
+        title: normalizedTitle,
+        documentType,
+        bundle: response.bundle,
+        markdownBody,
+        provider: normalizedProvider,
+        pluginVersion: config.pluginVersion
+      });
+
+      const filePath = nextNotePath(config, definition.surface);
+      writeNewFile(filePath, markdown);
+
+      const result = {
+        documentType,
+        title: normalizedTitle,
+        type: definition.type,
+        surface: definition.surface,
+        domains,
+        range,
+        provider: normalizedProvider,
+        focusInstruction: normalizedFocus,
+        filePath,
+        markdown,
+        bundleMeta: response.bundle.meta
+      };
+
+      return toolTextResponse(`Wrote ${filePath}.`, result);
+    }
+  );
+
+  server.tool(
+    "yoofloe_write_note",
+    "Write a richer Yoofloe Markdown note into the configured vault folder using caller-supplied Markdown content.",
+    {
+      title: z.string().min(1).describe("The note title that will be rendered as the top-level heading."),
+      surface: z.string().min(1).describe("The file surface/slug used in the generated note filename."),
+      type: z.string().min(1).describe("The Yoofloe frontmatter type to write."),
+      domains: z.array(z.enum(YOOFLOE_DOMAINS)).min(1).describe("One or more Yoofloe domains reflected in the note."),
+      range: z.enum(YOOFLOE_RANGES).describe("Time range that the note summarizes."),
+      markdownBody: z.string().min(1).describe("Markdown body content without YAML frontmatter."),
+      provider: z.string().optional().describe("Frontmatter provider label. Defaults to codex."),
+      tags: z.array(z.string().min(1)).optional().describe("Optional explicit tags. Defaults to Yoofloe domain tags.")
+    },
+    async ({ title, surface, type, domains, range, markdownBody, provider, tags }) => {
+      const markdown = renderAgentNoteMarkdown({
+        title: title.trim(),
+        type: type.trim(),
+        domains,
+        range,
+        markdownBody,
+        provider: provider?.trim() || "codex",
+        tags: tags?.map((tag) => tag.trim()).filter(Boolean),
+        config
+      });
+
+      const filePath = nextNotePath(config, surface.trim());
+      writeNewFile(filePath, markdown);
+
+      const result = {
+        title: title.trim(),
+        type: type.trim(),
+        surface: surface.trim(),
+        domains,
+        range,
+        provider: provider?.trim() || "codex",
+        filePath,
+        markdown
+      };
+
+      return toolTextResponse(`Wrote ${filePath}.`, result);
     }
   );
 

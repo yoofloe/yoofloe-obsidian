@@ -1,20 +1,25 @@
 # Yoofloe MCP Wrapper
 
-The Yoofloe MCP wrapper is a standalone stdio server in this repository. It lets Codex, Claude Code, Antigravity, or another MCP-capable client call Yoofloe tools and write Markdown only into your configured Obsidian vault folder.
+The Yoofloe MCP wrapper is a standalone stdio server in this repository. It lets Codex, Claude Code, Antigravity, or another MCP-capable client fetch Yoofloe AI-document context and write Markdown only into your configured Obsidian vault folder.
 
 This server does not call the Obsidian plugin runtime directly. It uses the same Yoofloe PAT and Edge Function APIs, then writes `.md` files into your vault.
 
-This MCP wrapper does not call Gemini, OpenAI, or Anthropic. Plugin BYOK is a separate feature that exists only inside Obsidian Plugin Mode.
+This MCP wrapper does not call Gemini or any other model provider directly. Plugin Gemini generation is a separate feature that exists only inside Obsidian Plugin Mode.
 
-## Phase 1 tools
+## Recommended tools
 
+- `yoofloe_agent_direct_guide`
+- `yoofloe_ai_document_context`
+- `yoofloe_write_ai_document`
 - `yoofloe_data_bundle`
 - `yoofloe_gardener_brief`
-- `yoofloe_generate_report`
+- `yoofloe_write_note`
 - `yoofloe_vault_status`
 - `yoofloe_test_token`
 
-Phase 2 tools like gardener plan and export are intentionally not included in the first MCP release.
+Deprecated compatibility tool:
+
+- `yoofloe_generate_report`
 
 ## Required environment variables
 
@@ -134,14 +139,15 @@ If Claude Code supports environment variables in your setup, provide at least:
 ```yaml
 source: yoofloe
 plugin_id: yoofloe
-plugin_version: 0.1.1
-type: finance-report
+plugin_version: 0.3.0
+type: ai-insight-brief
 domains:
   - finance
+  - business
 range: 1M
 scope: personal
 generated_at: 2026-04-05T11:45:00.000Z
-provider: yoofloe-mcp
+provider: codex
 tags:
   - yoofloe
   - yoofloe/finance
@@ -162,3 +168,23 @@ The plugin release assets remain unchanged:
 - `styles.css`
 
 `mcp-server.js` is a separate local/server artifact and is not part of the plugin release asset set.
+
+## AI document workflow
+
+The recommended Codex workflow is:
+
+1. Optionally call `yoofloe_agent_direct_guide` to fetch the current workflow contract, prompts, and output conventions.
+2. Call `yoofloe_ai_document_context` with a `documentType`, domains, range, and optional `focusInstruction`.
+3. Use the returned canonical bundle, gardener brief, and prompt scaffold with the client's own model.
+4. Call `yoofloe_write_ai_document` to save the final AI document into the configured `Yoofloe/` folder.
+
+Example:
+
+```text
+Use yoofloe_ai_document_context for documentType action-plan with domains finance, business, wellness, and schedule over 1M.
+Use the returned prompt scaffold to draft a grounded AI Action Plan.
+Keep evidence notes separate from recommendations.
+Save the result with yoofloe_write_ai_document.
+```
+
+Advanced users can still combine `yoofloe_data_bundle`, `yoofloe_gardener_brief`, and `yoofloe_write_note` manually, but the AI-document workflow above is the intended path.

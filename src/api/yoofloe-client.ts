@@ -1,5 +1,12 @@
 import { requestUrl } from "obsidian";
-import type { YoofloeDataApiResponse, YoofloeDomain, YoofloePluginSettings, YoofloeRange, YoofloeScope } from "../types";
+import type {
+  YoofloeDataApiResponse,
+  YoofloeDomain,
+  YoofloeGardenerApiResponse,
+  YoofloePluginSettings,
+  YoofloeRange,
+  YoofloeScope
+} from "../types";
 
 type BundleRequest = {
   domains: YoofloeDomain[];
@@ -9,13 +16,34 @@ type BundleRequest = {
   includeFrontmatterHints: boolean;
 };
 
+type GardenerBriefRequest = {
+  domains: YoofloeDomain[];
+  range: YoofloeRange;
+  scope: YoofloeScope;
+  format: "json" | "markdown";
+};
+
 function joinUrl(baseUrl: string, path: string) {
   return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
-async function postJson<T>(settings: YoofloePluginSettings, path: string, body: Record<string, unknown>): Promise<T> {
-  const token = settings.apiToken.trim();
-  if (!token) {
+type YoofloeClientSettings = Pick<YoofloePluginSettings, "functionsBaseUrl">;
+
+export class YoofloeApiError extends Error {
+  status: number;
+  body?: unknown;
+
+  constructor(message: string, status: number, body?: unknown) {
+    super(message);
+    this.name = "YoofloeApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+async function postJson<T>(settings: YoofloeClientSettings, token: string, path: string, body: Record<string, unknown>): Promise<T> {
+  const trimmedToken = token.trim();
+  if (!trimmedToken) {
     throw new Error("Yoofloe API token is missing.");
   }
 
@@ -23,7 +51,7 @@ async function postJson<T>(settings: YoofloePluginSettings, path: string, body: 
     url: joinUrl(settings.functionsBaseUrl, path),
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${trimmedToken}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(body)
@@ -32,14 +60,17 @@ async function postJson<T>(settings: YoofloePluginSettings, path: string, body: 
   if (response.status >= 400) {
     const payload = response.json || {};
     const message = typeof payload?.error === "string" ? payload.error : `Yoofloe request failed with status ${response.status}`;
-    throw new Error(message);
+    throw new YoofloeApiError(message, response.status, payload);
   }
 
   return response.json as T;
 }
 
 export class YoofloeClient {
-  constructor(private readonly settings: YoofloePluginSettings) {}
+  constructor(
+    private readonly settings: YoofloeClientSettings,
+    private readonly token: string
+  ) {}
 
   async testToken() {
     return this.fetchBundle({
@@ -52,6 +83,16 @@ export class YoofloeClient {
   }
 
   async fetchBundle(request: BundleRequest): Promise<YoofloeDataApiResponse> {
-    return postJson<YoofloeDataApiResponse>(this.settings, "obsidian-data-api", request);
+    return postJson<YoofloeDataApiResponse>(this.settings, this.token, "obsidian-data-api", request);
+  }
+
+  async fetchGardenerBrief(request: GardenerBriefRequest): Promise<YoofloeGardenerApiResponse> {
+    return postJson<YoofloeGardenerApiResponse>(this.settings, this.token, "obsidian-gardener-api", {
+      surface: "brief",
+      domains: request.domains,
+      range: request.range,
+      scope: request.scope,
+      format: request.format
+    });
   }
 }

@@ -1,11 +1,14 @@
 import { requestUrl } from "obsidian";
-import { buildByokPrompt, getByokTaskDefinition } from "./prompts";
-import type { YoofloeBundle, YoofloeByokSettings, YoofloeByokTaskType } from "../types";
+import { buildAiDocumentPrompt, getAiDocumentDefinition } from "./prompts";
+import type { YoofloeAiDocumentType, YoofloeBundle, YoofloeByokSettings } from "../types";
 
-type ByokRunOptions = {
+type AiDocumentRunOptions = {
   settings: YoofloeByokSettings;
+  googleAccessToken: string | null;
   bundle: YoofloeBundle;
-  taskType: YoofloeByokTaskType;
+  documentType: YoofloeAiDocumentType;
+  gardenerBrief?: string | null;
+  focusInstruction?: string | null;
 };
 
 function extractTextFromGemini(payload: Record<string, unknown>) {
@@ -14,7 +17,7 @@ function extractTextFromGemini(payload: Record<string, unknown>) {
   const content = firstCandidate && typeof firstCandidate.content === "object"
     ? firstCandidate.content as Record<string, unknown>
     : undefined;
-  const parts = Array.isArray(content?.parts) ? content?.parts as Array<Record<string, unknown>> : [];
+  const parts = Array.isArray(content?.parts) ? content.parts as Array<Record<string, unknown>> : [];
   const text = parts
     .map((part) => typeof part.text === "string" ? part.text : "")
     .filter(Boolean)
@@ -28,57 +31,11 @@ function extractTextFromGemini(payload: Record<string, unknown>) {
   return text;
 }
 
-function extractTextFromOpenAi(payload: Record<string, unknown>) {
-  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
-    return payload.output_text.trim();
-  }
-
-  const output = Array.isArray(payload.output) ? payload.output as Array<Record<string, unknown>> : [];
-  const text = output.flatMap((item) => {
-    const content = Array.isArray(item.content) ? item.content as Array<Record<string, unknown>> : [];
-    return content
-      .map((part) => {
-        if (typeof part.text === "string" && (part.type === "output_text" || part.type === "text")) {
-          return part.text;
-        }
-        return "";
-      })
-      .filter(Boolean);
-  }).join("\n").trim();
-
-  if (!text) {
-    throw new Error("OpenAI returned no text output.");
-  }
-
-  return text;
-}
-
-function extractTextFromAnthropic(payload: Record<string, unknown>) {
-  const content = Array.isArray(payload.content) ? payload.content as Array<Record<string, unknown>> : [];
-  const text = content
-    .map((part) => typeof part.text === "string" ? part.text : "")
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-
-  if (!text) {
-    throw new Error("Anthropic returned no text output.");
-  }
-
-  return text;
-}
-
 function extractProviderError(provider: string, status: number, payload: unknown) {
   if (payload && typeof payload === "object") {
     const record = payload as Record<string, unknown>;
-    if (provider === "gemini" && record.error && typeof record.error === "object") {
-      const error = record.error as Record<string, unknown>;
-      if (typeof error.message === "string" && error.message.trim()) {
-        return error.message;
-      }
-    }
 
-    if ((provider === "openai" || provider === "anthropic") && record.error && typeof record.error === "object") {
+    if (record.error && typeof record.error === "object") {
       const error = record.error as Record<string, unknown>;
       if (typeof error.message === "string" && error.message.trim()) {
         return error.message;
@@ -104,13 +61,35 @@ function normalizeMarkdownBody(markdown: string) {
   return value;
 }
 
-async function runGemini({ apiKey, model, prompt }: { apiKey: string; model: string; prompt: string; }) {
+function providerLabel(provider: YoofloeByokSettings["type"]) {
+  switch (provider) {
+    case "gemini-google":
+      return "Gemini (Google AI)";
+    case "gemini-vertex":
+      return "Gemini (Vertex AI)";
+    default:
+      return "AI provider";
+  }
+}
+
+async function runGeminiGoogle({
+  accessToken,
+  projectId,
+  model,
+  prompt
+}: {
+  accessToken: string;
+  projectId: string;
+  model: string;
+  prompt: string;
+}) {
   const response = await requestUrl({
     url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     method: "POST",
     headers: {
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
-      "x-goog-api-key": apiKey
+      "x-goog-user-project": projectId
     },
     body: JSON.stringify({
       contents: [
@@ -123,111 +102,106 @@ async function runGemini({ apiKey, model, prompt }: { apiKey: string; model: str
   });
 
   if (response.status >= 400) {
-    throw new Error(extractProviderError("gemini", response.status, response.json));
+    throw new Error(extractProviderError("gemini-google", response.status, response.json));
   }
 
   return normalizeMarkdownBody(extractTextFromGemini((response.json || {}) as Record<string, unknown>));
 }
 
-async function runOpenAi({
-  apiKey,
+async function runGeminiVertex({
+  accessToken,
+  projectId,
+  location,
   model,
-  prompt,
-  systemPrompt
+  prompt
 }: {
-  apiKey: string;
+  accessToken: string;
+  projectId: string;
+  location: string;
   model: string;
   prompt: string;
-  systemPrompt: string;
 }) {
   const response = await requestUrl({
-    url: "https://api.openai.com/v1/responses",
+    url: `https://${encodeURIComponent(location)}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:generateContent`,
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model,
-      instructions: systemPrompt,
-      input: prompt
-    })
-  });
-
-  if (response.status >= 400) {
-    throw new Error(extractProviderError("openai", response.status, response.json));
-  }
-
-  return normalizeMarkdownBody(extractTextFromOpenAi((response.json || {}) as Record<string, unknown>));
-}
-
-async function runAnthropic({
-  apiKey,
-  model,
-  prompt,
-  systemPrompt
-}: {
-  apiKey: string;
-  model: string;
-  prompt: string;
-  systemPrompt: string;
-}) {
-  const response = await requestUrl({
-    url: "https://api.anthropic.com/v1/messages",
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1600,
-      system: systemPrompt,
-      messages: [
+      contents: [
         {
           role: "user",
-          content: prompt
+          parts: [{ text: prompt }]
         }
       ]
     })
   });
 
   if (response.status >= 400) {
-    throw new Error(extractProviderError("anthropic", response.status, response.json));
+    throw new Error(extractProviderError("gemini-vertex", response.status, response.json));
   }
 
-  return normalizeMarkdownBody(extractTextFromAnthropic((response.json || {}) as Record<string, unknown>));
+  return normalizeMarkdownBody(extractTextFromGemini((response.json || {}) as Record<string, unknown>));
 }
 
-export async function runByokAnalysis({ settings, bundle, taskType }: ByokRunOptions) {
+export async function runAiDocumentAnalysis({
+  settings,
+  googleAccessToken,
+  bundle,
+  documentType,
+  gardenerBrief,
+  focusInstruction
+}: AiDocumentRunOptions) {
   const provider = settings.type;
+  const providerName = providerLabel(provider);
 
   if (provider === "none") {
-    throw new Error("Select an AI provider in Settings > Yoofloe before running AI commands.");
+    throw new Error("Select an AI provider in Settings > Yoofloe before running AI document commands.");
   }
 
-  const apiKey = settings.apiKey.trim();
-  if (!apiKey) {
-    throw new Error(`Add your ${provider} API key in Settings > Yoofloe before running AI commands.`);
+  const document = getAiDocumentDefinition(documentType);
+  const prompt = buildAiDocumentPrompt({ bundle, documentType, gardenerBrief, focusInstruction });
+
+  if (provider === "gemini-google" || provider === "gemini-vertex") {
+    const normalizedAccessToken = googleAccessToken?.trim() ?? "";
+    if (!normalizedAccessToken) {
+      throw new Error("Connect Google in Settings > Yoofloe before running Gemini commands.");
+    }
+
+    const projectId = settings.project.trim();
+    if (!projectId) {
+      throw new Error(`Add your Google Cloud Project ID in Settings > Yoofloe before running ${providerName} commands.`);
+    }
+
+    if (provider === "gemini-google") {
+      const model = settings.googleModel.trim();
+      if (!model) {
+        throw new Error("Add a Gemini model ID in Settings > Yoofloe before running Gemini commands.");
+      }
+
+      return await runGeminiGoogle({
+        accessToken: normalizedAccessToken,
+        projectId,
+        model,
+        prompt: `${document.systemPrompt}\n\n${prompt}`
+      });
+    }
+
+    const model = settings.vertexModel.trim();
+    if (!model) {
+      throw new Error("Add a Vertex model ID in Settings > Yoofloe before running Vertex AI commands.");
+    }
+
+    const location = settings.location.trim() || "us-central1";
+    return await runGeminiVertex({
+      accessToken: normalizedAccessToken,
+      projectId,
+      location,
+      model,
+      prompt: `${document.systemPrompt}\n\n${prompt}`
+    });
   }
 
-  const model = settings.model.trim();
-  if (!model) {
-    throw new Error(`Add a ${provider} model ID in Settings > Yoofloe before running AI commands.`);
-  }
-
-  const task = getByokTaskDefinition(taskType);
-  const prompt = buildByokPrompt({ bundle, taskType });
-
-  switch (provider) {
-    case "gemini":
-      return await runGemini({ apiKey, model, prompt: `${task.systemPrompt}\n\n${prompt}` });
-    case "openai":
-      return await runOpenAi({ apiKey, model, prompt, systemPrompt: task.systemPrompt });
-    case "anthropic":
-      return await runAnthropic({ apiKey, model, prompt, systemPrompt: task.systemPrompt });
-    default:
-      throw new Error("Unsupported BYOK provider.");
-  }
+  throw new Error(`Unsupported AI provider: ${providerName}.`);
 }
