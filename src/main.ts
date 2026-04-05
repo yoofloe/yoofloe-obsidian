@@ -1,8 +1,12 @@
 import { Notice, Plugin, normalizePath } from "obsidian";
+import { runByokAnalysis } from "./ai/byok-client";
+import { getByokTaskDefinition } from "./ai/prompts";
 import { YoofloeClient } from "./api/yoofloe-client";
+import { renderAiNoteMarkdown } from "./generators/ai-note";
 import { renderReportMarkdown } from "./generators/markdown";
 import { YoofloeSettingTab } from "./settings";
-import type { YoofloeBundle, YoofloeDomain, YoofloePluginSettings, YoofloeRange } from "./types";
+import { YOOFLOE_DOMAINS } from "./types";
+import type { YoofloeBundle, YoofloeByokTaskType, YoofloeDomain, YoofloePluginSettings, YoofloeRange } from "./types";
 
 const DEFAULT_SETTINGS: YoofloePluginSettings = {
   apiToken: "",
@@ -13,7 +17,12 @@ const DEFAULT_SETTINGS: YoofloePluginSettings = {
   defaultRange: "1M",
   defaultScope: "personal",
   includeRawData: false,
-  autoFrontmatter: true
+  autoFrontmatter: true,
+  provider: {
+    type: "none",
+    apiKey: "",
+    model: ""
+  }
 };
 
 type ReportDefinition = {
@@ -22,6 +31,13 @@ type ReportDefinition = {
   surface: string;
   domains: YoofloeDomain[];
   range: YoofloeRange;
+};
+
+type AiCommandDefinition = {
+  id: string;
+  name: string;
+  taskType: YoofloeByokTaskType;
+  domains: YoofloeDomain[];
 };
 
 function formatDate(date: Date, format: YoofloePluginSettings["dateFormat"]) {
@@ -91,9 +107,14 @@ export default class YoofloePlugin extends Plugin {
   }
 
   async loadSettings() {
+    const saved = (await this.loadData()) as Partial<YoofloePluginSettings> | null;
     this.settings = {
       ...DEFAULT_SETTINGS,
-      ...(await this.loadData())
+      ...saved,
+      provider: {
+        ...DEFAULT_SETTINGS.provider,
+        ...(saved?.provider || {})
+      }
     };
   }
 
@@ -174,6 +195,22 @@ export default class YoofloePlugin extends Plugin {
         }
       });
     }
+
+    const aiCommands: AiCommandDefinition[] = [
+      { id: "ai-brief", name: "Yoofloe: AI Brief", taskType: "brief", domains: [...YOOFLOE_DOMAINS] },
+      { id: "ai-action-plan", name: "Yoofloe: AI Action Plan", taskType: "action-plan", domains: [...YOOFLOE_DOMAINS] },
+      { id: "ai-prompt-package", name: "Yoofloe: AI Prompt Package", taskType: "prompt-package", domains: [...YOOFLOE_DOMAINS] }
+    ];
+
+    for (const command of aiCommands) {
+      this.addCommand({
+        id: command.id,
+        name: command.name,
+        callback: async () => {
+          await this.runAiCommand(command);
+        }
+      });
+    }
   }
 
   private async runReport(definition: ReportDefinition) {
@@ -218,18 +255,93 @@ export default class YoofloePlugin extends Plugin {
     surface: string;
     bundle: YoofloeBundle;
   }) {
+    const filePath = await this.writeContentFile(
+      surface,
+      renderReportMarkdown({
+        title,
+        type,
+        bundle,
+        settings: this.settings,
+        pluginVersion: this.manifest.version,
+        provider: "yoofloe-api"
+      })
+    );
+
+    return filePath;
+  }
+
+  private async writeAiFile({
+    title,
+    type,
+    surface,
+    bundle,
+    body
+  }: {
+    title: string;
+    type: string;
+    surface: string;
+    bundle: YoofloeBundle;
+    body: string;
+  }) {
+    const filePath = await this.writeContentFile(
+      surface,
+      renderAiNoteMarkdown({
+        title,
+        type,
+        bundle,
+        settings: this.settings,
+        pluginVersion: this.manifest.version,
+        provider: this.settings.provider.type,
+        body
+      })
+    );
+
+    return filePath;
+  }
+
+  private async writeContentFile(surface: string, content: string) {
     await ensureFolderPath(this, this.settings.savePath);
     const filePath = await uniqueFilePath(this, surface);
-    const content = renderReportMarkdown({
-      title,
-      type,
-      bundle,
-      settings: this.settings,
-      pluginVersion: this.manifest.version,
-      provider: "yoofloe-api"
-    });
-
     await this.app.vault.create(filePath, content);
     return filePath;
+  }
+
+  private async runAiCommand(definition: AiCommandDefinition) {
+    try {
+      this.ensureConfigured();
+      this.clearStatusResetTimer();
+      this.setStatus(`Yoofloe generating ${definition.taskType}...`);
+
+      const client = new YoofloeClient(this.settings);
+      const response = await client.fetchBundle({
+        domains: definition.domains,
+        range: this.settings.defaultRange,
+        scope: this.settings.defaultScope,
+        includeRaw: this.settings.includeRawData,
+        includeFrontmatterHints: true
+      });
+
+      const body = await runByokAnalysis({
+        settings: this.settings.provider,
+        bundle: response.bundle,
+        taskType: definition.taskType
+      });
+
+      const task = getByokTaskDefinition(definition.taskType);
+      const filePath = await this.writeAiFile({
+        title: task.title,
+        type: task.type,
+        surface: task.surface,
+        bundle: response.bundle,
+        body
+      });
+
+      this.setStatus("Yoofloe idle");
+      new Notice(`Yoofloe AI note created: ${filePath}`);
+    } catch (error) {
+      this.setStatus("Yoofloe error");
+      new Notice(error instanceof Error ? error.message : "Yoofloe AI command failed.");
+      this.queueIdleStatusReset();
+    }
   }
 }

@@ -2,6 +2,8 @@
 
 Agent Direct Mode lets Codex, Claude Code, Antigravity, or another filesystem-capable agent generate Yoofloe Markdown notes without calling the plugin runtime directly.
 
+This is separate from plugin BYOK. In Agent Direct Mode, the agent uses its own model path and writes Markdown directly into your vault.
+
 The flow is:
 
 1. Generate a Yoofloe `pat_yfl_...` token in the Yoofloe web app.

@@ -4,6 +4,8 @@ The Yoofloe MCP wrapper is a standalone stdio server in this repository. It lets
 
 This server does not call the Obsidian plugin runtime directly. It uses the same Yoofloe PAT and Edge Function APIs, then writes `.md` files into your vault.
 
+This MCP wrapper does not call Gemini, OpenAI, or Anthropic. Plugin BYOK is a separate feature that exists only inside Obsidian Plugin Mode.
+
 ## Phase 1 tools
 
 - `yoofloe_data_bundle`

@@ -10,7 +10,7 @@ function yamlValue(value: unknown): string {
   return yamlString(String(value));
 }
 
-function renderFrontmatter({
+export function renderYoofloeFrontmatter({
   bundle,
   settings,
   pluginVersion,
@@ -129,7 +129,7 @@ export function renderReportMarkdown({
   provider: string;
 }) {
   const parts: string[] = [];
-  const frontmatter = renderFrontmatter({ bundle, settings, pluginVersion, type, provider });
+  const frontmatter = renderYoofloeFrontmatter({ bundle, settings, pluginVersion, type, provider });
   if (frontmatter) {
     parts.push(frontmatter.trimEnd(), "");
   }

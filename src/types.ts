@@ -15,10 +15,18 @@ export type YoofloeRange = (typeof YOOFLOE_RANGES)[number];
 export type YoofloeScope = "personal";
 export type YoofloeDateFormat = "YYYY-MM-DD" | "YYYYMMDD" | "YYYY.MM.DD";
 export type YoofloeGardenerSurface = "brief" | "plan" | "prompt" | "export";
+export type YoofloeAiProviderType = "none" | "gemini" | "openai" | "anthropic";
+export type YoofloeByokTaskType = "brief" | "action-plan" | "prompt-package";
 
 export interface MarkdownRenderOptions {
   autoFrontmatter: boolean;
   includeRawData: boolean;
+}
+
+export interface YoofloeByokSettings {
+  type: YoofloeAiProviderType;
+  apiKey: string;
+  model: string;
 }
 
 export interface YoofloeEntitlement {
@@ -44,6 +52,7 @@ export interface YoofloePluginSettings {
   defaultScope: YoofloeScope;
   includeRawData: boolean;
   autoFrontmatter: boolean;
+  provider: YoofloeByokSettings;
 }
 
 export interface YoofloeBundle {

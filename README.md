@@ -1,6 +1,6 @@
 # Yoofloe for Obsidian
 
-Read-only Yoofloe reports inside Obsidian.
+Yoofloe reports, recaps, and optional BYOK AI notes inside Obsidian.
 
 ## Beta install
 
@@ -37,17 +37,22 @@ See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, suppor
 - The plugin pulls read-only Yoofloe data and writes Markdown files locally in your vault.
 - A Yoofloe Personal Access Token is required.
 - PAT and any optional provider keys are stored locally in the plugin settings and may be present in plain text inside `.obsidian/plugins/yoofloe/data.json`.
+- Optional BYOK keys are sent only to the provider you select. They are not sent to Yoofloe backend.
 
 ## Data Flow
 
 1. Obsidian sends a read-only request to Yoofloe Edge Functions.
 2. Yoofloe returns a deterministic bundle for the selected domains and range.
-3. The plugin writes Markdown into your vault.
+3. Read-only commands render Markdown locally and save it into your vault.
+4. Optional AI commands build prompts locally from the same bundle, call your selected BYOK provider with `requestUrl`, then save the result into your vault.
 
 ## Domains Contacted
 
 - `https://hhiyerojemcujzcmlzao.supabase.co/functions/v1/obsidian-data-api`
 - `https://hhiyerojemcujzcmlzao.supabase.co/functions/v1/obsidian-gardener-api`
+- `https://generativelanguage.googleapis.com` when you enable Gemini BYOK in the plugin
+- `https://api.openai.com` when you enable OpenAI BYOK in the plugin
+- `https://api.anthropic.com` when you enable Anthropic BYOK in the plugin
 
 ## Token Storage
 
@@ -61,4 +66,16 @@ Yoofloe Obsidian access requires an active Pro-eligible Yoofloe account.
 
 ## External AI Providers
 
-BYOK providers are not enabled in this MVP. The current plugin ships read-only report generation only.
+Plugin BYOK is optional and currently supports:
+
+- Gemini
+- OpenAI
+- Anthropic
+
+These providers are used only by the plugin AI commands:
+
+- `Yoofloe: AI Brief`
+- `Yoofloe: AI Action Plan`
+- `Yoofloe: AI Prompt Package`
+
+The MCP wrapper does not call AI providers. Agent Direct Mode also does not reuse plugin BYOK keys.

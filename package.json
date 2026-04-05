@@ -1,7 +1,7 @@
 {
   "name": "obsidian-yoofloe",
   "version": "0.1.1",
-  "description": "Read-only Yoofloe reports inside Obsidian.",
+  "description": "Yoofloe reports, recaps, and optional BYOK AI notes inside Obsidian.",
   "private": true,
   "type": "module",
   "scripts": {

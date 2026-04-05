@@ -112,5 +112,48 @@ export class YoofloeSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       });
+
+    new Setting(containerEl)
+      .setName("AI provider")
+      .setDesc("Optional BYOK provider for AI Brief, AI Action Plan, and AI Prompt Package commands.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("none", "None")
+          .addOption("gemini", "Gemini")
+          .addOption("openai", "OpenAI")
+          .addOption("anthropic", "Anthropic");
+
+        dropdown.setValue(this.plugin.settings.provider.type).onChange(async (value) => {
+          this.plugin.settings.provider.type = value as typeof this.plugin.settings.provider.type;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("AI provider API key")
+      .setDesc("Stored locally in plugin data only. This key is not sent to Yoofloe backend.")
+      .addText((text) => {
+        text.setPlaceholder("Provider API key")
+          .setValue(this.plugin.settings.provider.apiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.provider.apiKey = value.trim();
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = "password";
+        text.inputEl.style.width = "24rem";
+      });
+
+    new Setting(containerEl)
+      .setName("AI provider model")
+      .setDesc("Enter the exact model ID required by your selected provider.")
+      .addText((text) => {
+        text.setPlaceholder("Provider model ID")
+          .setValue(this.plugin.settings.provider.model)
+          .onChange(async (value) => {
+            this.plugin.settings.provider.model = value.trim();
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.style.width = "24rem";
+      });
   }
 }
