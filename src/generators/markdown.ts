@@ -1,4 +1,4 @@
-import type { YoofloeBundle, YoofloeDomain, YoofloePluginSettings } from "../types";
+import type { MarkdownRenderOptions, YoofloeBundle, YoofloeDomain } from "../types";
 
 function yamlString(value: string) {
   return JSON.stringify(value);
@@ -18,7 +18,7 @@ function renderFrontmatter({
   provider
 }: {
   bundle: YoofloeBundle;
-  settings: YoofloePluginSettings;
+  settings: MarkdownRenderOptions;
   pluginVersion: string;
   type: string;
   provider: string;
@@ -124,7 +124,7 @@ export function renderReportMarkdown({
   title: string;
   type: string;
   bundle: YoofloeBundle;
-  settings: YoofloePluginSettings;
+  settings: MarkdownRenderOptions;
   pluginVersion: string;
   provider: string;
 }) {

@@ -4,16 +4,31 @@ Read-only Yoofloe reports inside Obsidian.
 
 ## Beta install
 
-Before Community Plugin submission, use BRAT or manual installation from this repository.
+Before Community Plugin submission, install the beta from this public repository instead of the Community Plugin store.
+
+BRAT path:
+
+1. Install the BRAT plugin in Obsidian.
+2. Open `BRAT -> Add a beta plugin`.
+3. Paste `https://github.com/yoofloe/yoofloe-obsidian`.
+4. Install the latest beta release from that repository.
+
+Manual path:
+
+1. Download the latest release assets from `https://github.com/yoofloe/yoofloe-obsidian/releases`.
+2. Copy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/yoofloe/`.
+3. Enable `Yoofloe` in Obsidian Community Plugins.
 
 ## Modes
 
 - Plugin Mode: run Yoofloe commands inside Obsidian to generate local Markdown notes.
 - Agent Direct Mode: let Codex, Claude Code, Antigravity, or another filesystem-capable agent call Yoofloe APIs and write `.md` files directly into your vault.
+- MCP Wrapper Mode: run the standalone stdio MCP server from this repo so external coding agents can call Yoofloe tools and write notes only into your configured vault folder.
 
 Agent Direct Mode does not call the plugin runtime directly. It uses the same Yoofloe PAT and API contract, then writes files into your vault so Obsidian picks them up automatically.
 
 See [docs/agent-direct.md](docs/agent-direct.md) for the direct agent workflow, curl examples, and recommended file conventions.
+See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, supported tools, and Windows/PowerShell examples.
 
 ## Security & Privacy
 

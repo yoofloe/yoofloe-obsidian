@@ -13,12 +13,32 @@ export const YOOFLOE_RANGES = ["1W", "1M", "6M", "1Y", "All"] as const;
 export type YoofloeDomain = (typeof YOOFLOE_DOMAINS)[number];
 export type YoofloeRange = (typeof YOOFLOE_RANGES)[number];
 export type YoofloeScope = "personal";
+export type YoofloeDateFormat = "YYYY-MM-DD" | "YYYYMMDD" | "YYYY.MM.DD";
+export type YoofloeGardenerSurface = "brief" | "plan" | "prompt" | "export";
+
+export interface MarkdownRenderOptions {
+  autoFrontmatter: boolean;
+  includeRawData: boolean;
+}
+
+export interface YoofloeEntitlement {
+  allowed: boolean;
+  tier: string;
+  source: string;
+  status: string | null;
+}
+
+export interface YoofloeRateLimit {
+  limit: number;
+  remaining: number;
+  windowSeconds: number;
+}
 
 export interface YoofloePluginSettings {
   apiToken: string;
   functionsBaseUrl: string;
   savePath: string;
-  dateFormat: "YYYY-MM-DD" | "YYYYMMDD" | "YYYY.MM.DD";
+  dateFormat: YoofloeDateFormat;
   language: string;
   defaultRange: YoofloeRange;
   defaultScope: YoofloeScope;
@@ -52,16 +72,18 @@ export interface YoofloeBundle {
 export interface YoofloeDataApiResponse {
   success: boolean;
   generatedAt: string;
-  entitlement: {
-    allowed: boolean;
-    tier: string;
-    source: string;
-    status: string | null;
-  };
-  rateLimit?: {
-    limit: number;
-    remaining: number;
-    windowSeconds: number;
-  };
+  entitlement: YoofloeEntitlement;
+  rateLimit?: YoofloeRateLimit;
   bundle: YoofloeBundle;
+}
+
+export interface YoofloeGardenerApiResponse<TData = Record<string, unknown>> {
+  success: boolean;
+  generatedAt: string;
+  surface: YoofloeGardenerSurface;
+  format: "json" | "markdown";
+  entitlement: YoofloeEntitlement;
+  rateLimit?: YoofloeRateLimit;
+  data: TData;
+  rendered?: string;
 }
