@@ -77,13 +77,15 @@ PowerShell:
 
 ```powershell
 $env:YOOFLOE_PAT = "pat_yfl_..."
-$env:YOOFLOE_VAULT_PATH = "C:\Users\you\Documents\ObsidianVault"
+$env:YOOFLOE_VAULT_PATH = "C:\Users\you\Documents\Obsidian Vault"
 node .\mcp-server.js
 ```
 
 ## Client setup examples
 
 ### Codex / project `.mcp.json`
+
+Use a relative `mcp-server.js` path only when the MCP client launches from this repository root.
 
 ```json
 {
@@ -94,7 +96,7 @@ node .\mcp-server.js
       "args": ["mcp-server.js"],
       "env": {
         "YOOFLOE_PAT": "pat_yfl_...",
-        "YOOFLOE_VAULT_PATH": "C:/Users/you/Documents/ObsidianVault"
+        "YOOFLOE_VAULT_PATH": "C:/Users/you/Documents/Obsidian Vault"
       }
     }
   }
@@ -114,6 +116,8 @@ If Claude Code supports environment variables in your setup, provide at least:
 
 ### Antigravity / Gemini-style `settings.json`
 
+Use an absolute `mcp-server.js` path here. Antigravity does not start inside the plugin repository, so a bare `mcp-server.js` path will fail.
+
 ```json
 {
   "mcpServers": {
@@ -122,7 +126,29 @@ If Claude Code supports environment variables in your setup, provide at least:
       "args": ["C:/absolute/path/to/mcp-server.js"],
       "env": {
         "YOOFLOE_PAT": "pat_yfl_...",
-        "YOOFLOE_VAULT_PATH": "C:/Users/you/Documents/ObsidianVault"
+        "YOOFLOE_VAULT_PATH": "C:/Users/you/Documents/Obsidian Vault"
+      }
+    }
+  }
+}
+```
+
+Current Windows example in this workspace:
+
+```json
+{
+  "mcpServers": {
+    "yoofloe": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:/Users/MinisForum/Documents/hyunseo/Dev_Yoofloe/Project C_Yoofloe Obsidian Plugin/mcp-server.js"
+      ],
+      "env": {
+        "YOOFLOE_PAT": "pat_yfl_...",
+        "YOOFLOE_VAULT_PATH": "C:/Users/MinisForum/Documents/Obsidian Vault",
+        "YOOFLOE_FUNCTIONS_BASE_URL": "https://hhiyerojemcujzcmlzao.supabase.co/functions/v1",
+        "YOOFLOE_SAVE_FOLDER": "Yoofloe"
       }
     }
   }

@@ -10,6 +10,9 @@ export type AgentGuidanceOptions = {
   functionsBaseUrl?: string;
 };
 
+const MCP_SERVER_PATH_EXAMPLE = "C:/absolute/path/to/mcp-server.js";
+const VAULT_PATH_EXAMPLE = "C:/Users/you/Documents/Obsidian Vault";
+
 const DOCUMENT_TYPE_SUMMARIES: Record<YoofloeAiDocumentType, string> = {
   "insight-brief": "Strongest signals, tensions, opportunities, risks, and suggested questions.",
   "decision-memo": "Situation framing, tradeoffs, recommended direction, evidence, and open questions.",
@@ -54,10 +57,10 @@ export function buildMcpConfigSnippet(options: AgentGuidanceOptions) {
       yoofloe: {
         type: "stdio",
         command: "node",
-        args: ["mcp-server.js"],
+        args: [MCP_SERVER_PATH_EXAMPLE],
         env: {
           YOOFLOE_PAT: "pat_yfl_...",
-          YOOFLOE_VAULT_PATH: "C:/Users/you/Documents/ObsidianVault",
+          YOOFLOE_VAULT_PATH: VAULT_PATH_EXAMPLE,
           YOOFLOE_FUNCTIONS_BASE_URL: options.functionsBaseUrl?.trim() || "https://hhiyerojemcujzcmlzao.supabase.co/functions/v1",
           YOOFLOE_SAVE_FOLDER: normalizeSaveFolder(options.saveFolder)
         }
@@ -167,6 +170,8 @@ export function buildAgentSetupNoteMarkdown(options: AgentGuidanceOptions) {
     "",
     "## Important Rules",
     "",
+    "- Antigravity/Gemini-style MCP configs should use an absolute path to `mcp-server.js`.",
+    "- `YOOFLOE_VAULT_PATH` must point to your vault root, not the Yoofloe subfolder inside it.",
     "- `deep-dive` requires a non-empty `focusInstruction`.",
     "- Existing files are never overwritten; collisions use numeric suffixes.",
     `- The configured save folder is \`${guide.outputConventions.folder}\`.`,
@@ -191,6 +196,8 @@ export function buildAgentSetupNoteMarkdown(options: AgentGuidanceOptions) {
     "```",
     "",
     "## MCP Config Snippet",
+    "",
+    "Use an absolute `mcp-server.js` path for Antigravity/Gemini-style clients. Relative `mcp-server.js` only works when the MCP client starts inside this repository root.",
     "",
     "```json",
     guide.examplePrompts.mcpConfig,
