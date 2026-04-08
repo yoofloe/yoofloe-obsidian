@@ -4,6 +4,8 @@ The Yoofloe MCP wrapper is a standalone stdio server in this repository. It lets
 
 This server does not call the Obsidian plugin runtime directly. It uses the same Yoofloe PAT and Edge Function APIs, then writes `.md` files into your vault.
 
+The packaged wrapper zip is a companion release asset for external MCP clients. It is not the Community Plugin payload submitted to the Obsidian plugin store.
+
 This MCP wrapper does not call Gemini or any other model provider directly. Plugin Gemini generation is a separate feature that exists only inside Obsidian Plugin Mode.
 
 Public install guides for the plugin, wrapper, and CLI surfaces also live in the Yoofloe docs hub:

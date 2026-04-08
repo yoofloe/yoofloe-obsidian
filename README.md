@@ -23,6 +23,24 @@ Manual path:
 2. Copy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/yoofloe/`.
 3. Enable `Yoofloe` in Obsidian Community Plugins.
 
+## Community Plugin submission notes
+
+For Obsidian Community Plugin review, the submission target is the `yoofloe` plugin itself:
+
+- `main.js`
+- `manifest.json`
+- `styles.css`
+
+The packaged `yoofloe-obsidian-mcp-wrapper.zip` release asset is a companion download for external MCP clients. It is not the Community Plugin payload.
+
+Reviewer-facing disclosures:
+
+- desktop-only plugin
+- requires a Yoofloe `pat_yfl_...` token
+- requires Yoofloe Pro / External AI Access
+- calls Yoofloe API and Google Gemini endpoints
+- writes Markdown files locally into the vault
+
 ## Quick start
 
 1. Install the plugin from BRAT or copy the latest release files into `.obsidian/plugins/yoofloe/`.
@@ -104,7 +122,7 @@ See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, suppor
 - All network traffic uses Obsidian `requestUrl`.
 - The plugin pulls read-only Yoofloe data and writes Markdown files locally in your vault.
 - A Yoofloe Personal Access Token is required.
-- The plugin is desktop-only as of `v0.3.0`.
+- The plugin is desktop-only.
 - Yoofloe requires Obsidian `1.11.5+` and stores your PAT, Google OAuth client secret, and Google OAuth refresh token in Obsidian secure storage instead of `data.json`.
 - Google access tokens are kept in memory only and refreshed from secure storage when needed.
 - Google OAuth credentials are used only for Gemini requests. They are not sent to Yoofloe backend.
