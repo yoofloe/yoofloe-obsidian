@@ -1,9 +1,9 @@
 {
   "id": "yoofloe",
   "name": "Yoofloe",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "minAppVersion": "1.11.5",
-  "description": "Yoofloe AI insight documents grounded in your data for Obsidian.",
+  "description": "Yoofloe AI insight documents grounded in your data.",
   "author": "Henry0304",
   "authorUrl": "https://github.com/Henry0304",
   "isDesktopOnly": true
