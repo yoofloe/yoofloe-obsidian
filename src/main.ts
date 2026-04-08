@@ -439,10 +439,10 @@ export default class YoofloePlugin extends Plugin {
 
   private registerCommands() {
     const aiCommands: AiDocumentCommandDefinition[] = [
-      { id: "ai-insight-brief", name: "Yoofloe: AI Insight Brief", documentType: "insight-brief" },
-      { id: "ai-decision-memo", name: "Yoofloe: AI Decision Memo", documentType: "decision-memo" },
-      { id: "ai-action-plan", name: "Yoofloe: AI Action Plan", documentType: "action-plan" },
-      { id: "ai-deep-dive", name: "Yoofloe: AI Deep Dive", documentType: "deep-dive" }
+      { id: "ai-insight-brief", name: "AI Insight Brief", documentType: "insight-brief" },
+      { id: "ai-decision-memo", name: "AI Decision Memo", documentType: "decision-memo" },
+      { id: "ai-action-plan", name: "AI Action Plan", documentType: "action-plan" },
+      { id: "ai-deep-dive", name: "AI Deep Dive", documentType: "deep-dive" }
     ];
 
     for (const command of aiCommands) {
@@ -457,7 +457,7 @@ export default class YoofloePlugin extends Plugin {
 
     this.addCommand({
       id: "write-agent-setup-note",
-      name: "Yoofloe: Write Agent Setup Note",
+      name: "Write Agent Setup Note",
       callback: async () => {
         try {
           this.clearStatusResetTimer();

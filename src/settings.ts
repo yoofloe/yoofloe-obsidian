@@ -251,7 +251,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     [
       "Save your Yoofloe token and click Verify token.",
       "Finish the Gemini setup below.",
-      "Run Yoofloe: AI Insight Brief to generate your first grounded AI document."
+      "Run AI Insight Brief to generate your first grounded AI document."
     ].forEach((item) => quickStartList.createEl("li", { text: item }));
 
     const tokenSection = createStepSection(
@@ -488,7 +488,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       providerStatus,
       provider === "none"
         ? "Configure Gemini to start generating AI insight documents."
-        : "Save each required field below. When this step shows Ready, you can run Yoofloe: AI Insight Brief."
+        : "Save each required field below. When this step shows Ready, you can run AI Insight Brief."
     );
 
     if (provider !== "none" && nextSteps.length > 0) {

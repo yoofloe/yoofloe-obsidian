@@ -47,7 +47,7 @@ Reviewer-facing disclosures:
 2. Open `Settings -> Yoofloe`.
 3. Save your `pat_yfl_...` token and click `Verify token`.
 4. Choose a Gemini setup and save each required field in `Settings -> Yoofloe`.
-5. Run `Yoofloe: AI Insight Brief`.
+5. Run `AI Insight Brief`.
 
 Recommended first AI choice:
 
@@ -188,19 +188,19 @@ Yoofloe uses these scopes only for Gemini and Vertex generation requests. The pl
 
 These providers are used only by the plugin AI commands:
 
-- `Yoofloe: AI Insight Brief`
-- `Yoofloe: AI Decision Memo`
-- `Yoofloe: AI Action Plan`
-- `Yoofloe: AI Deep Dive`
+- `AI Insight Brief`
+- `AI Decision Memo`
+- `AI Action Plan`
+- `AI Deep Dive`
 
 The MCP wrapper does not call AI providers. Agent Direct Mode also does not reuse plugin secrets.
 
 ## AI Document Commands
 
-- `Yoofloe: AI Insight Brief`
-- `Yoofloe: AI Decision Memo`
-- `Yoofloe: AI Action Plan`
-- `Yoofloe: AI Deep Dive`
+- `AI Insight Brief`
+- `AI Decision Memo`
+- `AI Action Plan`
+- `AI Deep Dive`
 
 All four commands pull the full Yoofloe domain bundle by default. `AI Deep Dive` additionally asks for a focus instruction before generation.
 
@@ -214,7 +214,7 @@ Settings now includes a `Use With AI Agents` section with:
 - `Open Agent Direct Guide`
 - `Write Agent Setup Note`
 
-The command palette also includes `Yoofloe: Write Agent Setup Note` for generating a shareable setup note inside your configured Yoofloe folder.
+The command palette also includes `Write Agent Setup Note` for generating a shareable setup note inside your configured Yoofloe folder.
 
 ## Agent MCP Workflow
 
