@@ -40,8 +40,8 @@ const SUPPORTED_PLUGIN_PROVIDERS = new Set<YoofloePluginSettings["provider"]["ty
   "gemini-vertex"
 ]);
 
-const PRO_REQUIRED_NOTICE = "Yoofloe Obsidian access requires an active Pro plan. Upgrade your Yoofloe account to generate AI documents in Obsidian.";
-const PRO_REQUIRED_SETTINGS_MESSAGE = "This Yoofloe account does not currently include Obsidian access. Upgrade to a Pro-eligible plan to generate AI documents.";
+const PRO_REQUIRED_NOTICE = "Yoofloe External AI Access requires an active Pro plan. This Obsidian plugin uses a Yoofloe PAT, while Yoofloe CLI and CLI MCP use app login.";
+const PRO_REQUIRED_SETTINGS_MESSAGE = "This Yoofloe account does not currently include External AI Access. Upgrade to Pro to keep using the Obsidian plugin, CLI, and MCP surfaces.";
 
 function isBlockedEntitlement(entitlement: YoofloeEntitlement | null | undefined) {
   return entitlement?.allowed === false;

@@ -6,6 +6,10 @@ This server does not call the Obsidian plugin runtime directly. It uses the same
 
 This MCP wrapper does not call Gemini or any other model provider directly. Plugin Gemini generation is a separate feature that exists only inside Obsidian Plugin Mode.
 
+Public install guides for the plugin, wrapper, and CLI surfaces also live in the Yoofloe docs hub:
+
+- `https://www.yoofloe.com/docs/external-tools`
+
 ## Recommended tools
 
 - `yoofloe_agent_direct_guide`
@@ -50,27 +54,26 @@ YOOFLOE_VAULT_PATH environment variable is required and must point to your Obsid
 - Existing files are never overwritten.
 - Collisions use `__2`, `__3`, and so on.
 
-## Build and run
+## Download and run
 
-Install dependencies:
+Primary public install path:
 
-```bash
-npm install
-```
+1. Download the packaged wrapper zip from the latest release:
+   - `https://github.com/yoofloe/yoofloe-obsidian/releases/latest/download/yoofloe-obsidian-mcp-wrapper.zip`
+2. Unzip it anywhere on your machine.
+3. Point your MCP client at the extracted `mcp-server.js`.
 
-Build the plugin and MCP server separately:
+The zip contains:
 
-```bash
-npm run build
-npm run build:mcp
-```
+- `mcp-server.js`
+- `README-mcp-wrapper.txt`
 
-Start the MCP server:
+Start the MCP server directly:
 
 ```bash
 YOOFLOE_PAT="pat_yfl_..." \
 YOOFLOE_VAULT_PATH="/path/to/ObsidianVault" \
-node mcp-server.js
+node /absolute/path/to/mcp-server.js
 ```
 
 PowerShell:
@@ -78,14 +81,24 @@ PowerShell:
 ```powershell
 $env:YOOFLOE_PAT = "pat_yfl_..."
 $env:YOOFLOE_VAULT_PATH = "C:\Users\you\Documents\Obsidian Vault"
-node .\mcp-server.js
+node C:\absolute\path\to\mcp-server.js
+```
+
+## Advanced source build fallback
+
+If you want to rebuild the wrapper from source instead of using the release zip:
+
+```bash
+npm install
+npm run build
+npm run build:mcp
 ```
 
 ## Client setup examples
 
 ### Codex / project `.mcp.json`
 
-Use a relative `mcp-server.js` path only when the MCP client launches from this repository root.
+Use a relative `mcp-server.js` path only when the MCP client launches from the extracted wrapper folder or this repository root.
 
 ```json
 {
@@ -116,7 +129,7 @@ If Claude Code supports environment variables in your setup, provide at least:
 
 ### Antigravity / Gemini-style `settings.json`
 
-Use an absolute `mcp-server.js` path here. Antigravity does not start inside the plugin repository, so a bare `mcp-server.js` path will fail.
+Use an absolute `mcp-server.js` path here. Antigravity does not start inside the plugin repository or the extracted wrapper folder by default, so a bare `mcp-server.js` path will fail.
 
 ```json
 {
@@ -187,13 +200,17 @@ npm run build
 npm run build:mcp
 ```
 
-The plugin release assets remain unchanged:
+The plugin release assets include:
 
 - `main.js`
 - `manifest.json`
 - `styles.css`
+- `yoofloe-obsidian-mcp-wrapper.zip`
 
-`mcp-server.js` is a separate local/server artifact and is not part of the plugin release asset set.
+The wrapper zip contains:
+
+- `mcp-server.js`
+- `README-mcp-wrapper.txt`
 
 ## AI document workflow
 

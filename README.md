@@ -2,6 +2,10 @@
 
 Yoofloe turns your Yoofloe data into grounded AI documents inside Obsidian.
 
+Public install guides, release links, and cross-product setup notes also live in the Yoofloe docs hub:
+
+- `https://www.yoofloe.com/docs/external-tools`
+
 ## Beta install
 
 Before Community Plugin submission, install the beta from this public repository instead of the Community Plugin store.
@@ -73,8 +77,26 @@ Recommended first AI choice:
 
 Agent Direct Mode does not call the plugin runtime directly. It uses the same Yoofloe PAT and API contract, then writes files into your vault so Obsidian picks them up automatically.
 
+## External AI Access
+
+Yoofloe treats external AI surfaces as one Pro feature:
+
+- Yoofloe Obsidian Plugin
+- Yoofloe Obsidian MCP wrapper
+- Yoofloe CLI
+- Yoofloe CLI MCP
+
+Auth stays product-specific:
+
+- Obsidian Plugin and Obsidian MCP wrapper use a `pat_yfl_...` token
+- Yoofloe CLI and Yoofloe CLI MCP use Yoofloe app login
+
+Operator validation for cross-product entitlement changes should follow the shared runbook in the Yoofloe app repo:
+
+- `docs/ai/external-access-smoke-test.md`
+
 See [docs/agent-direct.md](docs/agent-direct.md) for the direct agent workflow, curl examples, and recommended file conventions.
-See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, supported tools, and Windows/PowerShell examples.
+See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, supported tools, packaged zip install path, and Windows/PowerShell examples.
 
 ## Security & Privacy
 
@@ -110,7 +132,18 @@ See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, suppor
 
 ## Pro Requirement
 
-Yoofloe Obsidian access requires an active Pro-eligible Yoofloe account.
+Yoofloe External AI Access requires an active Pro-eligible Yoofloe account.
+
+## Wrapper download
+
+The standalone Yoofloe Obsidian MCP Wrapper is published as a packaged release asset:
+
+- `https://github.com/yoofloe/yoofloe-obsidian/releases/latest/download/yoofloe-obsidian-mcp-wrapper.zip`
+
+That zip contains:
+
+- `mcp-server.js`
+- `README-mcp-wrapper.txt`
 
 ## AI Providers
 

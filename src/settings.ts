@@ -229,7 +229,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "Yoofloe setup" });
     containerEl.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Yoofloe is built for AI-generated insight documents grounded in your data. Connect Yoofloe first, finish Gemini setup, then generate your first AI document."
+      text: "Yoofloe External AI Access is a Pro feature. In Obsidian, you connect with a Yoofloe PAT. In Yoofloe CLI and CLI MCP, you sign in with your Yoofloe account."
     });
 
     containerEl.createEl("div", {
@@ -259,10 +259,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Step 1",
       "Connect Yoofloe",
       tokenBadgeState(this.plugin),
-      "This token lets Obsidian fetch Yoofloe data as grounding for AI-generated documents in your vault."
+      "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It does not replace Yoofloe CLI login."
     );
 
-    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. Generate it in Yoofloe web app Settings, then paste it here.");
+    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. External AI Access is included with Pro. Generate the token in the Yoofloe web app, then paste it here.");
     createHelpDetails(tokenSection, "Need help finding your token?", [
       "Open the Yoofloe web app and go to Settings.",
       "Use Generate Obsidian Token.",
@@ -374,7 +374,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Use an external agent when you want Codex, Claude Code, or another tool to bring its own model while Yoofloe provides grounded context and safe vault writes."
     );
 
-    createInfoCard(agentDirectSection, "Choose the right path", "Use Plugin AI for one-click generation inside Obsidian. Use Agent Direct when an external AI agent should bring its own model and workflow.");
+    createInfoCard(agentDirectSection, "Choose the right path", "Use Plugin AI for one-click generation inside Obsidian. Use Agent Direct when an external AI agent should bring its own model and workflow. Obsidian uses a PAT; Yoofloe CLI and CLI MCP use app login.");
     createChecklistCard(agentDirectSection, "Agent Direct rules", [
       "Agent Direct does not reuse the plugin's Gemini OAuth setup or secrets.",
       "The recommended MCP workflow is yoofloe_ai_document_context followed by yoofloe_write_ai_document.",
