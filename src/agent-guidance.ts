@@ -172,6 +172,7 @@ export function buildAgentSetupNoteMarkdown(options: AgentGuidanceOptions) {
     "",
     "- Antigravity/Gemini-style MCP configs should use an absolute path to `mcp-server.js`.",
     "- `YOOFLOE_VAULT_PATH` must point to your vault root, not the Yoofloe subfolder inside it.",
+    "- Business playbook context may include planning, success, setback, and learning categories. Treat planning as the idea-and-plan lane, and summarize it in terms of hypothesis, success signals, first steps, and risks.",
     "- `deep-dive` requires a non-empty `focusInstruction`.",
     "- Existing files are never overwritten; collisions use numeric suffixes.",
     `- The configured save folder is \`${guide.outputConventions.folder}\`.`,

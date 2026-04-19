@@ -8,6 +8,16 @@ The packaged wrapper zip is a companion release asset for external MCP clients. 
 
 This MCP wrapper does not call Gemini or any other model provider directly. Plugin Gemini generation is a separate feature that exists only inside Obsidian Plugin Mode.
 
+The public external-AI notice for this surface is:
+
+- `https://www.yoofloe.com/external-ai-access`
+
+On this wrapper surface, Yoofloe provides PAT-authenticated data access, workflow contracts, and bounded vault writes. Your MCP client or connected coding agent brings its own model/provider path.
+
+This wrapper is **personal-only by design**. Couple/shared exports are not offered on the wrapper surface.
+
+When you include the business domain, playbook entries may carry `planning`, `success`, `setback`, or `learning` categories. `planning` is the idea-and-plan lane, so summarize it as a hypothesis with success signals, first steps, and risks instead of treating it like an outcome.
+
 Public install guides for the plugin, wrapper, and CLI surfaces also live in the Yoofloe docs hub:
 
 - `https://www.yoofloe.com/docs/external-tools`
@@ -55,6 +65,7 @@ YOOFLOE_VAULT_PATH environment variable is required and must point to your Obsid
 - Writes are limited to the configured save folder.
 - Existing files are never overwritten.
 - Collisions use `__2`, `__3`, and so on.
+- Files written into the vault are local copies. Revoking your PAT or Pro entitlement stops future access, but it does not delete Markdown files already written into the vault.
 
 ## Download and run
 

@@ -4,6 +4,16 @@ Agent Direct Mode lets Codex, Claude Code, Antigravity, or another filesystem-ca
 
 This is separate from plugin Gemini setup. In Agent Direct Mode, the agent uses its own model path and writes Markdown directly into your vault.
 
+The public external-AI notice for this surface is:
+
+- `https://www.yoofloe.com/external-ai-access`
+
+Yoofloe provides PAT-authenticated data access, grounded context, and recommended file conventions. The external agent and its provider remain outside Yoofloe-hosted AI.
+
+Agent Direct is **personal-only by design**. Couple/shared external access is not offered on this surface.
+
+If you use the business domain, playbook entries may include `planning`, `success`, `setback`, and `learning` categories. Treat `planning` as a non-outcome lane for ideas, experiments, and execution plans, and summarize it in terms of hypothesis, success signals, first steps, and risks.
+
 Inside the plugin, `Settings -> Yoofloe -> Use With AI Agents` gives you copyable prompts, an MCP config snippet, the external guide link, and a vault note generator for sharing setup instructions.
 
 The flow is:
@@ -126,3 +136,4 @@ Write the file into my Obsidian vault under Yoofloe/YYYY-MM-DD__ai-deep-dive.md.
 - Treat the vault path and the PAT as local secrets.
 - Prefer writing only into the intended `Yoofloe/` folder instead of giving an agent unrestricted vault write instructions.
 - Agent Direct Mode is separate from the plugin runtime. If you want the built-in Gemini UX, use Plugin Mode instead.
+- Files the agent writes into your vault remain local copies after access is revoked. Revocation stops future reads and writes, not already-created Markdown files.

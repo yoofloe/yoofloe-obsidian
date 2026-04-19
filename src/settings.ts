@@ -229,7 +229,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "Yoofloe setup" });
     containerEl.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Yoofloe External AI Access is a Pro feature. In Obsidian, you connect with a Yoofloe PAT. In Yoofloe CLI and CLI MCP, you sign in with your Yoofloe account."
+      text: "Yoofloe External AI Access is a Pro feature. Basic in-app access and baseline data export stay available without Pro, while CLI, MCP, and Obsidian-connected workflows are premium interface layers. In Obsidian, you connect with a Yoofloe PAT. In Yoofloe CLI and CLI MCP, you sign in with your Yoofloe account. On these external surfaces, Yoofloe provides grounded context and access control, but not the model."
     });
 
     containerEl.createEl("div", {
@@ -259,10 +259,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Step 1",
       "Connect Yoofloe",
       tokenBadgeState(this.plugin),
-      "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It does not replace Yoofloe CLI login."
+      "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It does not replace Yoofloe CLI login, and it exposes personal-only data by design."
     );
 
-    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. External AI Access is included with Pro. Generate the token in the Yoofloe web app, then paste it here.");
+    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. External AI Access is included with Pro. Generate the token in the Yoofloe web app, review the External AI Access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
+    createInfoCard(tokenSection, "External AI notice", "Obsidian Plugin Mode uses your own Google provider setup directly from Obsidian. Yoofloe provides the PAT-protected bundle and brief, but Yoofloe does not receive your Google OAuth credentials.");
     createHelpDetails(tokenSection, "Need help finding your token?", [
       "Open the Yoofloe web app and go to Settings.",
       "Use Generate Obsidian Token.",
@@ -371,14 +372,16 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Optional",
       "Use With AI Agents",
       { text: "Available", tone: "accent" },
-      "Use an external agent when you want Codex, Claude Code, or another tool to bring its own model while Yoofloe provides grounded context and safe vault writes."
+      "Use an external agent when you want Codex, Claude Code, or another tool to bring its own model while Yoofloe provides grounded context and safe vault writes. Files written into your vault remain local copies after revocation."
     );
 
     createInfoCard(agentDirectSection, "Choose the right path", "Use Plugin AI for one-click generation inside Obsidian. Use Agent Direct when an external AI agent should bring its own model and workflow. Obsidian uses a PAT; Yoofloe CLI and CLI MCP use app login.");
     createChecklistCard(agentDirectSection, "Agent Direct rules", [
       "Agent Direct does not reuse the plugin's Gemini OAuth setup or secrets.",
       "The recommended MCP workflow is yoofloe_ai_document_context followed by yoofloe_write_ai_document.",
-      "AI Deep Dive requires a non-empty focusInstruction."
+      "AI Deep Dive requires a non-empty focusInstruction.",
+      "The connected external agent processes content under its own provider terms.",
+      "Plugin and wrapper access are personal-only by design and do not expose couple/shared data."
     ]);
 
     new Setting(agentDirectSection)
@@ -503,7 +506,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       let pendingVertexModel = this.plugin.settings.provider.vertexModel;
       let pendingVertexLocation = this.plugin.settings.provider.location;
 
-      createInfoCard(setupSection, "How Google setup works", "You will sign in with Google in your browser. The plugin stores a refresh token in secure storage and uses it only for Gemini or Vertex generation requests.");
+      createInfoCard(setupSection, "How Google setup works", "You will sign in with Google in your browser. The plugin stores a refresh token in secure storage and uses it only for Gemini or Vertex generation requests. Google calls are made directly from Obsidian with your own Google credentials and project.");
       createHelpDetails(setupSection, "Need help creating a Google OAuth client?", [
         "Open Google Cloud Console and select the project you want to use.",
         "Go to Google Auth Platform, then Clients.",
