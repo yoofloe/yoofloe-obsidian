@@ -40,6 +40,7 @@ Reviewer-facing disclosures:
 - requires Yoofloe Pro / External AI Access
 - calls Yoofloe API and Google Gemini endpoints
 - writes Markdown files locally into the vault
+- uses direct-provider Gemini calls with the user's own Google credentials
 
 ## Quick start
 
@@ -109,6 +110,17 @@ Auth stays product-specific:
 - Obsidian Plugin and Obsidian MCP wrapper use a `pat_yfl_...` token
 - Yoofloe CLI and Yoofloe CLI MCP use Yoofloe app login
 
+Role split:
+
+- Plugin Gemini mode is **user-direct**. Obsidian calls Google Gemini or Vertex with your own Google credentials and project.
+- MCP Wrapper and Agent Direct are **agent-direct**. Your connected external agent brings its own model/provider path.
+- Yoofloe provides auth, entitlement, grounded context, and bounded local writes. Yoofloe does not provide the model on these external surfaces.
+- Business playbook context may include `planning`, `success`, `setback`, and `learning` categories. Treat `planning` as an idea/plan lane with a hypothesis, success signals, first steps, and risks, rather than a completed outcome.
+
+Read the public notice:
+
+- `https://www.yoofloe.com/external-ai-access`
+
 Operator validation for cross-product entitlement changes should follow the shared runbook in the Yoofloe app repo:
 
 - `docs/ai/external-access-smoke-test.md`
@@ -126,6 +138,7 @@ See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, suppor
 - Yoofloe requires Obsidian `1.11.5+` and stores your PAT, Google OAuth client secret, and Google OAuth refresh token in Obsidian secure storage instead of `data.json`.
 - Google access tokens are kept in memory only and refreshed from secure storage when needed.
 - Google OAuth credentials are used only for Gemini requests. They are not sent to Yoofloe backend.
+- External providers may process content under their own terms and privacy practices when you choose to use them.
 
 ## Data Flow
 
