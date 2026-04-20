@@ -27,7 +27,7 @@ class YoofloeFocusModal extends Modal {
     this.textareaEl = contentEl.createEl("textarea");
     this.textareaEl.addClass("yoofloe-focus-textarea");
     this.textareaEl.rows = 8;
-    this.textareaEl.placeholder = "Example: Focus on cash flow pressure, energy dips, and whether my schedule supports recovery.";
+    this.textareaEl.placeholder = "Example: focus on cash flow pressure, energy dips, and whether my schedule supports recovery.";
 
     const actions = contentEl.createDiv({ cls: "yoofloe-focus-actions" });
     const cancelButton = actions.createEl("button", { text: "Cancel" });
@@ -38,7 +38,7 @@ class YoofloeFocusModal extends Modal {
     generateButton.addEventListener("click", () => {
       const value = this.textareaEl.value.trim();
       if (!value) {
-        new Notice("Add a focus instruction before generating AI deep dive.");
+        new Notice("Add a focus instruction before generating the deep dive.");
         this.textareaEl.focus();
         return;
       }
@@ -62,7 +62,7 @@ class YoofloeFocusModal extends Modal {
 
 export function requestDeepDiveFocusInstruction(app: App) {
   return new Promise<string | null>((resolve) => {
-    const modal = new YoofloeFocusModal(app, "AI deep dive focus", resolve);
+    const modal = new YoofloeFocusModal(app, "Deep dive focus", resolve);
     modal.open();
   });
 }

@@ -600,7 +600,7 @@ export default class YoofloePlugin extends Plugin {
       });
 
       this.setStatus("Yoofloe idle");
-      new Notice(`Yoofloe AI note created: ${filePath}`);
+      new Notice(`Yoofloe note created: ${filePath}`);
     } catch (error) {
       this.setStatus("Yoofloe error");
       if (error instanceof Error) {
@@ -616,7 +616,7 @@ export default class YoofloePlugin extends Plugin {
           this.googleConnectionStatus = "reconnect";
         }
       }
-      new Notice(this.normalizeUserFacingError(error, "Yoofloe AI command failed."));
+      new Notice(this.normalizeUserFacingError(error, "Yoofloe command failed."));
       this.queueIdleStatusReset();
     }
   }

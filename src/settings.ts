@@ -125,14 +125,14 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
   }
 
   if (provider === "none") {
-    nextSteps.push("Choose a Gemini setup to generate AI insight documents.");
+    nextSteps.push("Choose a Gemini setup to generate insight documents.");
     return nextSteps;
   }
 
   if (provider === "gemini-google") {
     if (!plugin.settings.provider.clientId.trim()) nextSteps.push("Save your Google OAuth client ID.");
     if (!plugin.secretStore.getGoogleClientSecret()) nextSteps.push("Save your Google OAuth client secret.");
-    if (!plugin.settings.provider.project.trim()) nextSteps.push("Save your Google Cloud Project ID.");
+    if (!plugin.settings.provider.project.trim()) nextSteps.push("Save your Google Cloud project ID.");
     if (!plugin.settings.provider.googleModel.trim()) nextSteps.push("Save your Gemini model.");
     if (googleStatus === "not-connected") nextSteps.push("Click Connect Google.");
     if (googleStatus === "reconnect") nextSteps.push("Reconnect Google to refresh your session.");
@@ -142,7 +142,7 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
   if (provider === "gemini-vertex") {
     if (!plugin.settings.provider.clientId.trim()) nextSteps.push("Save your Google OAuth client ID.");
     if (!plugin.secretStore.getGoogleClientSecret()) nextSteps.push("Save your Google OAuth client secret.");
-    if (!plugin.settings.provider.project.trim()) nextSteps.push("Save your Google Cloud Project ID.");
+    if (!plugin.settings.provider.project.trim()) nextSteps.push("Save your Google Cloud project ID.");
     if (!plugin.settings.provider.vertexModel.trim()) nextSteps.push("Save your Vertex model.");
     if (googleStatus === "not-connected") nextSteps.push("Click Connect Google.");
     if (googleStatus === "reconnect") nextSteps.push("Reconnect Google to refresh your session.");
@@ -157,10 +157,10 @@ function providerHelpText(provider: YoofloePlugin["settings"]["provider"]["type"
     case "gemini-google":
       return "Recommended for most users. Sign in with Google in your browser, then use Gemini with your own Google Cloud project.";
     case "gemini-vertex":
-      return "Advanced Google Cloud setup. Use this if you specifically want Vertex AI and know your project and model.";
+      return "Advanced Google Cloud setup. Use this if you specifically want the Vertex setup and know your project and model.";
     case "none":
     default:
-      return "Yoofloe is designed for AI-generated insight documents. Configure Gemini to start generating them.";
+      return "Yoofloe is designed to generate insight documents. Configure Gemini to start generating them.";
   }
 }
 
@@ -249,7 +249,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Setup").setHeading();
     containerEl.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Yoofloe external AI access is a pro feature. Basic in-app access and baseline data export stay available without pro, while CLI, mcp, and Obsidian-connected workflows are premium interface layers. In Obsidian, you connect with a yoofloe pat. In yoofloe CLI and CLI mcp, you sign in with your yoofloe account. On these external surfaces, yoofloe provides grounded context and access control, but not the model."
+      text: "Yoofloe external access is a pro feature. Basic in-app access and baseline data export stay available without pro, while CLI, mcp, and Obsidian-connected workflows are premium interface layers. In Obsidian, you connect with a yoofloe pat. In yoofloe CLI and CLI mcp, you sign in with your yoofloe account. On these external surfaces, yoofloe provides grounded context and access control, but not the model."
     });
 
     containerEl.createEl("div", {
@@ -271,7 +271,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     [
       "Save your Yoofloe token and click Verify token.",
       "Finish the Gemini setup below.",
-      "Run AI insight brief to generate your first grounded AI document."
+      "Run insight brief to generate your first grounded document."
     ].forEach((item) => quickStartList.createEl("li", { text: item }));
 
     const tokenSection = createStepSection(
@@ -282,8 +282,8 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It does not replace Yoofloe CLI login, and it exposes personal-only data by design."
     );
 
-    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. External AI Access is included with Pro. Generate the token in the Yoofloe web app, review the External AI Access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
-    createInfoCard(tokenSection, "External AI notice", "Obsidian Plugin Mode uses your own Google provider setup directly from Obsidian. Yoofloe provides the PAT-protected bundle and brief, but Yoofloe does not receive your Google OAuth credentials.");
+    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. External access is included with Pro. Generate the token in the Yoofloe web app, review the external access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
+    createInfoCard(tokenSection, "External access notice", "Obsidian plugin mode uses your own Google provider setup directly from Obsidian. Yoofloe provides the PAT-protected bundle and brief, but Yoofloe does not receive your Google OAuth credentials.");
     createHelpDetails(tokenSection, "Need help finding your token?", [
       "Open the Yoofloe web app and go to Settings.",
       "Use Generate Obsidian Token.",
@@ -390,23 +390,23 @@ export class YoofloeSettingTab extends PluginSettingTab {
     const agentDirectSection = createStepSection(
       containerEl,
       "Optional",
-      "Use with AI agents",
+      "Use with external agents",
       { text: "Available", tone: "accent" },
       "Use an external agent when you want Codex, Claude Code, or another tool to bring its own model while Yoofloe provides grounded context and safe vault writes. Files written into your vault remain local copies after revocation."
     );
 
-    createInfoCard(agentDirectSection, "Choose the right path", "Use Plugin AI for one-click generation inside Obsidian. Use Agent Direct when an external AI agent should bring its own model and workflow. Obsidian uses a PAT; Yoofloe CLI and CLI MCP use app login.");
+    createInfoCard(agentDirectSection, "Choose the right path", "Use plugin generation for one-click output inside Obsidian. Use Agent Direct when an external agent should bring its own model and workflow. Obsidian uses a PAT; Yoofloe CLI and CLI MCP use app login.");
     createChecklistCard(agentDirectSection, "Agent Direct rules", [
       "Agent Direct does not reuse the plugin's Gemini OAuth setup or secrets.",
       "The recommended MCP workflow is yoofloe_ai_document_context followed by yoofloe_write_ai_document.",
-      "AI deep dive requires a non-empty focusInstruction.",
+      "Deep dive requires a non-empty focusInstruction.",
       "The connected external agent processes content under its own provider terms.",
       "Plugin and wrapper access are personal-only by design and do not expose couple/shared data."
     ]);
 
     new Setting(agentDirectSection)
       .setName("Copy examples")
-      .setDesc("Copy ready-to-use prompts and mcp config snippets for external AI agents.")
+      .setDesc("Copy ready-to-use prompts and mcp config snippets for external agents.")
       .addButton((button) => {
         button.setButtonText("Copy codex prompt").onClick(async () => {
           try {
@@ -476,21 +476,21 @@ export class YoofloeSettingTab extends PluginSettingTab {
     const providerSection = createStepSection(
       containerEl,
       "Step 2",
-      "Choose your AI engine",
+      "Choose your provider",
       providerChoice,
-      "Choose the Gemini setup Yoofloe should use for AI insight brief, AI decision memo, AI action plan, and AI deep dive."
+      "Choose the setup for insight brief, decision memo, action plan, and deep dive."
     );
 
-    createInfoCard(providerSection, "Recommended choice", "Most people should start with Gemini (Google AI). Choose Vertex AI only if you specifically want your own Vertex setup.");
+    createInfoCard(providerSection, "Recommended choice", "Most people should start with the Google setup. Choose the Vertex setup only if you specifically want your own Vertex project.");
 
     new Setting(providerSection)
-      .setName("AI provider")
-      .setDesc("Choose the Gemini setup yoofloe should use for AI insight brief, AI decision memo, AI action plan, and AI deep dive.")
+      .setName("Model provider")
+      .setDesc("Choose the setup yoofloe should use for insight brief, decision memo, action plan, and deep dive.")
       .addDropdown((dropdown) => {
         dropdown
           .addOption("none", "None")
-          .addOption("gemini-google", "Gemini (Google AI)")
-          .addOption("gemini-vertex", "Gemini (Vertex AI)");
+          .addOption("gemini-google", "Google setup")
+          .addOption("gemini-vertex", "Vertex setup");
 
         dropdown.setValue(provider).onChange((value) => {
           void saveProviderType(value as typeof this.plugin.settings.provider.type);
@@ -505,11 +505,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
     const setupSection = createStepSection(
       containerEl,
       "Step 3",
-      "Finish AI setup",
+      "Finish setup",
       providerStatus,
       provider === "none"
-        ? "Configure Gemini to start generating AI insight documents."
-        : "Save each required field below. When this step shows Ready, you can run AI insight brief."
+        ? "Configure Gemini to start generating insight documents."
+        : "Save each required field below. When this step is ready, you can run insight brief."
     );
 
     if (provider !== "none" && nextSteps.length > 0) {
@@ -551,7 +551,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setDisabled(!hasSecureStorage)
             .onClick(async () => {
               if (!pendingClientId) {
-                new Notice("Add your Google OAUTH client ID before saving.");
+                new Notice("Google OAUTH client ID is required before saving.");
                 return;
               }
 
@@ -567,7 +567,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
                 this.plugin.googleConnectionStatus = "reconnect";
               }
               await this.plugin.saveSettings();
-              new Notice("Google OAUTH client ID saved.");
+                new Notice("Google OAUTH client ID saved.");
               this.display();
             });
         });
@@ -601,7 +601,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               }
 
               if (!pendingClientSecret) {
-                new Notice("Paste your Google OAUTH client secret before saving.");
+                new Notice("Google OAUTH client secret is required before saving.");
                 return;
               }
 
@@ -650,7 +650,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
                 return;
               }
 
-              let noticeMessage = "Google OAUTH connected.";
+              let noticeMessage = "Google OAuth connected.";
               try {
                 button.setDisabled(true);
                 await this.plugin.connectGoogle();
@@ -671,7 +671,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
         })
         .addButton((button) => {
           button
-            .setButtonText("Disconnect Google")
+            .setButtonText("Disconnect Google account")
             .setDisabled(!hasSecureStorage || effectiveGoogleStatus === "not-connected")
             .onClick(async () => {
               await this.plugin.disconnectGoogle();
@@ -693,7 +693,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
 
       new Setting(setupSection)
         .setName("Google cloud project ID")
-        .setDesc("Required for Google Gemini and vertex requests. Use your Google cloud project ID, not the project number.")
+        .setDesc("Required for Gemini and vertex requests. Use your Google cloud project ID, not the project number.")
         .addText((text) => {
           text
             .setPlaceholder("My-Google-cloud-project")
@@ -708,7 +708,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setButtonText("Save project ID")
             .onClick(async () => {
               if (!pendingProject) {
-                new Notice("Add your Google cloud project ID before saving.");
+                new Notice("Google cloud project ID is required before saving.");
                 return;
               }
 
@@ -722,7 +722,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       if (provider === "gemini-google") {
         new Setting(setupSection)
           .setName("Gemini model")
-          .setDesc("Recommended for most users. Example: Gemini-2.5-flash-lite.")
+          .setDesc("Recommended for most users. Example model: Gemini-2.5-flash-lite.")
           .addText((text) => {
             text
               .setPlaceholder("Gemini-2.5-flash-lite")
@@ -737,7 +737,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               .setButtonText("Save model")
               .onClick(async () => {
                 if (!pendingGoogleModel) {
-                  new Notice("Add a Gemini model before saving.");
+                  new Notice("Add a model name before saving.");
                   return;
                 }
 
@@ -752,7 +752,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       if (isVertexProvider) {
         new Setting(setupSection)
           .setName("Vertex model")
-          .setDesc("Use this only if you specifically want Vertex AI. Example: Gemini-2.5-flash-lite.")
+          .setDesc("Use this only if you specifically want the vertex setup. Example model: Gemini-2.5-flash-lite.")
           .addText((text) => {
             text
               .setPlaceholder("Gemini-2.5-flash-lite")
@@ -806,7 +806,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     }
 
     if (provider === "none") {
-      createInfoCard(setupSection, "Gemini setup required", "Yoofloe only generates AI insight documents. Select Gemini (Google AI) or Gemini (Vertex AI) to continue.");
+      createInfoCard(setupSection, "Gemini setup required", "Yoofloe only generates insight documents. Select the Google setup or the Vertex setup to continue.");
     }
 
     const advancedSection = containerEl.createEl("details", { cls: "yoofloe-help-details" });
@@ -823,7 +823,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
 
     new Setting(advancedSection)
       .setName("Default range")
-      .setDesc("Used by the AI document commands.")
+      .setDesc("Used by the insight document commands.")
       .addDropdown((dropdown) => {
         YOOFLOE_RANGES.forEach((range) => {
           dropdown.addOption(range, range);
