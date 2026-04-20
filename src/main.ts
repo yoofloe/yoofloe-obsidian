@@ -42,6 +42,7 @@ const SUPPORTED_PLUGIN_PROVIDERS = new Set<YoofloePluginSettings["provider"]["ty
 
 const PRO_REQUIRED_NOTICE = "Yoofloe External AI Access requires an active Pro plan. This Obsidian plugin uses a Yoofloe PAT, while Yoofloe CLI and CLI MCP use app login.";
 const PRO_REQUIRED_SETTINGS_MESSAGE = "This Yoofloe account does not currently include External AI Access. Upgrade to Pro to keep using the Obsidian plugin, CLI, and MCP surfaces.";
+type DesktopWindow = Window & { require?: NodeJS.Require; };
 
 function isBlockedEntitlement(entitlement: YoofloeEntitlement | null | undefined) {
   return entitlement?.allowed === false;
@@ -70,9 +71,10 @@ function isPaywallMessage(message: string) {
 }
 
 function requireDesktopModule<T>(specifier: string): T {
+  const desktopWindow = activeWindow as DesktopWindow;
   const runtimeRequire = typeof require === "function"
     ? require
-    : (globalThis as { require?: NodeJS.Require }).require;
+    : desktopWindow.require;
 
   if (!runtimeRequire) {
     throw new Error("This action is available only in the desktop Obsidian runtime.");
@@ -149,11 +151,11 @@ export default class YoofloePlugin extends Plugin {
     this.secretStore = new YoofloeSecretStore(this.app);
     this.googleAuth = new YoofloeGoogleAuthManager(this.secretStore);
     this.refreshOnboardingStatuses();
-    await this.refreshGoogleConnectionStatus();
+    this.refreshGoogleConnectionStatus();
     if (migrateLegacySecretsFromSettings(this.settings, this.secretStore) || migrationMessages.length > 0) {
       await this.saveSettings();
       this.refreshOnboardingStatuses();
-      await this.refreshGoogleConnectionStatus();
+      this.refreshGoogleConnectionStatus();
     }
     this.statusEl = this.addStatusBarItem();
     this.setStatus("Yoofloe idle");
@@ -274,7 +276,7 @@ export default class YoofloePlugin extends Plugin {
     }
   }
 
-  async refreshGoogleConnectionStatus() {
+  refreshGoogleConnectionStatus() {
     if (!this.secretStore?.isAvailable || !this.googleAuth?.hasRefreshToken()) {
       this.googleConnectionStatus = this.settings.provider.googleConnected ? "connected" : "not-connected";
       return;
@@ -338,7 +340,7 @@ export default class YoofloePlugin extends Plugin {
     this.settings.provider.googleLastConnectState = "idle";
     this.settings.provider.googleLastConnectMessage = "";
     await this.saveSettings();
-    await this.refreshGoogleConnectionStatus();
+    this.refreshGoogleConnectionStatus();
   }
 
   private setStatus(text: string) {
@@ -409,15 +411,17 @@ export default class YoofloePlugin extends Plugin {
   }
 
   private clearStatusResetTimer() {
+    const pluginWindow = activeWindow as Window;
     if (this.statusResetTimer !== null) {
-      window.clearTimeout(this.statusResetTimer);
+      pluginWindow.clearTimeout(this.statusResetTimer);
       this.statusResetTimer = null;
     }
   }
 
   private queueIdleStatusReset(delayMs = 2500) {
+    const pluginWindow = activeWindow as Window;
     this.clearStatusResetTimer();
-    this.statusResetTimer = window.setTimeout(() => {
+    this.statusResetTimer = pluginWindow.setTimeout(() => {
       this.statusResetTimer = null;
       this.setStatus("Yoofloe idle");
     }, delayMs);
@@ -439,29 +443,30 @@ export default class YoofloePlugin extends Plugin {
 
   private registerCommands() {
     const aiCommands: AiDocumentCommandDefinition[] = [
-      { id: "ai-insight-brief", name: "AI Insight Brief", documentType: "insight-brief" },
-      { id: "ai-decision-memo", name: "AI Decision Memo", documentType: "decision-memo" },
-      { id: "ai-action-plan", name: "AI Action Plan", documentType: "action-plan" },
-      { id: "ai-deep-dive", name: "AI Deep Dive", documentType: "deep-dive" }
+      { id: "ai-insight-brief", name: "AI insight brief", documentType: "insight-brief" },
+      { id: "ai-decision-memo", name: "AI decision memo", documentType: "decision-memo" },
+      { id: "ai-action-plan", name: "AI action plan", documentType: "action-plan" },
+      { id: "ai-deep-dive", name: "AI deep dive", documentType: "deep-dive" }
     ];
 
     for (const command of aiCommands) {
       this.addCommand({
         id: command.id,
         name: command.name,
-        callback: async () => {
-          await this.runAiDocumentCommand(command);
+        callback: () => {
+          void this.runAiDocumentCommand(command);
         }
       });
     }
 
     this.addCommand({
       id: "write-agent-setup-note",
-      name: "Write Agent Setup Note",
-      callback: async () => {
-        try {
-          this.clearStatusResetTimer();
-          this.setStatus("Yoofloe writing agent setup note...");
+      name: "Write agent setup note",
+      callback: () => {
+        void (async () => {
+          try {
+            this.clearStatusResetTimer();
+            this.setStatus("Yoofloe writing agent setup note...");
           const filePath = await this.writeAgentSetupNote();
           this.setStatus("Yoofloe idle");
           new Notice(`Yoofloe agent setup note created: ${filePath}`);
@@ -470,6 +475,7 @@ export default class YoofloePlugin extends Plugin {
           new Notice(this.normalizeUserFacingError(error, "Failed to write the Yoofloe agent setup note."));
           this.queueIdleStatusReset();
         }
+        })();
       }
     });
   }
@@ -522,7 +528,7 @@ export default class YoofloePlugin extends Plugin {
   }
 
   async openAgentDirectGuide() {
-    const electron = requireDesktopModule<{ shell: { openExternal: (target: string) => Promise<unknown> | unknown; }; }>("electron");
+    const electron = requireDesktopModule<{ shell: { openExternal: (target: string) => Promise<void> | void; }; }>("electron");
     await Promise.resolve(electron.shell.openExternal(AGENT_DIRECT_GUIDE_URL));
   }
 

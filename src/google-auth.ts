@@ -8,6 +8,7 @@ const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/generative-language.retriever"
 ];
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+type DesktopWindow = Window & { require?: NodeJS.Require; };
 
 type GoogleTokenResponse = {
   access_token?: string;
@@ -18,9 +19,10 @@ type GoogleTokenResponse = {
 };
 
 function requireDesktopModule<T>(specifier: string): T {
+  const desktopWindow = activeWindow as DesktopWindow;
   const runtimeRequire = typeof require === "function"
     ? require
-    : (globalThis as { require?: NodeJS.Require }).require;
+    : desktopWindow.require;
 
   if (!runtimeRequire) {
     throw new Error("Google OAuth is available only in the desktop Obsidian runtime.");
@@ -126,15 +128,16 @@ async function refreshAccessToken(args: {
 }
 
 async function openExternalUrl(url: string) {
-  const electron = requireDesktopModule<{ shell: { openExternal: (target: string) => Promise<unknown> | unknown; }; }>("electron");
+  const electron = requireDesktopModule<{ shell: { openExternal: (target: string) => Promise<void> | void; }; }>("electron");
   await Promise.resolve(electron.shell.openExternal(url));
 }
 
 async function createLoopbackReceiver(state: string) {
+  const authWindow = activeWindow as Window;
   const http = requireDesktopModule<typeof import("node:http")>("node:http");
   return await new Promise<{ redirectUri: string; waitForCode: () => Promise<string>; }>((resolveReceiver, rejectReceiver) => {
     let settled = false;
-    let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
+    let timeoutId: number | null = null;
     let resolveCode!: (code: string) => void;
     let rejectCode!: (reason?: unknown) => void;
 
@@ -158,7 +161,7 @@ async function createLoopbackReceiver(state: string) {
 
       const cleanup = () => {
         if (timeoutId !== null) {
-          globalThis.clearTimeout(timeoutId);
+          authWindow.clearTimeout(timeoutId);
           timeoutId = null;
         }
         server.close();
@@ -208,7 +211,7 @@ async function createLoopbackReceiver(state: string) {
       if (settled) return;
       settled = true;
       if (timeoutId !== null) {
-        globalThis.clearTimeout(timeoutId);
+        authWindow.clearTimeout(timeoutId);
         timeoutId = null;
       }
       rejectCode(error);
@@ -225,7 +228,7 @@ async function createLoopbackReceiver(state: string) {
         return;
       }
 
-      timeoutId = globalThis.setTimeout(() => {
+      timeoutId = authWindow.setTimeout(() => {
         if (settled) return;
         settled = true;
         server.close();
@@ -234,7 +237,7 @@ async function createLoopbackReceiver(state: string) {
 
       resolveReceiver({
         redirectUri: `http://127.0.0.1:${address.port}/yoofloe-google-auth`,
-        waitForCode: async () => await codePromise
+        waitForCode: () => codePromise
       });
     });
   });

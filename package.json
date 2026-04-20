@@ -10,7 +10,8 @@
     "dev": "node esbuild.config.mjs --watch",
     "dev:mcp": "node esbuild.mcp.mjs --watch",
     "start:mcp": "node mcp-server.js",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "lint": "eslint src"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.2",
@@ -18,7 +19,12 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.1",
+    "@typescript-eslint/eslint-plugin": "^8.58.2",
+    "@typescript-eslint/parser": "^8.58.2",
     "esbuild": "^0.25.2",
+    "eslint": "^9.39.4",
+    "eslint-plugin-obsidianmd": "^0.2.4",
+    "globals": "^17.5.0",
     "obsidian": "^1.8.10",
     "typescript": "^5.8.3"
   }

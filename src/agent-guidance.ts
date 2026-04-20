@@ -30,7 +30,7 @@ export function buildCodexPrompt(options: AgentGuidanceOptions) {
   return [
     "Use the yoofloe MCP server.",
     "Call yoofloe_ai_document_context for documentType insight-brief with domains schedule, life, wellness, finance, business, journal, and garden over 1M.",
-    "Use the returned prompt scaffold to draft a grounded AI Insight Brief.",
+    "Use the returned prompt scaffold to draft a grounded AI insight brief.",
     "Keep evidence, interpretation, recommendations, and open questions clearly separated.",
     "Then call yoofloe_write_ai_document to save the result into the configured vault folder.",
     `The target folder is ${saveFolder}.`,
@@ -43,7 +43,7 @@ export function buildClaudeCodePrompt(options: AgentGuidanceOptions) {
   return [
     "Use the yoofloe MCP tools.",
     "Start with yoofloe_ai_document_context for documentType action-plan with domains finance, business, wellness, and schedule over 1M.",
-    "Use the returned prompt scaffold to draft a grounded AI Action Plan.",
+    "Use the returned prompt scaffold to draft a grounded AI action plan.",
     "Keep evidence notes separate from recommendations and sequence the actions realistically.",
     "Save the final result with yoofloe_write_ai_document.",
     `Write into the configured ${saveFolder} folder only.`,
@@ -172,6 +172,7 @@ export function buildAgentSetupNoteMarkdown(options: AgentGuidanceOptions) {
     "",
     "- Antigravity/Gemini-style MCP configs should use an absolute path to `mcp-server.js`.",
     "- `YOOFLOE_VAULT_PATH` must point to your vault root, not the Yoofloe subfolder inside it.",
+    "- Business playbook context may include planning, success, setback, and learning categories. Treat planning as the idea-and-plan lane, and summarize it in terms of hypothesis, success signals, first steps, and risks.",
     "- `deep-dive` requires a non-empty `focusInstruction`.",
     "- Existing files are never overwritten; collisions use numeric suffixes.",
     `- The configured save folder is \`${guide.outputConventions.folder}\`.`,

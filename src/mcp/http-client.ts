@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import type {
   YoofloeDataApiResponse,
   YoofloeDateFormat,
@@ -60,8 +62,7 @@ function errorMessageFromBody(body: unknown, status: number) {
   return `Yoofloe API request failed with status ${status}.`;
 }
 
-async function parseResponseBody(response: Response) {
-  const text = await response.text();
+function parseResponseBody(text: string) {
   if (!text) return null;
 
   try {
@@ -71,36 +72,62 @@ async function parseResponseBody(response: Response) {
   }
 }
 
+async function postJsonRequest(url: string, pat: string, body: Record<string, unknown>) {
+  const targetUrl = new URL(url);
+  const requestBody = JSON.stringify(body);
+  const requestFn = targetUrl.protocol === "https:" ? httpsRequest : httpRequest;
+
+  return await new Promise<{ status: number; body: unknown; }>((resolve, reject) => {
+    const request = requestFn(targetUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${pat}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(requestBody)
+      }
+    }, (response) => {
+      const chunks: Buffer[] = [];
+
+      response.on("data", (chunk: Buffer | string) => {
+        chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+      });
+
+      response.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          status: response.statusCode ?? 500,
+          body: parseResponseBody(text)
+        });
+      });
+    });
+
+    request.on("error", reject);
+    request.write(requestBody);
+    request.end();
+  });
+}
+
 async function postJson<TResponse>(
   config: YoofloeMcpConfig,
   path: string,
   body: Record<string, unknown>
 ): Promise<TResponse> {
-  const response = await fetch(`${normalizeBaseUrl(config.functionsBaseUrl)}/${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.pat}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
+  const response = await postJsonRequest(`${normalizeBaseUrl(config.functionsBaseUrl)}/${path}`, config.pat, body);
 
-  const parsedBody = await parseResponseBody(response);
-
-  if (!response.ok) {
-    const code = parsedBody && typeof parsedBody === "object"
-      ? (parsedBody as Record<string, unknown>).code
+  if (response.status >= 400) {
+    const code = response.body && typeof response.body === "object"
+      ? (response.body as Record<string, unknown>).code
       : undefined;
 
     throw new YoofloeMcpHttpError(
-      errorMessageFromBody(parsedBody, response.status),
+      errorMessageFromBody(response.body, response.status),
       response.status,
       typeof code === "string" ? code : undefined,
-      parsedBody
+      response.body
     );
   }
 
-  return parsedBody as TResponse;
+  return response.body as TResponse;
 }
 
 export class YoofloeMcpHttpClient {

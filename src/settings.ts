@@ -6,6 +6,7 @@ import { describeStoredSecret, SECRET_STORAGE_REQUIRED_MESSAGE } from "./secrets
 import { YOOFLOE_RANGES } from "./types";
 
 type BadgeTone = "muted" | "accent" | "success" | "warning" | "danger";
+type DesktopWindow = Window & { require?: NodeJS.Require; };
 
 function secureStorageWarning(hasSecureStorage: boolean) {
   if (!hasSecureStorage) {
@@ -33,7 +34,7 @@ function createStepSection(
   const header = section.createDiv({ cls: "yoofloe-step-header" });
   const titleWrap = header.createDiv({ cls: "yoofloe-step-title-wrap" });
   titleWrap.createEl("div", { cls: "yoofloe-step-label", text: step });
-  titleWrap.createEl("h3", { cls: "yoofloe-step-title", text: title });
+  titleWrap.createEl("div", { cls: "yoofloe-step-title", text: title });
   createBadge(header.createDiv({ cls: "yoofloe-step-badge-wrap" }), badge.text, badge.tone);
   section.createEl("p", { cls: "yoofloe-step-description", text: description });
   return section;
@@ -66,21 +67,27 @@ function createHelpDetails(containerEl: HTMLElement, summaryText: string, items:
   return details;
 }
 
+function requireDesktopModule<T>(specifier: string): T {
+  const desktopWindow = activeWindow as DesktopWindow;
+  const runtimeRequire = typeof require === "function"
+    ? require
+    : desktopWindow.require;
+
+  if (!runtimeRequire) {
+    throw new Error("This action is available only in the desktop Obsidian runtime.");
+  }
+
+  return runtimeRequire(specifier) as T;
+}
+
 async function copyTextToClipboard(text: string) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
     return;
   }
 
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "absolute";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  textarea.remove();
+  const electron = requireDesktopModule<{ clipboard: { writeText: (value: string) => void; }; }>("electron");
+  electron.clipboard.writeText(text);
 }
 
 function tokenBadgeState(plugin: YoofloePlugin) {
@@ -143,22 +150,6 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
   }
 
   return nextSteps;
-}
-
-function googleBadgeState(plugin: YoofloePlugin) {
-  const status = plugin.settings.provider.googleConnected || plugin.googleAuth.hasRefreshToken()
-    ? "connected"
-    : plugin.googleConnectionStatus;
-
-  switch (status) {
-    case "connected":
-      return { text: "Connected", tone: "success" as const };
-    case "reconnect":
-      return { text: "Reconnect needed", tone: "danger" as const };
-    case "not-connected":
-    default:
-      return { text: "Not connected", tone: "warning" as const };
-  }
 }
 
 function providerHelpText(provider: YoofloePlugin["settings"]["provider"]["type"]) {
@@ -225,11 +216,40 @@ export class YoofloeSettingTab extends PluginSettingTab {
     const effectiveGoogleStatus = this.plugin.settings.provider.googleConnected || this.plugin.googleAuth.hasRefreshToken()
       ? "connected"
       : this.plugin.googleConnectionStatus;
+    const saveProviderType = async (value: typeof this.plugin.settings.provider.type) => {
+      this.plugin.settings.provider.type = value;
+      await this.plugin.saveSettings();
+      this.display();
+    };
+    const saveSavePath = async (value: string) => {
+      this.plugin.settings.savePath = value.trim() || "Yoofloe";
+      await this.plugin.saveSettings();
+    };
+    const saveDefaultRange = async (value: typeof this.plugin.settings.defaultRange) => {
+      this.plugin.settings.defaultRange = value;
+      await this.plugin.saveSettings();
+    };
+    const saveDateFormat = async (value: typeof this.plugin.settings.dateFormat) => {
+      this.plugin.settings.dateFormat = value;
+      await this.plugin.saveSettings();
+    };
+    const saveIncludeRawData = async (value: boolean) => {
+      this.plugin.settings.includeRawData = value;
+      await this.plugin.saveSettings();
+    };
+    const saveAutoFrontmatter = async (value: boolean) => {
+      this.plugin.settings.autoFrontmatter = value;
+      await this.plugin.saveSettings();
+    };
+    const saveFunctionsBaseUrl = async (value: string) => {
+      this.plugin.settings.functionsBaseUrl = value.trim();
+      await this.plugin.saveSettings();
+    };
 
-    containerEl.createEl("h2", { text: "Yoofloe setup" });
+    new Setting(containerEl).setName("Setup").setHeading();
     containerEl.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Yoofloe External AI Access is a Pro feature. In Obsidian, you connect with a Yoofloe PAT. In Yoofloe CLI and CLI MCP, you sign in with your Yoofloe account."
+      text: "Yoofloe external AI access is a pro feature. Basic in-app access and baseline data export stay available without pro, while CLI, mcp, and Obsidian-connected workflows are premium interface layers. In Obsidian, you connect with a yoofloe pat. In yoofloe CLI and CLI mcp, you sign in with your yoofloe account. On these external surfaces, yoofloe provides grounded context and access control, but not the model."
     });
 
     containerEl.createEl("div", {
@@ -246,12 +266,12 @@ export class YoofloeSettingTab extends PluginSettingTab {
     }
 
     const quickStart = containerEl.createDiv({ cls: "yoofloe-quick-start" });
-    quickStart.createEl("h3", { text: "Recommended first run" });
+    new Setting(quickStart).setName("Recommended first run").setHeading();
     const quickStartList = quickStart.createEl("ol", { cls: "yoofloe-step-list" });
     [
       "Save your Yoofloe token and click Verify token.",
       "Finish the Gemini setup below.",
-      "Run AI Insight Brief to generate your first grounded AI document."
+      "Run AI insight brief to generate your first grounded AI document."
     ].forEach((item) => quickStartList.createEl("li", { text: item }));
 
     const tokenSection = createStepSection(
@@ -259,10 +279,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Step 1",
       "Connect Yoofloe",
       tokenBadgeState(this.plugin),
-      "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It does not replace Yoofloe CLI login."
+      "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It does not replace Yoofloe CLI login, and it exposes personal-only data by design."
     );
 
-    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. External AI Access is included with Pro. Generate the token in the Yoofloe web app, then paste it here.");
+    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. External AI Access is included with Pro. Generate the token in the Yoofloe web app, review the External AI Access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
+    createInfoCard(tokenSection, "External AI notice", "Obsidian Plugin Mode uses your own Google provider setup directly from Obsidian. Yoofloe provides the PAT-protected bundle and brief, but Yoofloe does not receive your Google OAuth credentials.");
     createHelpDetails(tokenSection, "Need help finding your token?", [
       "Open the Yoofloe web app and go to Settings.",
       "Use Generate Obsidian Token.",
@@ -285,7 +306,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
             pendingPat = value.trim();
           });
         text.inputEl.type = "password";
-        text.inputEl.style.width = "24rem";
+        text.inputEl.classList.add("yoofloe-input-wide");
       })
       .addButton((button) => {
         button
@@ -298,7 +319,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
             }
 
             if (!pendingPat) {
-              new Notice("Paste a Yoofloe token before saving.");
+              new Notice("Paste a yoofloe token before saving.");
               return;
             }
 
@@ -369,23 +390,25 @@ export class YoofloeSettingTab extends PluginSettingTab {
     const agentDirectSection = createStepSection(
       containerEl,
       "Optional",
-      "Use With AI Agents",
+      "Use with AI agents",
       { text: "Available", tone: "accent" },
-      "Use an external agent when you want Codex, Claude Code, or another tool to bring its own model while Yoofloe provides grounded context and safe vault writes."
+      "Use an external agent when you want Codex, Claude Code, or another tool to bring its own model while Yoofloe provides grounded context and safe vault writes. Files written into your vault remain local copies after revocation."
     );
 
     createInfoCard(agentDirectSection, "Choose the right path", "Use Plugin AI for one-click generation inside Obsidian. Use Agent Direct when an external AI agent should bring its own model and workflow. Obsidian uses a PAT; Yoofloe CLI and CLI MCP use app login.");
     createChecklistCard(agentDirectSection, "Agent Direct rules", [
       "Agent Direct does not reuse the plugin's Gemini OAuth setup or secrets.",
       "The recommended MCP workflow is yoofloe_ai_document_context followed by yoofloe_write_ai_document.",
-      "AI Deep Dive requires a non-empty focusInstruction."
+      "AI deep dive requires a non-empty focusInstruction.",
+      "The connected external agent processes content under its own provider terms.",
+      "Plugin and wrapper access are personal-only by design and do not expose couple/shared data."
     ]);
 
     new Setting(agentDirectSection)
       .setName("Copy examples")
-      .setDesc("Copy ready-to-use prompts and MCP config snippets for external AI agents.")
+      .setDesc("Copy ready-to-use prompts and mcp config snippets for external AI agents.")
       .addButton((button) => {
-        button.setButtonText("Copy Codex Prompt").onClick(async () => {
+        button.setButtonText("Copy codex prompt").onClick(async () => {
           try {
             await copyTextToClipboard(buildCodexPrompt({
               pluginVersion: this.plugin.manifest.version,
@@ -399,28 +422,28 @@ export class YoofloeSettingTab extends PluginSettingTab {
         });
       })
       .addButton((button) => {
-        button.setButtonText("Copy Claude Code Prompt").onClick(async () => {
+        button.setButtonText("Copy Claude code prompt").onClick(async () => {
           try {
             await copyTextToClipboard(buildClaudeCodePrompt({
               pluginVersion: this.plugin.manifest.version,
               saveFolder: this.plugin.settings.savePath,
               functionsBaseUrl: this.plugin.settings.functionsBaseUrl
             }));
-            new Notice("Claude Code prompt copied.");
+            new Notice("Claude code prompt copied.");
           } catch (error) {
             new Notice(error instanceof Error ? error.message : "Failed to copy the Claude Code prompt.");
           }
         });
       })
       .addButton((button) => {
-        button.setButtonText("Copy MCP Config").onClick(async () => {
+        button.setButtonText("Copy mcp config").onClick(async () => {
           try {
             await copyTextToClipboard(buildMcpConfigSnippet({
               pluginVersion: this.plugin.manifest.version,
               saveFolder: this.plugin.settings.savePath,
               functionsBaseUrl: this.plugin.settings.functionsBaseUrl
             }));
-            new Notice("MCP config snippet copied.");
+            new Notice("Mcp config snippet copied.");
           } catch (error) {
             new Notice(error instanceof Error ? error.message : "Failed to copy the MCP config snippet.");
           }
@@ -431,7 +454,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       .setName("More actions")
       .setDesc("Open the full guide or write a shareable setup note into your vault.")
       .addButton((button) => {
-        button.setButtonText("Open Agent Direct Guide").onClick(async () => {
+        button.setButtonText("Open agent direct guide").onClick(async () => {
           try {
             await this.plugin.openAgentDirectGuide();
           } catch (error) {
@@ -440,7 +463,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
         });
       })
       .addButton((button) => {
-        button.setButtonText("Write Agent Setup Note").onClick(async () => {
+        button.setButtonText("Write agent setup note").onClick(async () => {
           try {
             const filePath = await this.plugin.writeAgentSetupNote();
             new Notice(`Yoofloe agent setup note created: ${filePath}`);
@@ -455,24 +478,22 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Step 2",
       "Choose your AI engine",
       providerChoice,
-      "Choose the Gemini setup Yoofloe should use for AI Insight Brief, AI Decision Memo, AI Action Plan, and AI Deep Dive."
+      "Choose the Gemini setup Yoofloe should use for AI insight brief, AI decision memo, AI action plan, and AI deep dive."
     );
 
     createInfoCard(providerSection, "Recommended choice", "Most people should start with Gemini (Google AI). Choose Vertex AI only if you specifically want your own Vertex setup.");
 
     new Setting(providerSection)
       .setName("AI provider")
-      .setDesc("Choose the Gemini setup Yoofloe should use for AI Insight Brief, AI Decision Memo, AI Action Plan, and AI Deep Dive.")
+      .setDesc("Choose the Gemini setup yoofloe should use for AI insight brief, AI decision memo, AI action plan, and AI deep dive.")
       .addDropdown((dropdown) => {
         dropdown
           .addOption("none", "None")
           .addOption("gemini-google", "Gemini (Google AI)")
           .addOption("gemini-vertex", "Gemini (Vertex AI)");
 
-        dropdown.setValue(provider).onChange(async (value) => {
-          this.plugin.settings.provider.type = value as typeof this.plugin.settings.provider.type;
-          await this.plugin.saveSettings();
-          this.display();
+        dropdown.setValue(provider).onChange((value) => {
+          void saveProviderType(value as typeof this.plugin.settings.provider.type);
         });
       });
 
@@ -488,7 +509,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       providerStatus,
       provider === "none"
         ? "Configure Gemini to start generating AI insight documents."
-        : "Save each required field below. When this step shows Ready, you can run AI Insight Brief."
+        : "Save each required field below. When this step shows Ready, you can run AI insight brief."
     );
 
     if (provider !== "none" && nextSteps.length > 0) {
@@ -503,7 +524,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       let pendingVertexModel = this.plugin.settings.provider.vertexModel;
       let pendingVertexLocation = this.plugin.settings.provider.location;
 
-      createInfoCard(setupSection, "How Google setup works", "You will sign in with Google in your browser. The plugin stores a refresh token in secure storage and uses it only for Gemini or Vertex generation requests.");
+      createInfoCard(setupSection, "How Google setup works", "You will sign in with Google in your browser. The plugin stores a refresh token in secure storage and uses it only for Gemini or Vertex generation requests. Google calls are made directly from Obsidian with your own Google credentials and project.");
       createHelpDetails(setupSection, "Need help creating a Google OAuth client?", [
         "Open Google Cloud Console and select the project you want to use.",
         "Go to Google Auth Platform, then Clients.",
@@ -512,8 +533,8 @@ export class YoofloeSettingTab extends PluginSettingTab {
       ]);
 
       new Setting(setupSection)
-        .setName("Google OAuth client ID")
-        .setDesc("Required for Google sign-in. Use a Desktop app client ID from your own Google Cloud project.")
+        .setName("Google OAUTH client ID")
+        .setDesc("Required for Google sign-in. Use a desktop app client ID from your own Google cloud project.")
         .addText((text) => {
           text
             .setPlaceholder("1234567890-abc123.apps.googleusercontent.com")
@@ -522,7 +543,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .onChange((value) => {
               pendingClientId = value.trim();
             });
-          text.inputEl.style.width = "28rem";
+          text.inputEl.classList.add("yoofloe-input-xwide");
         })
         .addButton((button) => {
           button
@@ -530,12 +551,12 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setDisabled(!hasSecureStorage)
             .onClick(async () => {
               if (!pendingClientId) {
-                new Notice("Add your Google OAuth client ID before saving.");
+                new Notice("Add your Google OAUTH client ID before saving.");
                 return;
               }
 
               if (!pendingClientId.includes(".apps.googleusercontent.com")) {
-                new Notice("Use a Desktop App OAuth client ID ending in .apps.googleusercontent.com.");
+                new Notice("Use a desktop app OAUTH client ID ending in .apps.googleusercontent.com.");
                 return;
               }
 
@@ -546,13 +567,13 @@ export class YoofloeSettingTab extends PluginSettingTab {
                 this.plugin.googleConnectionStatus = "reconnect";
               }
               await this.plugin.saveSettings();
-              new Notice("Google OAuth client ID saved.");
+              new Notice("Google OAUTH client ID saved.");
               this.display();
             });
         });
 
       new Setting(setupSection)
-        .setName("Google OAuth client secret")
+        .setName("Google OAUTH client secret")
         .setDesc(hasSecureStorage
           ? `Stored in secure storage. ${describeStoredSecret(googleClientSecret)}`
           : SECRET_STORAGE_REQUIRED_MESSAGE)
@@ -567,7 +588,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               pendingClientSecret = value.trim();
             });
           text.inputEl.type = "password";
-          text.inputEl.style.width = "24rem";
+          text.inputEl.classList.add("yoofloe-input-wide");
         })
         .addButton((button) => {
           button
@@ -580,7 +601,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               }
 
               if (!pendingClientSecret) {
-                new Notice("Paste your Google OAuth client secret before saving.");
+                new Notice("Paste your Google OAUTH client secret before saving.");
                 return;
               }
 
@@ -588,7 +609,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
                 this.plugin.secretStore.setGoogleClientSecret(pendingClientSecret);
                 pendingClientSecret = "";
                 await this.plugin.saveSettings();
-                new Notice("Google OAuth client secret saved in secure storage.");
+                new Notice("Google OAUTH client secret saved in secure storage.");
                 this.display();
               } catch (error) {
                 new Notice(error instanceof Error ? error.message : "Failed to save the Google OAuth client secret.");
@@ -598,12 +619,12 @@ export class YoofloeSettingTab extends PluginSettingTab {
         .addExtraButton((button) => {
           button
             .setIcon("cross")
-            .setTooltip("Clear stored Google OAuth client secret")
+            .setTooltip("Clear stored Google OAUTH client secret")
             .setDisabled(!hasSecureStorage || !googleClientSecret)
             .onClick(async () => {
               this.plugin.secretStore.clearGoogleClientSecret();
               await this.plugin.saveSettings();
-              new Notice("Google OAuth client secret cleared from secure storage.");
+              new Notice("Google OAUTH client secret cleared from secure storage.");
               this.display();
             });
         });
@@ -621,15 +642,15 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setDisabled(!hasSecureStorage)
             .onClick(async () => {
               if (pendingClientId.trim() !== this.plugin.settings.provider.clientId.trim()) {
-                new Notice("Save your Google OAuth client ID before connecting Google.");
+                new Notice("Save your Google OAUTH client ID before connecting Google.");
                 return;
               }
               if (!this.plugin.secretStore.getGoogleClientSecret()) {
-                new Notice("Save your Google OAuth client secret before connecting Google.");
+                new Notice("Save your Google OAUTH client secret before connecting Google.");
                 return;
               }
 
-              let noticeMessage = "Google OAuth connected.";
+              let noticeMessage = "Google OAUTH connected.";
               try {
                 button.setDisabled(true);
                 await this.plugin.connectGoogle();
@@ -654,7 +675,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setDisabled(!hasSecureStorage || effectiveGoogleStatus === "not-connected")
             .onClick(async () => {
               await this.plugin.disconnectGoogle();
-              new Notice("Google OAuth disconnected.");
+              new Notice("Google OAUTH disconnected.");
               this.display();
             });
         });
@@ -671,29 +692,29 @@ export class YoofloeSettingTab extends PluginSettingTab {
       }
 
       new Setting(setupSection)
-        .setName("Google Cloud project ID")
-        .setDesc("Required for Google Gemini and Vertex requests. Use your Google Cloud Project ID, not the project number.")
+        .setName("Google cloud project ID")
+        .setDesc("Required for Google Gemini and vertex requests. Use your Google cloud project ID, not the project number.")
         .addText((text) => {
           text
-            .setPlaceholder("my-google-cloud-project")
+            .setPlaceholder("My-Google-cloud-project")
             .setValue(this.plugin.settings.provider.project)
             .onChange((value) => {
               pendingProject = value.trim();
             });
-          text.inputEl.style.width = "24rem";
+          text.inputEl.classList.add("yoofloe-input-wide");
         })
         .addButton((button) => {
           button
             .setButtonText("Save project ID")
             .onClick(async () => {
               if (!pendingProject) {
-                new Notice("Add your Google Cloud Project ID before saving.");
+                new Notice("Add your Google cloud project ID before saving.");
                 return;
               }
 
               this.plugin.settings.provider.project = pendingProject;
               await this.plugin.saveSettings();
-              new Notice("Google Cloud Project ID saved.");
+              new Notice("Google cloud project ID saved.");
               this.display();
             });
         });
@@ -701,15 +722,15 @@ export class YoofloeSettingTab extends PluginSettingTab {
       if (provider === "gemini-google") {
         new Setting(setupSection)
           .setName("Gemini model")
-          .setDesc("Recommended for most users. Example: gemini-2.5-flash-lite.")
+          .setDesc("Recommended for most users. Example: Gemini-2.5-flash-lite.")
           .addText((text) => {
             text
-              .setPlaceholder("gemini-2.5-flash-lite")
+              .setPlaceholder("Gemini-2.5-flash-lite")
               .setValue(this.plugin.settings.provider.googleModel)
               .onChange((value) => {
                 pendingGoogleModel = value.trim();
               });
-            text.inputEl.style.width = "24rem";
+            text.inputEl.classList.add("yoofloe-input-wide");
           })
           .addButton((button) => {
             button
@@ -731,22 +752,22 @@ export class YoofloeSettingTab extends PluginSettingTab {
       if (isVertexProvider) {
         new Setting(setupSection)
           .setName("Vertex model")
-          .setDesc("Use this only if you specifically want Vertex AI. Example: gemini-2.5-flash-lite.")
+          .setDesc("Use this only if you specifically want Vertex AI. Example: Gemini-2.5-flash-lite.")
           .addText((text) => {
             text
-              .setPlaceholder("gemini-2.5-flash-lite")
+              .setPlaceholder("Gemini-2.5-flash-lite")
               .setValue(this.plugin.settings.provider.vertexModel)
               .onChange((value) => {
                 pendingVertexModel = value.trim();
               });
-            text.inputEl.style.width = "24rem";
+            text.inputEl.classList.add("yoofloe-input-wide");
           })
           .addButton((button) => {
             button
               .setButtonText("Save model")
               .onClick(async () => {
                 if (!pendingVertexModel) {
-                  new Notice("Add a Vertex model before saving.");
+                  new Notice("Add a vertex model before saving.");
                   return;
                 }
 
@@ -758,18 +779,18 @@ export class YoofloeSettingTab extends PluginSettingTab {
           });
 
         const advanced = setupSection.createEl("details", { cls: "yoofloe-help-details" });
-        advanced.createEl("summary", { text: "Advanced Vertex settings" });
+        advanced.createEl("summary", { text: "Advanced vertex settings" });
         new Setting(advanced)
           .setName("Vertex location")
-          .setDesc("Most users can keep the default us-central1. Change this only if your Vertex deployment uses a different region.")
+          .setDesc("Most users can keep the default us-central1. Change this only if your vertex deployment uses a different region.")
           .addText((text) => {
             text
-              .setPlaceholder("us-central1")
+              .setPlaceholder("Us-central1")
               .setValue(this.plugin.settings.provider.location)
               .onChange((value) => {
                 pendingVertexLocation = value.trim();
               });
-            text.inputEl.style.width = "16rem";
+            text.inputEl.classList.add("yoofloe-input-medium");
           })
           .addButton((button) => {
             button
@@ -795,9 +816,8 @@ export class YoofloeSettingTab extends PluginSettingTab {
       .setName("Save path")
       .setDesc("Generated Markdown files will be written here inside your vault.")
       .addText((text) => {
-        text.setValue(this.plugin.settings.savePath).onChange(async (value) => {
-          this.plugin.settings.savePath = value.trim() || "Yoofloe";
-          await this.plugin.saveSettings();
+        text.setValue(this.plugin.settings.savePath).onChange((value) => {
+          void saveSavePath(value);
         });
       });
 
@@ -805,10 +825,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
       .setName("Default range")
       .setDesc("Used by the AI document commands.")
       .addDropdown((dropdown) => {
-        YOOFLOE_RANGES.forEach((range) => dropdown.addOption(range, range));
-        dropdown.setValue(this.plugin.settings.defaultRange).onChange(async (value) => {
-          this.plugin.settings.defaultRange = value as typeof this.plugin.settings.defaultRange;
-          await this.plugin.saveSettings();
+        YOOFLOE_RANGES.forEach((range) => {
+          dropdown.addOption(range, range);
+        });
+        dropdown.setValue(this.plugin.settings.defaultRange).onChange((value) => {
+          void saveDefaultRange(value as typeof this.plugin.settings.defaultRange);
         });
       });
 
@@ -816,10 +837,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
       .setName("Date format")
       .setDesc("Used in generated file names.")
       .addDropdown((dropdown) => {
-        ["YYYY-MM-DD", "YYYYMMDD", "YYYY.MM.DD"].forEach((format) => dropdown.addOption(format, format));
-        dropdown.setValue(this.plugin.settings.dateFormat).onChange(async (value) => {
-          this.plugin.settings.dateFormat = value as typeof this.plugin.settings.dateFormat;
-          await this.plugin.saveSettings();
+        ["YYYY-MM-DD", "YYYYMMDD", "YYYY.MM.DD"].forEach((format) => {
+          dropdown.addOption(format, format);
+        });
+        dropdown.setValue(this.plugin.settings.dateFormat).onChange((value) => {
+          void saveDateFormat(value as typeof this.plugin.settings.dateFormat);
         });
       });
 
@@ -827,31 +849,28 @@ export class YoofloeSettingTab extends PluginSettingTab {
       .setName("Include raw data")
       .setDesc("Adds raw JSON sections to generated notes.")
       .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.includeRawData).onChange(async (value) => {
-          this.plugin.settings.includeRawData = value;
-          await this.plugin.saveSettings();
+        toggle.setValue(this.plugin.settings.includeRawData).onChange((value) => {
+          void saveIncludeRawData(value);
         });
       });
 
     new Setting(advancedSection)
       .setName("Write frontmatter")
-      .setDesc("Adds Yoofloe metadata frontmatter to each generated note.")
+      .setDesc("Adds yoofloe metadata frontmatter to each generated note.")
       .addToggle((toggle) => {
-        toggle.setValue(this.plugin.settings.autoFrontmatter).onChange(async (value) => {
-          this.plugin.settings.autoFrontmatter = value;
-          await this.plugin.saveSettings();
+        toggle.setValue(this.plugin.settings.autoFrontmatter).onChange((value) => {
+          void saveAutoFrontmatter(value);
         });
       });
 
     new Setting(advancedSection)
       .setName("Functions base URL")
-      .setDesc("Defaults to the Yoofloe Supabase Edge Functions base URL.")
+      .setDesc("Defaults to the yoofloe supabase edge functions base URL.")
       .addText((text) => {
-        text.setValue(this.plugin.settings.functionsBaseUrl).onChange(async (value) => {
-          this.plugin.settings.functionsBaseUrl = value.trim();
-          await this.plugin.saveSettings();
+        text.setValue(this.plugin.settings.functionsBaseUrl).onChange((value) => {
+          void saveFunctionsBaseUrl(value);
         });
-        text.inputEl.style.width = "24rem";
+        text.inputEl.classList.add("yoofloe-input-wide");
       });
   }
 }

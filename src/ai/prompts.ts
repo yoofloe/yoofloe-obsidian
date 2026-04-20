@@ -11,7 +11,7 @@ export type YoofloeAiDocumentDefinition = {
 
 const DOCUMENT_DEFINITIONS: Record<YoofloeAiDocumentType, YoofloeAiDocumentDefinition> = {
   "insight-brief": {
-    title: "AI Insight Brief",
+    title: "AI insight brief",
     type: "ai-insight-brief",
     surface: "ai-insight-brief",
     systemPrompt: "You are an insight-focused analyst for Yoofloe data. Use only the provided facts, distinguish evidence from interpretation, and return Markdown only.",
@@ -25,7 +25,7 @@ const DOCUMENT_DEFINITIONS: Record<YoofloeAiDocumentType, YoofloeAiDocumentDefin
     ].join("\n")
   },
   "decision-memo": {
-    title: "AI Decision Memo",
+    title: "AI decision memo",
     type: "ai-decision-memo",
     surface: "ai-decision-memo",
     systemPrompt: "You are a strategic decision-support writer for Yoofloe data. Use only the provided facts, separate interpretation from evidence, and return Markdown only.",
@@ -39,7 +39,7 @@ const DOCUMENT_DEFINITIONS: Record<YoofloeAiDocumentType, YoofloeAiDocumentDefin
     ].join("\n")
   },
   "action-plan": {
-    title: "AI Action Plan",
+    title: "AI action plan",
     type: "ai-action-plan",
     surface: "ai-action-plan",
     systemPrompt: "You are an action-oriented planning assistant for Yoofloe data. Use only the provided facts, separate evidence from recommendations, and return Markdown only.",
@@ -53,7 +53,7 @@ const DOCUMENT_DEFINITIONS: Record<YoofloeAiDocumentType, YoofloeAiDocumentDefin
     ].join("\n")
   },
   "deep-dive": {
-    title: "AI Deep Dive",
+    title: "AI deep dive",
     type: "ai-deep-dive",
     surface: "ai-deep-dive",
     systemPrompt: "You are a focused research analyst for Yoofloe data. Stay tightly aligned to the supplied focus instruction, use only the provided facts, and return Markdown only.",
@@ -92,7 +92,7 @@ export function buildAiDocumentPrompt({
   if (document.requiresFocusInstruction) {
     const normalizedFocus = focusInstruction?.trim() ?? "";
     if (!normalizedFocus) {
-      throw new Error("Add a focus instruction before running AI Deep Dive.");
+      throw new Error("Add a focus instruction before running AI deep dive.");
     }
     sections.push("", `Focus instruction:\n${normalizedFocus}`);
   } else if (focusInstruction?.trim()) {

@@ -58,8 +58,9 @@ async function postJson<T>(settings: YoofloeClientSettings, token: string, path:
   });
 
   if (response.status >= 400) {
-    const payload = response.json || {};
-    const message = typeof payload?.error === "string" ? payload.error : `Yoofloe request failed with status ${response.status}`;
+    const payload = response.json as Record<string, unknown> | null;
+    const apiError = payload?.error;
+    const message = typeof apiError === "string" ? apiError : `Yoofloe request failed with status ${response.status}`;
     throw new YoofloeApiError(message, response.status, payload);
   }
 

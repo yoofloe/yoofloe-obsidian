@@ -518,11 +518,10 @@ export function readMcpConfig(env: NodeJS.ProcessEnv): YoofloeMcpConfig {
 export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig) {
   const client = new YoofloeMcpHttpClient(config);
 
-  server.tool(
-    "yoofloe_agent_direct_guide",
-    "Return the current Agent Direct and MCP workflow contract for external AI agents without fetching data or writing files.",
-    {},
-    async () => {
+  server.registerTool("yoofloe_agent_direct_guide", {
+    description: "Return the current Agent Direct and MCP workflow contract for external AI agents without fetching data or writing files.",
+    inputSchema: {}
+  }, () => {
       const guide = buildAgentDirectGuidePayload({
         pluginVersion: config.pluginVersion,
         saveFolder: config.saveFolder,
@@ -537,20 +536,18 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
         }),
         guide
       );
-    }
-  );
+    });
 
-  server.tool(
-    "yoofloe_ai_document_context",
-    "Fetch a grounded AI-document context package for Insight Brief, Decision Memo, Action Plan, or Deep Dive workflows.",
-    {
+  server.registerTool("yoofloe_ai_document_context", {
+    description: "Fetch a grounded AI-document context package for Insight Brief, Decision Memo, Action Plan, or Deep Dive workflows.",
+    inputSchema: {
       documentType: z.enum(AI_DOCUMENT_TYPES).describe("AI document type to prepare."),
       domains: z.array(z.enum(YOOFLOE_DOMAINS)).min(1).describe("One or more Yoofloe domains to include."),
       range: z.enum(YOOFLOE_RANGES).optional().describe("Time range. Defaults to 1M."),
       includeRaw: z.boolean().optional().describe("Include raw evidence payloads in the canonical bundle. Defaults to false."),
       focusInstruction: z.string().optional().describe("Required when documentType is deep-dive.")
-    },
-    async ({ documentType, domains, range, includeRaw, focusInstruction }) => {
+    }
+  }, async ({ documentType, domains, range, includeRaw, focusInstruction }) => {
       const normalizedFocus = requireFocusInstruction(documentType, focusInstruction);
       const context = await buildAiDocumentContext({
         client,
@@ -562,19 +559,17 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       });
 
       return toolTextResponse(asJsonText(context), context);
-    }
-  );
+    });
 
-  server.tool(
-    "yoofloe_data_bundle",
-    "Fetch a canonical Yoofloe data bundle for the requested domains and range.",
-    {
+  server.registerTool("yoofloe_data_bundle", {
+    description: "Fetch a canonical Yoofloe data bundle for the requested domains and range.",
+    inputSchema: {
       domains: z.array(z.enum(YOOFLOE_DOMAINS)).min(1).describe("One or more Yoofloe domains to include."),
       range: z.enum(YOOFLOE_RANGES).optional().describe("Time range. Defaults to 1M."),
       includeRaw: z.boolean().optional().describe("Include raw evidence payloads. Defaults to false."),
       includeFrontmatterHints: z.boolean().optional().describe("Include frontmatter hints from Yoofloe. Defaults to true.")
-    },
-    async ({ domains, range, includeRaw, includeFrontmatterHints }) => {
+    }
+  }, async ({ domains, range, includeRaw, includeFrontmatterHints }) => {
       const response = await client.fetchBundle({
         domains,
         range: range ?? "1M",
@@ -583,18 +578,16 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       });
 
       return toolTextResponse(asJsonText(response), { ...response });
-    }
-  );
+    });
 
-  server.tool(
-    "yoofloe_gardener_brief",
-    "Fetch the deterministic Yoofloe gardener brief for the requested domains and range.",
-    {
+  server.registerTool("yoofloe_gardener_brief", {
+    description: "Fetch the deterministic Yoofloe gardener brief for the requested domains and range.",
+    inputSchema: {
       domains: z.array(z.enum(YOOFLOE_DOMAINS)).min(1).describe("One or more Yoofloe domains to include."),
       range: z.enum(YOOFLOE_RANGES).optional().describe("Time range. Defaults to 1M."),
       format: z.enum(["json", "markdown"]).optional().describe("Return the gardener brief as JSON or rendered Markdown.")
-    },
-    async ({ domains, range, format }) => {
+    }
+  }, async ({ domains, range, format }) => {
       const response = await client.fetchGardenerBrief({
         domains,
         range: range ?? "1M",
@@ -606,13 +599,11 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
         : asJsonText(response);
 
       return toolTextResponse(text, { ...response });
-    }
-  );
+    });
 
-  server.tool(
-    "yoofloe_generate_report",
-    "Deprecated: generate report-style Yoofloe Markdown from a data bundle and optionally write it into the configured vault folder. Prefer yoofloe_ai_document_context plus yoofloe_write_ai_document for new workflows.",
-    {
+  server.registerTool("yoofloe_generate_report", {
+    description: "Deprecated: generate report-style Yoofloe Markdown from a data bundle and optionally write it into the configured vault folder. Prefer yoofloe_ai_document_context plus yoofloe_write_ai_document for new workflows.",
+    inputSchema: {
       domains: z.array(z.enum(YOOFLOE_DOMAINS)).min(1).describe("One or more Yoofloe domains to include."),
       range: z.enum(YOOFLOE_RANGES).optional().describe("Time range. Defaults to 1M."),
       title: z.string().optional().describe("Optional Markdown title override."),
@@ -620,8 +611,8 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       surface: z.string().optional().describe("Optional file surface/slug override."),
       includeRawData: z.boolean().optional().describe("Include raw JSON blocks. Defaults to false."),
       writeFile: z.boolean().optional().describe("Write the note into the vault. Defaults to true.")
-    },
-    async ({ domains, range, title, type, surface, includeRawData, writeFile }) => {
+    }
+  }, async ({ domains, range, title, type, surface, includeRawData, writeFile }) => {
       const preset = chooseReportPreset(domains);
       const response = await client.fetchBundle({
         domains,
@@ -645,13 +636,11 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
         : report.markdown;
 
       return toolTextResponse(summary, report);
-    }
-  );
+    });
 
-  server.tool(
-    "yoofloe_write_ai_document",
-    "Write a normalized Yoofloe AI document into the configured vault folder using caller-supplied Markdown content.",
-    {
+  server.registerTool("yoofloe_write_ai_document", {
+    description: "Write a normalized Yoofloe AI document into the configured vault folder using caller-supplied Markdown content.",
+    inputSchema: {
       documentType: z.enum(AI_DOCUMENT_TYPES).describe("AI document type to write."),
       title: z.string().min(1).describe("Document title rendered as the top-level heading."),
       domains: z.array(z.enum(YOOFLOE_DOMAINS)).min(1).describe("One or more Yoofloe domains reflected in the document."),
@@ -659,8 +648,8 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       markdownBody: z.string().min(1).describe("Markdown body content without YAML frontmatter."),
       provider: z.string().optional().describe("Frontmatter provider label. Defaults to codex."),
       focusInstruction: z.string().optional().describe("Required when documentType is deep-dive.")
-    },
-    async ({ documentType, title, domains, range, markdownBody, provider, focusInstruction }) => {
+    }
+  }, async ({ documentType, title, domains, range, markdownBody, provider, focusInstruction }) => {
       const normalizedFocus = requireFocusInstruction(documentType, focusInstruction);
       const response = await client.fetchBundle({
         domains,
@@ -698,13 +687,11 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       };
 
       return toolTextResponse(`Wrote ${filePath}.`, result);
-    }
-  );
+    });
 
-  server.tool(
-    "yoofloe_write_note",
-    "Write a richer Yoofloe Markdown note into the configured vault folder using caller-supplied Markdown content.",
-    {
+  server.registerTool("yoofloe_write_note", {
+    description: "Write a richer Yoofloe Markdown note into the configured vault folder using caller-supplied Markdown content.",
+    inputSchema: {
       title: z.string().min(1).describe("The note title that will be rendered as the top-level heading."),
       surface: z.string().min(1).describe("The file surface/slug used in the generated note filename."),
       type: z.string().min(1).describe("The Yoofloe frontmatter type to write."),
@@ -713,8 +700,8 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       markdownBody: z.string().min(1).describe("Markdown body content without YAML frontmatter."),
       provider: z.string().optional().describe("Frontmatter provider label. Defaults to codex."),
       tags: z.array(z.string().min(1)).optional().describe("Optional explicit tags. Defaults to Yoofloe domain tags.")
-    },
-    async ({ title, surface, type, domains, range, markdownBody, provider, tags }) => {
+    }
+  }, ({ title, surface, type, domains, range, markdownBody, provider, tags }) => {
       const markdown = renderAgentNoteMarkdown({
         title: title.trim(),
         type: type.trim(),
@@ -741,14 +728,12 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       };
 
       return toolTextResponse(`Wrote ${filePath}.`, result);
-    }
-  );
+    });
 
-  server.tool(
-    "yoofloe_vault_status",
-    "Inspect the configured Obsidian vault output folder and note conventions without modifying anything.",
-    {},
-    async () => {
+  server.registerTool("yoofloe_vault_status", {
+    description: "Inspect the configured Obsidian vault output folder and note conventions without modifying anything.",
+    inputSchema: {}
+  }, () => {
       const outputDir = resolveOutputDirectory(config, false);
       const folderExists = existsSync(outputDir);
       const structured = {
@@ -767,16 +752,13 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       };
 
       return toolTextResponse(asJsonText(structured), structured);
-    }
-  );
+    });
 
-  server.tool(
-    "yoofloe_test_token",
-    "Verify the configured Yoofloe PAT by calling the data API with a minimal read-only request.",
-    {},
-    async () => {
+  server.registerTool("yoofloe_test_token", {
+    description: "Verify the configured Yoofloe PAT by calling the data API with a minimal read-only request.",
+    inputSchema: {}
+  }, async () => {
       const result = await client.testToken();
       return toolTextResponse(asJsonText(result), result);
-    }
-  );
+    });
 }

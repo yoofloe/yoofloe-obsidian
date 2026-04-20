@@ -1,6 +1,8 @@
 import { Modal, Notice } from "obsidian";
 import type { App } from "obsidian";
 
+type ModalWindow = Window;
+
 class YoofloeFocusModal extends Modal {
   private textareaEl!: HTMLTextAreaElement;
   private settled = false;
@@ -14,18 +16,18 @@ class YoofloeFocusModal extends Modal {
   }
 
   onOpen() {
+    const modalWindow = activeWindow as ModalWindow;
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: this.titleText });
+    contentEl.createEl("div", { cls: "yoofloe-focus-title", text: this.titleText });
     contentEl.createEl("p", {
       text: "Enter the theme, concern, or question you want the deep dive to focus on."
     });
 
     this.textareaEl = contentEl.createEl("textarea");
+    this.textareaEl.addClass("yoofloe-focus-textarea");
     this.textareaEl.rows = 8;
     this.textareaEl.placeholder = "Example: Focus on cash flow pressure, energy dips, and whether my schedule supports recovery.";
-    this.textareaEl.style.width = "100%";
-    this.textareaEl.style.resize = "vertical";
 
     const actions = contentEl.createDiv({ cls: "yoofloe-focus-actions" });
     const cancelButton = actions.createEl("button", { text: "Cancel" });
@@ -36,7 +38,7 @@ class YoofloeFocusModal extends Modal {
     generateButton.addEventListener("click", () => {
       const value = this.textareaEl.value.trim();
       if (!value) {
-        new Notice("Add a focus instruction before generating AI Deep Dive.");
+        new Notice("Add a focus instruction before generating AI deep dive.");
         this.textareaEl.focus();
         return;
       }
@@ -46,7 +48,7 @@ class YoofloeFocusModal extends Modal {
       this.close();
     });
 
-    window.setTimeout(() => this.textareaEl.focus(), 0);
+    modalWindow.setTimeout(() => this.textareaEl.focus(), 0);
   }
 
   onClose() {
@@ -60,7 +62,7 @@ class YoofloeFocusModal extends Modal {
 
 export function requestDeepDiveFocusInstruction(app: App) {
   return new Promise<string | null>((resolve) => {
-    const modal = new YoofloeFocusModal(app, "AI Deep Dive Focus", resolve);
+    const modal = new YoofloeFocusModal(app, "AI deep dive focus", resolve);
     modal.open();
   });
 }

@@ -4,12 +4,6 @@ function yamlString(value: string) {
   return JSON.stringify(value);
 }
 
-function yamlValue(value: unknown): string {
-  if (value === null || value === undefined) return "null";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return yamlString(String(value));
-}
-
 export function renderYoofloeFrontmatter({
   bundle,
   settings,
@@ -53,9 +47,19 @@ export function renderYoofloeFrontmatter({
 
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return "n/a";
-  if (Array.isArray(value)) return value.join(", ");
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      if (typeof item === "object" && item !== null) {
+        return JSON.stringify(item);
+      }
+      return String(item);
+    }).join(", ");
+  }
   if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return String(value);
+  if (typeof value === "symbol") return value.toString();
+  return "n/a";
 }
 
 function renderMetrics(metrics: Record<string, unknown>) {
