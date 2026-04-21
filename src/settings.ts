@@ -8,12 +8,16 @@ import { YOOFLOE_RANGES } from "./types";
 type BadgeTone = "muted" | "accent" | "success" | "warning" | "danger";
 type DesktopWindow = Window & { require?: NodeJS.Require; };
 
+const DEFAULT_MODEL_PLACEHOLDER = "gemini-2.5-flash-lite";
+const DEFAULT_PROJECT_PLACEHOLDER = "my-google-cloud-project";
+const DEFAULT_VERTEX_LOCATION = "us-central1";
+
 function secureStorageWarning(hasSecureStorage: boolean) {
   if (!hasSecureStorage) {
-    return `${SECRET_STORAGE_REQUIRED_MESSAGE} Token and Google OAuth setup are disabled until you upgrade.`;
+    return `${SECRET_STORAGE_REQUIRED_MESSAGE} Token and Google sign-in setup are disabled until you upgrade.`;
   }
 
-  return "Yoofloe stores your PAT, Google OAuth client secret, and Google OAuth refresh token in Obsidian secure storage. Secrets are not written to data.json.";
+  return "Yoofloe stores your PAT, Google sign-in client secret, and Google sign-in refresh token in Obsidian secure storage. Secrets are not written to data.json.";
 }
 
 function createBadge(containerEl: HTMLElement, text: string, tone: BadgeTone) {
@@ -130,9 +134,9 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
   }
 
   if (provider === "gemini-google") {
-    if (!plugin.settings.provider.clientId.trim()) nextSteps.push("Save your Google OAuth client ID.");
-    if (!plugin.secretStore.getGoogleClientSecret()) nextSteps.push("Save your Google OAuth client secret.");
-    if (!plugin.settings.provider.project.trim()) nextSteps.push("Save your Google Cloud project ID.");
+    if (!plugin.settings.provider.clientId.trim()) nextSteps.push("Save your Google sign-in client ID.");
+    if (!plugin.secretStore.getGoogleClientSecret()) nextSteps.push("Save your Google sign-in client secret.");
+    if (!plugin.settings.provider.project.trim()) nextSteps.push("Save your Google cloud project ID.");
     if (!plugin.settings.provider.googleModel.trim()) nextSteps.push("Save your Gemini model.");
     if (googleStatus === "not-connected") nextSteps.push("Click Connect Google.");
     if (googleStatus === "reconnect") nextSteps.push("Reconnect Google to refresh your session.");
@@ -140,9 +144,9 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
   }
 
   if (provider === "gemini-vertex") {
-    if (!plugin.settings.provider.clientId.trim()) nextSteps.push("Save your Google OAuth client ID.");
-    if (!plugin.secretStore.getGoogleClientSecret()) nextSteps.push("Save your Google OAuth client secret.");
-    if (!plugin.settings.provider.project.trim()) nextSteps.push("Save your Google Cloud project ID.");
+    if (!plugin.settings.provider.clientId.trim()) nextSteps.push("Save your Google sign-in client ID.");
+    if (!plugin.secretStore.getGoogleClientSecret()) nextSteps.push("Save your Google sign-in client secret.");
+    if (!plugin.settings.provider.project.trim()) nextSteps.push("Save your Google cloud project ID.");
     if (!plugin.settings.provider.vertexModel.trim()) nextSteps.push("Save your Vertex model.");
     if (googleStatus === "not-connected") nextSteps.push("Click Connect Google.");
     if (googleStatus === "reconnect") nextSteps.push("Reconnect Google to refresh your session.");
@@ -155,9 +159,9 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
 function providerHelpText(provider: YoofloePlugin["settings"]["provider"]["type"]) {
   switch (provider) {
     case "gemini-google":
-      return "Recommended for most users. Sign in with Google in your browser, then use Gemini with your own Google Cloud project.";
+      return "Recommended for most users. Sign in with Google in your browser, then use Gemini with your own Google cloud project.";
     case "gemini-vertex":
-      return "Advanced Google Cloud setup. Use this if you specifically want the Vertex setup and know your project and model.";
+      return "Advanced cloud setup. Use this if you specifically want the cloud setup and know your project and model.";
     case "none":
     default:
       return "Yoofloe is designed to generate insight documents. Configure Gemini to start generating them.";
@@ -283,7 +287,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     );
 
     createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. External access is included with Pro. Generate the token in the Yoofloe web app, review the external access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
-    createInfoCard(tokenSection, "External access notice", "Obsidian plugin mode uses your own Google provider setup directly from Obsidian. Yoofloe provides the PAT-protected bundle and brief, but Yoofloe does not receive your Google OAuth credentials.");
+    createInfoCard(tokenSection, "External access notice", "Obsidian plugin mode uses your own Google provider setup directly from Obsidian. Yoofloe provides the PAT-protected bundle and brief, but Yoofloe does not receive your Google sign-in credentials.");
     createHelpDetails(tokenSection, "Need help finding your token?", [
       "Open the Yoofloe web app and go to Settings.",
       "Use Generate Obsidian Token.",
@@ -392,7 +396,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Optional",
       "Use with external agents",
       { text: "Available", tone: "accent" },
-      "Use an external agent when you want Codex, Claude Code, or another tool to bring its own model while Yoofloe provides grounded context and safe vault writes. Files written into your vault remain local copies after revocation."
+      "Use an external agent when you want Codex, Claude, or another tool to bring its own model while Yoofloe provides grounded context and safe vault writes. Files written into your vault remain local copies after revocation."
     );
 
     createInfoCard(agentDirectSection, "Choose the right path", "Use plugin generation for one-click output inside Obsidian. Use Agent Direct when an external agent should bring its own model and workflow. Obsidian uses a PAT; Yoofloe CLI and CLI MCP use app login.");
@@ -422,16 +426,16 @@ export class YoofloeSettingTab extends PluginSettingTab {
         });
       })
       .addButton((button) => {
-        button.setButtonText("Copy Claude Code prompt").onClick(async () => {
+        button.setButtonText("Copy Claude prompt").onClick(async () => {
           try {
             await copyTextToClipboard(buildClaudeCodePrompt({
               pluginVersion: this.plugin.manifest.version,
               saveFolder: this.plugin.settings.savePath,
               functionsBaseUrl: this.plugin.settings.functionsBaseUrl
             }));
-            new Notice("Claude Code prompt copied.");
+            new Notice("Claude prompt copied.");
           } catch (error) {
-            new Notice(error instanceof Error ? error.message : "Failed to copy the Claude Code prompt.");
+            new Notice(error instanceof Error ? error.message : "Failed to copy the Claude prompt.");
           }
         });
       })
@@ -524,17 +528,17 @@ export class YoofloeSettingTab extends PluginSettingTab {
       let pendingVertexModel = this.plugin.settings.provider.vertexModel;
       let pendingVertexLocation = this.plugin.settings.provider.location;
 
-      createInfoCard(setupSection, "How Google setup works", "You will sign in with Google in your browser. The plugin stores a refresh token in secure storage and uses it only for Gemini or Vertex generation requests. Google calls are made directly from Obsidian with your own Google credentials and project.");
-      createHelpDetails(setupSection, "Need help creating a Google OAuth client?", [
-        "Open Google Cloud Console and select the project you want to use.",
-        "Go to Google Auth Platform, then Clients.",
-        "Create a new client and choose Desktop app.",
-        "Copy the Client ID that ends with .apps.googleusercontent.com and paste it below."
+      createInfoCard(setupSection, "How Google setup works", "You will sign in with Google in your browser. The plugin stores a refresh token in secure storage and uses it only for generation requests. Google calls are made directly from Obsidian with your own Google credentials and project.");
+      createHelpDetails(setupSection, "Need help creating a Google sign-in client?", [
+        "Open the Google cloud console and select the project you want to use.",
+        "Go to Google auth platform, then clients.",
+        "Create a new client and choose desktop app.",
+        "Copy the client ID that ends with .apps.googleusercontent.com and paste it below."
       ]);
 
       new Setting(setupSection)
-        .setName("Google OAuth client ID")
-        .setDesc("Required for Google sign-in. Use a desktop app client ID from your own Google Cloud project.")
+        .setName("Google sign-in client ID")
+        .setDesc("Required for Google sign-in. Use a desktop app client ID from your own Google cloud project.")
         .addText((text) => {
           text
             .setPlaceholder("1234567890-abc123.apps.googleusercontent.com")
@@ -551,12 +555,12 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setDisabled(!hasSecureStorage)
             .onClick(async () => {
               if (!pendingClientId) {
-                new Notice("Google OAuth client ID is required before saving.");
+                new Notice("Google sign-in client ID is required before saving.");
                 return;
               }
 
               if (!pendingClientId.includes(".apps.googleusercontent.com")) {
-                new Notice("Use a desktop app OAuth client ID ending in .apps.googleusercontent.com.");
+                new Notice("Use a desktop app sign-in client ID ending in .apps.googleusercontent.com.");
                 return;
               }
 
@@ -567,20 +571,20 @@ export class YoofloeSettingTab extends PluginSettingTab {
                 this.plugin.googleConnectionStatus = "reconnect";
               }
               await this.plugin.saveSettings();
-                new Notice("Google OAuth client ID saved.");
+                new Notice("Google sign-in client ID saved.");
               this.display();
             });
         });
 
       new Setting(setupSection)
-        .setName("Google OAuth client secret")
+        .setName("Google sign-in client secret")
         .setDesc(hasSecureStorage
           ? `Stored in secure storage. ${describeStoredSecret(googleClientSecret)}`
           : SECRET_STORAGE_REQUIRED_MESSAGE)
         .addText((text) => {
           text
             .setPlaceholder(hasSecureStorage
-              ? "Paste the Desktop App client secret to save or replace"
+              ? "Paste the desktop app client secret to save or replace"
               : "Requires Obsidian 1.11.5+")
             .setValue("")
             .setDisabled(!hasSecureStorage)
@@ -601,7 +605,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               }
 
               if (!pendingClientSecret) {
-                new Notice("Google OAuth client secret is required before saving.");
+                new Notice("Google sign-in client secret is required before saving.");
                 return;
               }
 
@@ -609,22 +613,22 @@ export class YoofloeSettingTab extends PluginSettingTab {
                 this.plugin.secretStore.setGoogleClientSecret(pendingClientSecret);
                 pendingClientSecret = "";
                 await this.plugin.saveSettings();
-                new Notice("Google OAuth client secret saved in secure storage.");
+                new Notice("Google sign-in client secret saved in secure storage.");
                 this.display();
               } catch (error) {
-                new Notice(error instanceof Error ? error.message : "Failed to save the Google OAuth client secret.");
+                new Notice(error instanceof Error ? error.message : "Failed to save the Google sign-in client secret.");
               }
             });
         })
         .addExtraButton((button) => {
           button
             .setIcon("cross")
-            .setTooltip("Clear stored Google OAuth client secret")
+            .setTooltip("Clear stored Google sign-in client secret")
             .setDisabled(!hasSecureStorage || !googleClientSecret)
             .onClick(async () => {
               this.plugin.secretStore.clearGoogleClientSecret();
               await this.plugin.saveSettings();
-              new Notice("Google OAuth client secret cleared from secure storage.");
+              new Notice("Google sign-in client secret cleared from secure storage.");
               this.display();
             });
         });
@@ -642,20 +646,20 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setDisabled(!hasSecureStorage)
             .onClick(async () => {
               if (pendingClientId.trim() !== this.plugin.settings.provider.clientId.trim()) {
-                new Notice("Save your Google OAuth client ID before connecting Google.");
+                new Notice("Save your Google sign-in client ID before connecting Google.");
                 return;
               }
               if (!this.plugin.secretStore.getGoogleClientSecret()) {
-                new Notice("Save your Google OAuth client secret before connecting Google.");
+                new Notice("Save your Google sign-in client secret before connecting Google.");
                 return;
               }
 
-              let noticeMessage = "Google OAuth connected.";
+              let noticeMessage = "Google sign-in connected.";
               try {
                 button.setDisabled(true);
                 await this.plugin.connectGoogle();
               } catch (error) {
-                const message = error instanceof Error ? error.message : "Failed to connect Google OAuth.";
+                const message = error instanceof Error ? error.message : "Failed to connect Google sign-in.";
                 this.plugin.settings.provider.googleLastConnectState = "error";
                 this.plugin.settings.provider.googleLastConnectMessage = message;
                 await this.plugin.saveSettings();
@@ -671,11 +675,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
         })
         .addButton((button) => {
           button
-            .setButtonText("Disconnect Google Account")
+            .setButtonText("Disconnect Google account")
             .setDisabled(!hasSecureStorage || effectiveGoogleStatus === "not-connected")
             .onClick(async () => {
               await this.plugin.disconnectGoogle();
-              new Notice("Google OAuth disconnected.");
+              new Notice("Google sign-in disconnected.");
               this.display();
             });
         });
@@ -692,11 +696,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
       }
 
       new Setting(setupSection)
-        .setName("Google Cloud project ID")
-        .setDesc("Required for Gemini and Vertex AI requests. Use your Google Cloud project ID, not the project number.")
+        .setName("Google cloud project ID")
+        .setDesc("Required for generation requests. Use your Google cloud project ID, not the project number.")
         .addText((text) => {
           text
-            .setPlaceholder("my-google-cloud-project")
+            .setPlaceholder(DEFAULT_PROJECT_PLACEHOLDER)
             .setValue(this.plugin.settings.provider.project)
             .onChange((value) => {
               pendingProject = value.trim();
@@ -708,13 +712,13 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setButtonText("Save project ID")
             .onClick(async () => {
               if (!pendingProject) {
-                new Notice("Google Cloud project ID is required before saving.");
+                new Notice("Google cloud project ID is required before saving.");
                 return;
               }
 
               this.plugin.settings.provider.project = pendingProject;
               await this.plugin.saveSettings();
-              new Notice("Google Cloud project ID saved.");
+              new Notice("Google cloud project ID saved.");
               this.display();
             });
         });
@@ -722,10 +726,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
       if (provider === "gemini-google") {
         new Setting(setupSection)
           .setName("Gemini model")
-          .setDesc("Recommended for most users. Example model: gemini-2.5-flash-lite.")
+          .setDesc("Recommended for most users. The default model is shown below.")
           .addText((text) => {
             text
-              .setPlaceholder("gemini-2.5-flash-lite")
+              .setPlaceholder(DEFAULT_MODEL_PLACEHOLDER)
               .setValue(this.plugin.settings.provider.googleModel)
               .onChange((value) => {
                 pendingGoogleModel = value.trim();
@@ -752,10 +756,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
       if (isVertexProvider) {
         new Setting(setupSection)
           .setName("Vertex model")
-          .setDesc("Use this only if you specifically want the Vertex AI setup. Example model: gemini-2.5-flash-lite.")
+          .setDesc("Use this only if you specifically want the cloud setup. The default model is shown below.")
           .addText((text) => {
             text
-              .setPlaceholder("gemini-2.5-flash-lite")
+              .setPlaceholder(DEFAULT_MODEL_PLACEHOLDER)
               .setValue(this.plugin.settings.provider.vertexModel)
               .onChange((value) => {
                 pendingVertexModel = value.trim();
@@ -767,7 +771,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               .setButtonText("Save model")
               .onClick(async () => {
                 if (!pendingVertexModel) {
-                  new Notice("Add a Vertex AI model before saving.");
+                  new Notice("Add a cloud model before saving.");
                   return;
                 }
 
@@ -779,13 +783,13 @@ export class YoofloeSettingTab extends PluginSettingTab {
           });
 
         const advanced = setupSection.createEl("details", { cls: "yoofloe-help-details" });
-        advanced.createEl("summary", { text: "Advanced Vertex AI settings" });
+        advanced.createEl("summary", { text: "Advanced cloud settings" });
         new Setting(advanced)
           .setName("Vertex location")
-          .setDesc("Most users can keep the default us-central1. Change this only if your Vertex AI deployment uses a different region.")
+          .setDesc("Most users can keep the default location. Change this only if your cloud deployment uses a different region.")
           .addText((text) => {
             text
-              .setPlaceholder("us-central1")
+              .setPlaceholder(DEFAULT_VERTEX_LOCATION)
               .setValue(this.plugin.settings.provider.location)
               .onChange((value) => {
                 pendingVertexLocation = value.trim();
@@ -796,7 +800,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
             button
               .setButtonText("Save location")
               .onClick(async () => {
-                this.plugin.settings.provider.location = pendingVertexLocation || "us-central1";
+                this.plugin.settings.provider.location = pendingVertexLocation || DEFAULT_VERTEX_LOCATION;
                 await this.plugin.saveSettings();
                 new Notice("Vertex location saved.");
                 this.display();
