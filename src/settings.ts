@@ -422,14 +422,14 @@ export class YoofloeSettingTab extends PluginSettingTab {
         });
       })
       .addButton((button) => {
-        button.setButtonText("Copy Claude code prompt").onClick(async () => {
+        button.setButtonText("Copy Claude Code prompt").onClick(async () => {
           try {
             await copyTextToClipboard(buildClaudeCodePrompt({
               pluginVersion: this.plugin.manifest.version,
               saveFolder: this.plugin.settings.savePath,
               functionsBaseUrl: this.plugin.settings.functionsBaseUrl
             }));
-            new Notice("Claude code prompt copied.");
+            new Notice("Claude Code prompt copied.");
           } catch (error) {
             new Notice(error instanceof Error ? error.message : "Failed to copy the Claude Code prompt.");
           }
@@ -533,8 +533,8 @@ export class YoofloeSettingTab extends PluginSettingTab {
       ]);
 
       new Setting(setupSection)
-        .setName("Google OAUTH client ID")
-        .setDesc("Required for Google sign-in. Use a desktop app client ID from your own Google cloud project.")
+        .setName("Google OAuth client ID")
+        .setDesc("Required for Google sign-in. Use a desktop app client ID from your own Google Cloud project.")
         .addText((text) => {
           text
             .setPlaceholder("1234567890-abc123.apps.googleusercontent.com")
@@ -551,12 +551,12 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setDisabled(!hasSecureStorage)
             .onClick(async () => {
               if (!pendingClientId) {
-                new Notice("Google OAUTH client ID is required before saving.");
+                new Notice("Google OAuth client ID is required before saving.");
                 return;
               }
 
               if (!pendingClientId.includes(".apps.googleusercontent.com")) {
-                new Notice("Use a desktop app OAUTH client ID ending in .apps.googleusercontent.com.");
+                new Notice("Use a desktop app OAuth client ID ending in .apps.googleusercontent.com.");
                 return;
               }
 
@@ -567,13 +567,13 @@ export class YoofloeSettingTab extends PluginSettingTab {
                 this.plugin.googleConnectionStatus = "reconnect";
               }
               await this.plugin.saveSettings();
-                new Notice("Google OAUTH client ID saved.");
+                new Notice("Google OAuth client ID saved.");
               this.display();
             });
         });
 
       new Setting(setupSection)
-        .setName("Google OAUTH client secret")
+        .setName("Google OAuth client secret")
         .setDesc(hasSecureStorage
           ? `Stored in secure storage. ${describeStoredSecret(googleClientSecret)}`
           : SECRET_STORAGE_REQUIRED_MESSAGE)
@@ -601,7 +601,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               }
 
               if (!pendingClientSecret) {
-                new Notice("Google OAUTH client secret is required before saving.");
+                new Notice("Google OAuth client secret is required before saving.");
                 return;
               }
 
@@ -609,7 +609,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
                 this.plugin.secretStore.setGoogleClientSecret(pendingClientSecret);
                 pendingClientSecret = "";
                 await this.plugin.saveSettings();
-                new Notice("Google OAUTH client secret saved in secure storage.");
+                new Notice("Google OAuth client secret saved in secure storage.");
                 this.display();
               } catch (error) {
                 new Notice(error instanceof Error ? error.message : "Failed to save the Google OAuth client secret.");
@@ -619,12 +619,12 @@ export class YoofloeSettingTab extends PluginSettingTab {
         .addExtraButton((button) => {
           button
             .setIcon("cross")
-            .setTooltip("Clear stored Google OAUTH client secret")
+            .setTooltip("Clear stored Google OAuth client secret")
             .setDisabled(!hasSecureStorage || !googleClientSecret)
             .onClick(async () => {
               this.plugin.secretStore.clearGoogleClientSecret();
               await this.plugin.saveSettings();
-              new Notice("Google OAUTH client secret cleared from secure storage.");
+              new Notice("Google OAuth client secret cleared from secure storage.");
               this.display();
             });
         });
@@ -642,11 +642,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setDisabled(!hasSecureStorage)
             .onClick(async () => {
               if (pendingClientId.trim() !== this.plugin.settings.provider.clientId.trim()) {
-                new Notice("Save your Google OAUTH client ID before connecting Google.");
+                new Notice("Save your Google OAuth client ID before connecting Google.");
                 return;
               }
               if (!this.plugin.secretStore.getGoogleClientSecret()) {
-                new Notice("Save your Google OAUTH client secret before connecting Google.");
+                new Notice("Save your Google OAuth client secret before connecting Google.");
                 return;
               }
 
@@ -671,11 +671,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
         })
         .addButton((button) => {
           button
-            .setButtonText("Disconnect Google account")
+            .setButtonText("Disconnect Google Account")
             .setDisabled(!hasSecureStorage || effectiveGoogleStatus === "not-connected")
             .onClick(async () => {
               await this.plugin.disconnectGoogle();
-              new Notice("Google OAUTH disconnected.");
+              new Notice("Google OAuth disconnected.");
               this.display();
             });
         });
@@ -692,11 +692,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
       }
 
       new Setting(setupSection)
-        .setName("Google cloud project ID")
-        .setDesc("Required for Gemini and vertex requests. Use your Google cloud project ID, not the project number.")
+        .setName("Google Cloud project ID")
+        .setDesc("Required for Gemini and Vertex AI requests. Use your Google Cloud project ID, not the project number.")
         .addText((text) => {
           text
-            .setPlaceholder("My-Google-cloud-project")
+            .setPlaceholder("my-google-cloud-project")
             .setValue(this.plugin.settings.provider.project)
             .onChange((value) => {
               pendingProject = value.trim();
@@ -708,13 +708,13 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setButtonText("Save project ID")
             .onClick(async () => {
               if (!pendingProject) {
-                new Notice("Google cloud project ID is required before saving.");
+                new Notice("Google Cloud project ID is required before saving.");
                 return;
               }
 
               this.plugin.settings.provider.project = pendingProject;
               await this.plugin.saveSettings();
-              new Notice("Google cloud project ID saved.");
+              new Notice("Google Cloud project ID saved.");
               this.display();
             });
         });
@@ -722,10 +722,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
       if (provider === "gemini-google") {
         new Setting(setupSection)
           .setName("Gemini model")
-          .setDesc("Recommended for most users. Example model: Gemini-2.5-flash-lite.")
+          .setDesc("Recommended for most users. Example model: gemini-2.5-flash-lite.")
           .addText((text) => {
             text
-              .setPlaceholder("Gemini-2.5-flash-lite")
+              .setPlaceholder("gemini-2.5-flash-lite")
               .setValue(this.plugin.settings.provider.googleModel)
               .onChange((value) => {
                 pendingGoogleModel = value.trim();
@@ -752,10 +752,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
       if (isVertexProvider) {
         new Setting(setupSection)
           .setName("Vertex model")
-          .setDesc("Use this only if you specifically want the vertex setup. Example model: Gemini-2.5-flash-lite.")
+          .setDesc("Use this only if you specifically want the Vertex AI setup. Example model: gemini-2.5-flash-lite.")
           .addText((text) => {
             text
-              .setPlaceholder("Gemini-2.5-flash-lite")
+              .setPlaceholder("gemini-2.5-flash-lite")
               .setValue(this.plugin.settings.provider.vertexModel)
               .onChange((value) => {
                 pendingVertexModel = value.trim();
@@ -767,7 +767,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               .setButtonText("Save model")
               .onClick(async () => {
                 if (!pendingVertexModel) {
-                  new Notice("Add a vertex model before saving.");
+                  new Notice("Add a Vertex AI model before saving.");
                   return;
                 }
 
@@ -779,13 +779,13 @@ export class YoofloeSettingTab extends PluginSettingTab {
           });
 
         const advanced = setupSection.createEl("details", { cls: "yoofloe-help-details" });
-        advanced.createEl("summary", { text: "Advanced vertex settings" });
+        advanced.createEl("summary", { text: "Advanced Vertex AI settings" });
         new Setting(advanced)
           .setName("Vertex location")
-          .setDesc("Most users can keep the default us-central1. Change this only if your vertex deployment uses a different region.")
+          .setDesc("Most users can keep the default us-central1. Change this only if your Vertex AI deployment uses a different region.")
           .addText((text) => {
             text
-              .setPlaceholder("Us-central1")
+              .setPlaceholder("us-central1")
               .setValue(this.plugin.settings.provider.location)
               .onChange((value) => {
                 pendingVertexLocation = value.trim();
