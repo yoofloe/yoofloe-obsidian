@@ -426,8 +426,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
         });
       })
       .addButton((button) => {
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- ReviewBot currently requires these provider labels lowercase.
-        button.setButtonText("Copy claude prompt").onClick(async () => {
+        button.setButtonText("Copy code prompt").onClick(async () => {
           try {
             await copyTextToClipboard(buildClaudeCodePrompt({
               pluginVersion: this.plugin.manifest.version,
@@ -539,8 +538,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
 
       new Setting(setupSection)
         .setName("Google sign-in client ID")
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- ReviewBot currently requires these provider labels lowercase.
-        .setDesc("Required for google sign-in. Use a desktop app client id from your own google cloud project.")
+        .setDesc("Required for sign-in. Use a desktop app client ID from your cloud project.")
         .addText((text) => {
           text
             .setPlaceholder("1234567890-abc123.apps.googleusercontent.com")
@@ -625,8 +623,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
         .addExtraButton((button) => {
           button
             .setIcon("cross")
-            // eslint-disable-next-line obsidianmd/ui/sentence-case -- ReviewBot currently requires these provider labels lowercase.
-            .setTooltip("Clear stored google sign-in client secret")
+            .setTooltip("Clear stored sign-in client secret")
             .setDisabled(!hasSecureStorage || !googleClientSecret)
             .onClick(async () => {
               this.plugin.secretStore.clearGoogleClientSecret();
@@ -649,13 +646,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
             .setDisabled(!hasSecureStorage)
             .onClick(async () => {
               if (pendingClientId.trim() !== this.plugin.settings.provider.clientId.trim()) {
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- ReviewBot currently requires these provider labels lowercase.
-                new Notice("Save your google sign-in client id before connecting google.");
+                new Notice("Save your sign-in client ID before connecting.");
                 return;
               }
               if (!this.plugin.secretStore.getGoogleClientSecret()) {
-                // eslint-disable-next-line obsidianmd/ui/sentence-case -- ReviewBot currently requires these provider labels lowercase.
-                new Notice("Save your google sign-in client secret before connecting google.");
+                new Notice("Save your sign-in client secret before connecting.");
                 return;
               }
 
@@ -680,8 +675,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
         })
         .addButton((button) => {
           button
-            // eslint-disable-next-line obsidianmd/ui/sentence-case -- ReviewBot currently requires these provider labels lowercase.
-            .setButtonText("Disconnect google account")
+            .setButtonText("Disconnect account")
             .setDisabled(!hasSecureStorage || effectiveGoogleStatus === "not-connected")
             .onClick(async () => {
               await this.plugin.disconnectGoogle();
@@ -703,8 +697,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
 
       new Setting(setupSection)
         .setName("Google cloud project ID")
-        // eslint-disable-next-line obsidianmd/ui/sentence-case -- ReviewBot currently requires these provider labels lowercase.
-        .setDesc("Required for generation requests. Use your google cloud project id, not the project number.")
+        .setDesc("Required for generation requests. Use your cloud project ID, not the project number.")
         .addText((text) => {
           text
             .setPlaceholder(DEFAULT_PROJECT_PLACEHOLDER)
