@@ -49,6 +49,23 @@ export interface YoofloeRateLimit {
   windowSeconds: number;
 }
 
+export interface YoofloeExternalAccessSecurityContract {
+  schemaVersion: 2;
+  scope: YoofloeScope;
+  coupleScopeEnabled: false;
+  encryptionMode: "mixed_legacy_v1_and_zke_v2";
+  zkeAtRestMode: "zke_client_decrypt";
+  legacyServerDerivedKeyStatus: "migration_only";
+  requiresLocalKeyForV2: true;
+  canReadCiphertext: true;
+  canReadZkePlaintext: false;
+  plaintextExportConsentRequired: true;
+  patCanDecrypt: false;
+  mcpConfigCanDecrypt: false;
+  rawKeyStorageAllowed: false;
+  serverCanDecryptV2: false;
+}
+
 export interface YoofloePluginSettings {
   apiToken: string;
   functionsBaseUrl: string;
@@ -70,6 +87,7 @@ export interface YoofloeBundle {
     range: YoofloeRange;
     domains: YoofloeDomain[];
     fidelity: string;
+    security?: YoofloeExternalAccessSecurityContract;
   };
   overview: Record<string, unknown>;
   domains: Record<string, { summary: Record<string, unknown>; evidence: Record<string, unknown>; raw?: Record<string, unknown> }>;

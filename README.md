@@ -139,6 +139,8 @@ See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, suppor
 - Google access tokens are kept in memory only and refreshed from secure storage when needed.
 - Google OAuth credentials are used only for Gemini requests. They are not sent to Yoofloe backend.
 - External providers may process content under their own terms and privacy practices when you choose to use them.
+- PATs and `.mcp.json` entries do not contain Yoofloe raw encryption keys and cannot decrypt v2 zero-knowledge content by themselves.
+- External MCP users can call `yoofloe_mcp_session_status` before fetching data to inspect the personal-only scope and local-key readiness contract.
 
 ## Data Flow
 

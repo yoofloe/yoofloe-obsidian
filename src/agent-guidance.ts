@@ -122,6 +122,7 @@ export function buildAgentDirectGuidePayload(options: AgentGuidanceOptions) {
       ]
     },
     preferredTools: [
+      "yoofloe_mcp_session_status",
       "yoofloe_agent_direct_guide",
       "yoofloe_ai_document_context",
       "yoofloe_write_ai_document"
@@ -172,6 +173,9 @@ export function buildAgentSetupNoteMarkdown(options: AgentGuidanceOptions) {
     "",
     "- Antigravity/Gemini-style MCP configs should use an absolute path to `mcp-server.js`.",
     "- `YOOFLOE_VAULT_PATH` must point to your vault root, not the Yoofloe subfolder inside it.",
+    "- Treat `YOOFLOE_PAT` as a local secret. Do not commit `.mcp.json`, shell profiles, logs, or prompts containing a real PAT.",
+    "- Do not place raw Yoofloe encryption keys or recovery keys in `.mcp.json`; PAT access alone cannot decrypt v2 zero-knowledge content.",
+    "- Run `yoofloe_mcp_session_status` before fetching data when you need the current scope and ZK readiness contract.",
     "- Business playbook context may include planning, success, setback, and learning categories. Treat planning as the idea-and-plan lane, and summarize it in terms of hypothesis, success signals, first steps, and risks.",
     "- `deep-dive` requires a non-empty `focusInstruction`.",
     "- Existing files are never overwritten; collisions use numeric suffixes.",
@@ -198,7 +202,7 @@ export function buildAgentSetupNoteMarkdown(options: AgentGuidanceOptions) {
     "",
     "## MCP Config Snippet",
     "",
-    "Use an absolute `mcp-server.js` path for Antigravity/Gemini-style clients. Relative `mcp-server.js` only works when the MCP client starts inside this repository root.",
+    "Use an absolute `mcp-server.js` path for Antigravity/Gemini-style clients. Relative `mcp-server.js` only works when the MCP client starts inside this repository root. The PAT value below is a placeholder; do not commit a real PAT.",
     "",
     "```json",
     guide.examplePrompts.mcpConfig,

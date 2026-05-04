@@ -112,6 +112,8 @@ npm run build:mcp
 ### Codex / project `.mcp.json`
 
 Use a relative `mcp-server.js` path only when the MCP client launches from the extracted wrapper folder or this repository root.
+The PAT values below are placeholders. Do not commit a real `.mcp.json`, shell profile, log, or prompt that contains `YOOFLOE_PAT`.
+Do not store raw Yoofloe encryption keys or recovery keys in `.mcp.json`; PAT access alone cannot decrypt v2 zero-knowledge content.
 
 ```json
 {
@@ -140,9 +142,12 @@ If Claude Code supports environment variables in your setup, provide at least:
 - `YOOFLOE_PAT`
 - `YOOFLOE_VAULT_PATH`
 
+Prefer environment-variable or secret-manager injection over copying a real PAT into reusable project config.
+
 ### Antigravity / Gemini-style `settings.json`
 
 Use an absolute `mcp-server.js` path here. Antigravity does not start inside the plugin repository or the extracted wrapper folder by default, so a bare `mcp-server.js` path will fail.
+The inline PAT below is a placeholder only.
 
 ```json
 {
@@ -204,6 +209,15 @@ tags:
   - yoofloe
   - yoofloe/finance
 ```
+
+## Security status tool
+
+Before fetching Yoofloe data, call `yoofloe_mcp_session_status` to inspect the current wrapper contract. It reports:
+
+- personal-only scope while couple scope remains disabled for external clients;
+- whether a PAT is configured, without revealing the PAT value;
+- that v2 zero-knowledge plaintext requires local key unlock support and cannot be decrypted by PAT or `.mcp.json` alone; and
+- that Markdown files already written into the vault remain local copies after PAT revocation or Yoofloe account deletion.
 
 ## Verification
 

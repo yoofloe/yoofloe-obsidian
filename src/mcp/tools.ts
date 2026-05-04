@@ -65,6 +65,47 @@ function asJsonText(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function buildExternalAccessSecurityContract() {
+  return {
+    schemaVersion: 2,
+    scope: "personal" as const,
+    coupleScopeEnabled: false as const,
+    encryptionMode: "mixed_legacy_v1_and_zke_v2" as const,
+    zkeAtRestMode: "zke_client_decrypt" as const,
+    legacyServerDerivedKeyStatus: "migration_only" as const,
+    requiresLocalKeyForV2: true as const,
+    canReadCiphertext: true as const,
+    canReadZkePlaintext: false as const,
+    plaintextExportConsentRequired: true as const,
+    patCanDecrypt: false as const,
+    mcpConfigCanDecrypt: false as const,
+    rawKeyStorageAllowed: false as const,
+    serverCanDecryptV2: false as const
+  };
+}
+
+function buildMcpSessionStatus(config: YoofloeMcpConfig) {
+  return {
+    mode: "obsidian_mcp",
+    auth: {
+      patConfigured: Boolean(config.pat),
+      patCanDecrypt: false,
+      entitlementCheck: "use yoofloe_test_token"
+    },
+    scope: {
+      current: "personal",
+      coupleScopeEnabled: false,
+      coupleScopeReason: "temporarily_disabled_until_shared_encryption_is_fully_externalized"
+    },
+    security: buildExternalAccessSecurityContract(),
+    vault: {
+      saveFolder: config.saveFolder,
+      dateFormat: config.dateFormat,
+      localFilesRemainAfterRevocation: true
+    }
+  };
+}
+
 function yamlString(value: string) {
   return JSON.stringify(value);
 }
@@ -517,6 +558,14 @@ export function readMcpConfig(env: NodeJS.ProcessEnv): YoofloeMcpConfig {
 
 export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig) {
   const client = new YoofloeMcpHttpClient(config);
+
+  server.registerTool("yoofloe_mcp_session_status", {
+    description: "Inspect the Obsidian MCP wrapper security, scope, local vault, and ZK readiness contract without fetching Yoofloe data.",
+    inputSchema: {}
+  }, () => {
+      const status = buildMcpSessionStatus(config);
+      return toolTextResponse(asJsonText(status), status);
+    });
 
   server.registerTool("yoofloe_agent_direct_guide", {
     description: "Return the current Agent Direct and MCP workflow contract for external AI agents without fetching data or writing files.",
