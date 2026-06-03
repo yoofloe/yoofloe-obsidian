@@ -33,7 +33,7 @@ type ReportPreset = {
 
 const DOMAIN_PRESETS: Record<YoofloeDomain, ReportPreset> = {
   schedule: { title: "Schedule Overview", type: "schedule-overview", surface: "schedule-overview" },
-  life: { title: "Life Overview", type: "life-overview", surface: "life-overview" },
+  life: { title: "Life Activity & Habit Overview", type: "life-activity-habit-overview", surface: "life-activity-habit-overview" },
   wellness: { title: "Wellness Report", type: "wellness-report", surface: "wellness-report" },
   finance: { title: "Finance Report", type: "finance-report", surface: "finance-report" },
   business: { title: "Business Overview", type: "business-overview", surface: "business-overview" },

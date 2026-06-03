@@ -176,6 +176,7 @@ export function buildAgentSetupNoteMarkdown(options: AgentGuidanceOptions) {
     "- Treat `YOOFLOE_PAT` as a local secret. Do not commit `.mcp.json`, shell profiles, logs, or prompts containing a real PAT.",
     "- Do not place raw Yoofloe encryption keys or recovery keys in `.mcp.json`; PAT access alone cannot decrypt v2 zero-knowledge content.",
     "- Run `yoofloe_mcp_session_status` before fetching data when you need the current scope and ZK readiness contract.",
+    "- The `life` domain includes Activity Log entries, Habit Tracker definitions, habit date check-ins, goals, and study evidence.",
     "- Business playbook context may include planning, success, setback, and learning categories. Treat planning as the idea-and-plan lane, and summarize it in terms of hypothesis, success signals, first steps, and risks.",
     "- `deep-dive` requires a non-empty `focusInstruction`.",
     "- Existing files are never overwritten; collisions use numeric suffixes.",

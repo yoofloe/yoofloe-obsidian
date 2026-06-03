@@ -149,6 +149,8 @@ See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, suppor
 3. The plugin optionally fetches a deterministic gardener brief to compress signals.
 4. AI document commands build prompts locally from the bundle and gardener brief, call your selected Gemini setup with `requestUrl`, then save the result into your vault.
 
+The `life` domain includes Activity Log entries, Habit Tracker definitions, habit date check-ins, goals, and study evidence.
+
 ## Domains Contacted
 
 - `https://hhiyerojemcujzcmlzao.supabase.co/functions/v1/obsidian-data-api`
