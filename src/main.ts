@@ -39,9 +39,8 @@ const SUPPORTED_PLUGIN_PROVIDERS = new Set<YoofloePluginSettings["provider"]["ty
   "gemini-vertex"
 ]);
 
-const OBSIDIAN_ACCESS_UNAVAILABLE_NOTICE = "Yoofloe for Obsidian is included with Free and Pro accounts. Check your Yoofloe token or try again later.";
-const OBSIDIAN_ACCESS_UNAVAILABLE_SETTINGS_MESSAGE = "Yoofloe for Obsidian is included with Free and Pro accounts. Generate a fresh Obsidian token in Yoofloe Settings if verification fails.";
-type DesktopWindow = Window & { require?: NodeJS.Require; };
+const OBSIDIAN_ACCESS_UNAVAILABLE_NOTICE = "Yoofloe for Obsidian is included with free and pro accounts. Check your Yoofloe token or try again later.";
+const OBSIDIAN_ACCESS_UNAVAILABLE_SETTINGS_MESSAGE = "Yoofloe for Obsidian is included with free and pro accounts. Generate a fresh Obsidian token in Yoofloe settings if verification fails.";
 
 function isBlockedEntitlement(entitlement: YoofloeEntitlement | null | undefined) {
   return entitlement?.allowed === false;
@@ -67,19 +66,6 @@ function entitlementFromApiError(error: YoofloeApiError) {
 
 function isPaywallMessage(message: string) {
   return /pro|plan|subscription|upgrade|not entitled|entitlement|does not currently include obsidian access|obsidian access requires/i.test(message);
-}
-
-function requireDesktopModule<T>(specifier: string): T {
-  const desktopWindow = activeWindow as DesktopWindow;
-  const runtimeRequire = typeof require === "function"
-    ? require
-    : desktopWindow.require;
-
-  if (!runtimeRequire) {
-    throw new Error("This action is available only in the desktop Obsidian runtime.");
-  }
-
-  return runtimeRequire(specifier) as T;
 }
 
 type AiDocumentCommandDefinition = {

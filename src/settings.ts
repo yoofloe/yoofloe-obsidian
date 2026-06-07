@@ -228,7 +228,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Setup").setHeading();
     containerEl.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Yoofloe for Obsidian is included with Free and Pro accounts. In Obsidian, you connect with a Yoofloe personal access token, then use your own Google provider setup for AI generation. Yoofloe provides grounded context and access control, but not the model."
+      text: "Yoofloe for Obsidian is included with free and pro accounts. In Obsidian, you connect with a personal access token from your account, then use your own Google provider setup for AI generation. Yoofloe provides grounded context and access control, but not the model."
     });
 
     containerEl.createEl("div", {
@@ -261,7 +261,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It exposes personal-only data by design."
     );
 
-    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. Yoofloe for Obsidian is included with Free and Pro accounts. Generate the token in the Yoofloe web app, review the external access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
+    createInfoCard(tokenSection, "What you need", "A personal access token with the pat_yfl_ prefix. Yoofloe for Obsidian is included with free and pro accounts. Generate the token in the Yoofloe web app, review the external access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
     createInfoCard(tokenSection, "External access notice", "Obsidian plugin mode uses your own Google provider setup directly from Obsidian. Yoofloe provides the PAT-protected bundle and brief, but Yoofloe does not receive your Google sign-in credentials.");
     createHelpDetails(tokenSection, "Need help finding your token?", [
       "Open the Yoofloe web app and go to Settings.",
