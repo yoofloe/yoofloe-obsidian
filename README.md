@@ -2,28 +2,25 @@
 
 Yoofloe turns your Yoofloe data into grounded AI documents inside Obsidian.
 
-Public install guides, release links, and cross-product setup notes also live in the Yoofloe docs hub:
+Public install guides and setup notes also live in the Yoofloe docs hub:
 
 - `https://www.yoofloe.com/docs/external-tools`
 
-## Beta install
+## Install
 
-Before Community Plugin submission, install the beta from this public repository instead of the Community Plugin store.
+### Community Plugin Store
 
-BRAT path:
+1. Open `Settings -> Community plugins -> Browse` in Obsidian.
+2. Search for `Yoofloe`.
+3. Install and enable the `Yoofloe` plugin.
 
-1. Install the BRAT plugin in Obsidian.
-2. Open `BRAT -> Add a beta plugin`.
-3. Paste `https://github.com/yoofloe/yoofloe-obsidian`.
-4. Install the latest beta release from that repository.
-
-Manual path:
+### Manual fallback
 
 1. Download the latest release assets from `https://github.com/yoofloe/yoofloe-obsidian/releases`.
 2. Copy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/yoofloe/`.
 3. Enable `Yoofloe` in Obsidian Community Plugins.
 
-## Community Plugin submission notes
+## Review notes
 
 For Obsidian Community Plugin review, the submission target is the `yoofloe` plugin itself:
 
@@ -31,20 +28,18 @@ For Obsidian Community Plugin review, the submission target is the `yoofloe` plu
 - `manifest.json`
 - `styles.css`
 
-The packaged `yoofloe-obsidian-mcp-wrapper.zip` release asset is a companion download for external MCP clients. It is not the Community Plugin payload.
-
 Reviewer-facing disclosures:
 
 - desktop-only plugin
 - requires a Yoofloe `pat_yfl_...` token
-- requires Yoofloe Pro / External AI Access
+- available to Yoofloe Free and Pro accounts
 - calls Yoofloe API and Google Gemini endpoints
 - writes Markdown files locally into the vault
 - uses direct-provider Gemini calls with the user's own Google credentials
 
 ## Quick start
 
-1. Install the plugin from BRAT or copy the latest release files into `.obsidian/plugins/yoofloe/`.
+1. Install the plugin from the Community Plugin Store or copy the latest release files into `.obsidian/plugins/yoofloe/`.
 2. Open `Settings -> Yoofloe`.
 3. Save your `pat_yfl_...` token and click `Verify token`.
 4. Choose a Gemini setup and save each required field in `Settings -> Yoofloe`.
@@ -54,6 +49,14 @@ Recommended first AI choice:
 
 - `Gemini (Google AI)` for most users
 - `Gemini (Vertex AI)` only if you specifically want your own Vertex setup
+
+## Yoofloe access
+
+Yoofloe for Obsidian is included with Free and Pro accounts.
+
+The plugin uses a Yoofloe Personal Access Token to fetch read-only, personal-only Yoofloe context. The token does not include couple/shared exports and cannot decrypt v2 zero-knowledge ciphertext by itself.
+
+Yoofloe does not provide the AI model for plugin generation. Obsidian calls your selected Google Gemini setup directly with your own Google credentials and project.
 
 ## Choose your AI setup
 
@@ -88,47 +91,7 @@ Recommended first AI choice:
 - `Reconnect Google`
   - Your Google session expired or was revoked; connect again from Settings
 
-## Modes
-
-- Plugin Mode: generate grounded AI documents inside Obsidian with Gemini.
-- Agent Direct Mode: let Codex, Claude Code, Antigravity, or another filesystem-capable agent fetch Yoofloe context and write AI documents directly into your vault.
-- MCP Wrapper Mode: run the standalone stdio MCP server from this repo so external coding agents can fetch Yoofloe AI context and write notes only into your configured vault folder.
-
-Agent Direct Mode does not call the plugin runtime directly. It uses the same Yoofloe PAT and API contract, then writes files into your vault so Obsidian picks them up automatically.
-
-## External AI Access
-
-Yoofloe treats external AI surfaces as one Pro feature:
-
-- Yoofloe Obsidian Plugin
-- Yoofloe Obsidian MCP wrapper
-- Yoofloe CLI
-- Yoofloe CLI MCP
-
-Auth stays product-specific:
-
-- Obsidian Plugin and Obsidian MCP wrapper use a `pat_yfl_...` token
-- Yoofloe CLI and Yoofloe CLI MCP use Yoofloe app login
-
-Role split:
-
-- Plugin Gemini mode is **user-direct**. Obsidian calls Google Gemini or Vertex with your own Google credentials and project.
-- MCP Wrapper and Agent Direct are **agent-direct**. Your connected external agent brings its own model/provider path.
-- Yoofloe provides auth, entitlement, grounded context, and bounded local writes. Yoofloe does not provide the model on these external surfaces.
-- Business playbook context may include `planning`, `success`, `setback`, and `learning` categories. Treat `planning` as an idea/plan lane with a hypothesis, success signals, first steps, and risks, rather than a completed outcome.
-
-Read the public notice:
-
-- `https://www.yoofloe.com/external-ai-access`
-
-Operator validation for cross-product entitlement changes should follow the shared runbook in the Yoofloe app repo:
-
-- `docs/ai/external-access-smoke-test.md`
-
-See [docs/agent-direct.md](docs/agent-direct.md) for the direct agent workflow, curl examples, and recommended file conventions.
-See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, supported tools, packaged zip install path, and Windows/PowerShell examples.
-
-## Security & Privacy
+## Security & privacy
 
 - Vault content is not uploaded to Yoofloe.
 - All network traffic uses Obsidian `requestUrl`.
@@ -139,10 +102,8 @@ See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, suppor
 - Google access tokens are kept in memory only and refreshed from secure storage when needed.
 - Google OAuth credentials are used only for Gemini requests. They are not sent to Yoofloe backend.
 - External providers may process content under their own terms and privacy practices when you choose to use them.
-- PATs and `.mcp.json` entries do not contain Yoofloe raw encryption keys and cannot decrypt v2 zero-knowledge content by themselves.
-- External MCP users can call `yoofloe_mcp_session_status` before fetching data to inspect the personal-only scope and local-key readiness contract.
 
-## Data Flow
+## Data flow
 
 1. Obsidian sends a read-only request to Yoofloe Edge Functions.
 2. Yoofloe returns a deterministic bundle for the selected domains and range.
@@ -151,7 +112,7 @@ See [docs/mcp-wrapper.md](docs/mcp-wrapper.md) for the MCP wrapper setup, suppor
 
 The `life` domain includes Activity Log entries, Habit Tracker definitions, habit date check-ins, goals, and study evidence.
 
-## Domains Contacted
+## Domains contacted
 
 - `https://hhiyerojemcujzcmlzao.supabase.co/functions/v1/obsidian-data-api`
 - `https://hhiyerojemcujzcmlzao.supabase.co/functions/v1/obsidian-gardener-api`
@@ -159,28 +120,14 @@ The `life` domain includes Activity Log entries, Habit Tracker definitions, habi
 - `https://oauth2.googleapis.com` for Google OAuth token exchange and refresh
 - `https://generativelanguage.googleapis.com` when you use `Gemini (Google AI)`
 - `https://*.aiplatform.googleapis.com` when you use `Gemini (Vertex AI)`
-## Token Storage
+
+## Token storage
 
 - Tokens are generated in Yoofloe web app Settings.
 - Tokens use the `pat_yfl_` prefix.
 - Tokens expire after 90 days unless regenerated sooner.
 
-## Pro Requirement
-
-Yoofloe External AI Access requires an active Pro-eligible Yoofloe account.
-
-## Wrapper download
-
-The standalone Yoofloe Obsidian MCP Wrapper is published as a packaged release asset:
-
-- `https://github.com/yoofloe/yoofloe-obsidian/releases/latest/download/yoofloe-obsidian-mcp-wrapper.zip`
-
-That zip contains:
-
-- `mcp-server.js`
-- `README-mcp-wrapper.txt`
-
-## AI Providers
+## AI providers
 
 Plugin AI providers currently support:
 
@@ -203,16 +150,7 @@ Google OAuth scopes:
 
 Yoofloe uses these scopes only for Gemini and Vertex generation requests. The plugin does not use them for unrelated Google Cloud APIs.
 
-These providers are used only by the plugin AI commands:
-
-- `AI Insight Brief`
-- `AI Decision Memo`
-- `AI Action Plan`
-- `AI Deep Dive`
-
-The MCP wrapper does not call AI providers. Agent Direct Mode also does not reuse plugin secrets.
-
-## AI Document Commands
+## AI document commands
 
 - `AI Insight Brief`
 - `AI Decision Memo`
@@ -220,27 +158,3 @@ The MCP wrapper does not call AI providers. Agent Direct Mode also does not reus
 - `AI Deep Dive`
 
 All four commands pull the full Yoofloe domain bundle by default. `AI Deep Dive` additionally asks for a focus instruction before generation.
-
-## Agent Direct In The Plugin
-
-Settings now includes a `Use With AI Agents` section with:
-
-- `Copy Codex Prompt`
-- `Copy Claude Code Prompt`
-- `Copy MCP Config`
-- `Open Agent Direct Guide`
-- `Write Agent Setup Note`
-
-The command palette also includes `Write Agent Setup Note` for generating a shareable setup note inside your configured Yoofloe folder.
-
-## Agent MCP Workflow
-
-If you want Codex or another coding agent to create a grounded Yoofloe AI document without using plugin Gemini setup:
-
-1. Run the MCP wrapper from this repo.
-2. Optionally call `yoofloe_agent_direct_guide` to fetch the current workflow contract and examples.
-3. Call `yoofloe_ai_document_context` to fetch the canonical bundle, optional gardener brief, and the document-specific prompt scaffold.
-4. Let the agent use its own model path to draft the final Markdown.
-5. Call `yoofloe_write_ai_document` to save the final Markdown into your vault under `Yoofloe/`.
-
-Low-level tools such as `yoofloe_data_bundle` and `yoofloe_write_note` remain available for advanced flows, but the AI-document workflow above is the recommended path.

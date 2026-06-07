@@ -1,5 +1,4 @@
 import { Notice, Plugin, normalizePath } from "obsidian";
-import { AGENT_DIRECT_GUIDE_URL, buildAgentSetupNoteMarkdown } from "./agent-guidance";
 import { runAiDocumentAnalysis } from "./ai/byok-client";
 import { getAiDocumentDefinition } from "./ai/prompts";
 import { YoofloeApiError, YoofloeClient } from "./api/yoofloe-client";
@@ -40,8 +39,8 @@ const SUPPORTED_PLUGIN_PROVIDERS = new Set<YoofloePluginSettings["provider"]["ty
   "gemini-vertex"
 ]);
 
-const PRO_REQUIRED_NOTICE = "Yoofloe External AI Access requires an active Pro plan. This Obsidian plugin uses a Yoofloe PAT, while Yoofloe CLI and CLI MCP use app login.";
-const PRO_REQUIRED_SETTINGS_MESSAGE = "This Yoofloe account does not currently include External AI Access. Upgrade to Pro to keep using the Obsidian plugin, CLI, and MCP surfaces.";
+const OBSIDIAN_ACCESS_UNAVAILABLE_NOTICE = "Yoofloe for Obsidian is included with Free and Pro accounts. Check your Yoofloe token or try again later.";
+const OBSIDIAN_ACCESS_UNAVAILABLE_SETTINGS_MESSAGE = "Yoofloe for Obsidian is included with Free and Pro accounts. Generate a fresh Obsidian token in Yoofloe Settings if verification fails.";
 type DesktopWindow = Window & { require?: NodeJS.Require; };
 
 function isBlockedEntitlement(entitlement: YoofloeEntitlement | null | undefined) {
@@ -123,16 +122,16 @@ async function ensureFolderPath(plugin: YoofloePlugin, path: string) {
 async function uniqueFilePath(plugin: YoofloePlugin, surface: string) {
   const folder = normalizePath(plugin.settings.savePath);
   const stamp = formatDate(new Date(), plugin.settings.dateFormat);
-  let attempt = 1;
 
-  while (true) {
+  for (let attempt = 1; attempt < 1000; attempt += 1) {
     const suffix = attempt === 1 ? "" : `__${attempt}`;
     const candidate = normalizePath(`${folder}/${stamp}__${surface}${suffix}.md`);
     if (!(await plugin.app.vault.adapter.exists(candidate))) {
       return candidate;
     }
-    attempt += 1;
   }
+
+  throw new Error("Unable to allocate a unique Yoofloe note path after 999 attempts.");
 }
 
 export default class YoofloePlugin extends Plugin {
@@ -348,11 +347,11 @@ export default class YoofloePlugin extends Plugin {
   }
 
   getEntitlementBannerMessage() {
-    return isBlockedEntitlement(this.latestEntitlement) ? PRO_REQUIRED_SETTINGS_MESSAGE : "";
+    return isBlockedEntitlement(this.latestEntitlement) ? OBSIDIAN_ACCESS_UNAVAILABLE_SETTINGS_MESSAGE : "";
   }
 
   getEntitlementNoticeMessage() {
-    return PRO_REQUIRED_NOTICE;
+    return OBSIDIAN_ACCESS_UNAVAILABLE_NOTICE;
   }
 
   getUserFacingErrorMessage(error: unknown, fallbackMessage: string) {
@@ -372,7 +371,7 @@ export default class YoofloePlugin extends Plugin {
   private ensureEntitlement(entitlement: YoofloeEntitlement | null | undefined) {
     this.updateEntitlement(entitlement);
     if (isBlockedEntitlement(entitlement)) {
-      throw new Error(PRO_REQUIRED_NOTICE);
+      throw new Error(OBSIDIAN_ACCESS_UNAVAILABLE_NOTICE);
     }
   }
 
@@ -389,7 +388,7 @@ export default class YoofloePlugin extends Plugin {
             status: "paywall"
           };
         }
-        return PRO_REQUIRED_NOTICE;
+        return OBSIDIAN_ACCESS_UNAVAILABLE_NOTICE;
       }
       return error.message;
     }
@@ -402,7 +401,7 @@ export default class YoofloePlugin extends Plugin {
           source: "plugin",
           status: "paywall"
         };
-        return PRO_REQUIRED_NOTICE;
+        return OBSIDIAN_ACCESS_UNAVAILABLE_NOTICE;
       }
       return error.message;
     }
@@ -458,26 +457,6 @@ export default class YoofloePlugin extends Plugin {
         }
       });
     }
-
-    this.addCommand({
-      id: "write-agent-setup-note",
-      name: "Write agent setup note",
-      callback: () => {
-        void (async () => {
-          try {
-            this.clearStatusResetTimer();
-            this.setStatus("Yoofloe writing agent setup note...");
-          const filePath = await this.writeAgentSetupNote();
-          this.setStatus("Yoofloe idle");
-          new Notice(`Yoofloe agent setup note created: ${filePath}`);
-        } catch (error) {
-          this.setStatus("Yoofloe error");
-          new Notice(this.normalizeUserFacingError(error, "Failed to write the Yoofloe agent setup note."));
-          this.queueIdleStatusReset();
-        }
-        })();
-      }
-    });
   }
 
   private async writeAiFile({
@@ -514,22 +493,6 @@ export default class YoofloePlugin extends Plugin {
     const filePath = await uniqueFilePath(this, surface);
     await this.app.vault.create(filePath, content);
     return filePath;
-  }
-
-  async writeAgentSetupNote() {
-    return await this.writeContentFile(
-      "agent-direct-setup",
-      buildAgentSetupNoteMarkdown({
-        pluginVersion: this.manifest.version,
-        saveFolder: this.settings.savePath,
-        functionsBaseUrl: this.settings.functionsBaseUrl
-      })
-    );
-  }
-
-  async openAgentDirectGuide() {
-    const electron = requireDesktopModule<{ shell: { openExternal: (target: string) => Promise<void> | void; }; }>("electron");
-    await Promise.resolve(electron.shell.openExternal(AGENT_DIRECT_GUIDE_URL));
   }
 
   private async fetchGardenerBriefMarkdown(client: YoofloeClient) {

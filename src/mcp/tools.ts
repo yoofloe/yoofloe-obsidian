@@ -535,6 +535,10 @@ function requireFocusInstruction(documentType: YoofloeAiDocumentType, focusInstr
 }
 
 export function readMcpConfig(env: NodeJS.ProcessEnv): YoofloeMcpConfig {
+  if (trimEnv(env.YOOFLOE_INTERNAL_PREVIEW) !== "1") {
+    throw new Error("Yoofloe MCP wrapper is an internal preview and is not available for public use yet.");
+  }
+
   const pat = trimEnv(env.YOOFLOE_PAT);
   if (!pat) {
     throw new Error(PAT_ENV_ERROR);
@@ -659,7 +663,7 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       type: z.string().optional().describe("Optional frontmatter type override."),
       surface: z.string().optional().describe("Optional file surface/slug override."),
       includeRawData: z.boolean().optional().describe("Include raw JSON blocks. Defaults to false."),
-      writeFile: z.boolean().optional().describe("Write the note into the vault. Defaults to true.")
+      writeFile: z.boolean().optional().describe("Write the note into the vault. Defaults to false.")
     }
   }, async ({ domains, range, title, type, surface, includeRawData, writeFile }) => {
       const preset = chooseReportPreset(domains);
@@ -677,7 +681,7 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
         surface: surface?.trim() || preset.surface,
         includeRawData: includeRawData ?? false,
         config,
-        writeFile: writeFile ?? true
+        writeFile: writeFile ?? false
       });
 
       const summary = report.filePath

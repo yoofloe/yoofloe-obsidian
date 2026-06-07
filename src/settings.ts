@@ -1,12 +1,10 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
-import { buildClaudeCodePrompt, buildCodexPrompt, buildMcpConfigSnippet } from "./agent-guidance";
 import type YoofloePlugin from "./main";
 import { YoofloeClient } from "./api/yoofloe-client";
 import { describeStoredSecret, SECRET_STORAGE_REQUIRED_MESSAGE } from "./secrets";
 import { YOOFLOE_RANGES } from "./types";
 
 type BadgeTone = "muted" | "accent" | "success" | "warning" | "danger";
-type DesktopWindow = Window & { require?: NodeJS.Require; };
 
 const DEFAULT_MODEL_PLACEHOLDER = "gemini-2.5-flash-lite";
 const DEFAULT_PROJECT_PLACEHOLDER = "my-google-cloud-project";
@@ -14,7 +12,7 @@ const DEFAULT_VERTEX_LOCATION = "us-central1";
 
 function secureStorageWarning(hasSecureStorage: boolean) {
   if (!hasSecureStorage) {
-    return `${SECRET_STORAGE_REQUIRED_MESSAGE} Token and Google sign-in setup are disabled until you upgrade.`;
+    return `${SECRET_STORAGE_REQUIRED_MESSAGE} Token and Google sign-in setup are disabled until you upgrade Obsidian.`;
   }
 
   return "Yoofloe stores your PAT, Google sign-in client secret, and Google sign-in refresh token in Obsidian secure storage. Secrets are not written to data.json.";
@@ -69,29 +67,6 @@ function createHelpDetails(containerEl: HTMLElement, summaryText: string, items:
     list.createEl("li", { text: item });
   }
   return details;
-}
-
-function requireDesktopModule<T>(specifier: string): T {
-  const desktopWindow = activeWindow as DesktopWindow;
-  const runtimeRequire = typeof require === "function"
-    ? require
-    : desktopWindow.require;
-
-  if (!runtimeRequire) {
-    throw new Error("This action is available only in the desktop Obsidian runtime.");
-  }
-
-  return runtimeRequire(specifier) as T;
-}
-
-async function copyTextToClipboard(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const electron = requireDesktopModule<{ clipboard: { writeText: (value: string) => void; }; }>("electron");
-  electron.clipboard.writeText(text);
 }
 
 function tokenBadgeState(plugin: YoofloePlugin) {
@@ -253,7 +228,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Setup").setHeading();
     containerEl.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Yoofloe external access is a pro feature. Basic in-app access and baseline data export stay available without pro, while CLI, mcp, and Obsidian-connected workflows are premium interface layers. In Obsidian, you connect with a yoofloe pat. In yoofloe CLI and CLI mcp, you sign in with your yoofloe account. On these external surfaces, yoofloe provides grounded context and access control, but not the model."
+      text: "Yoofloe for Obsidian is included with Free and Pro accounts. In Obsidian, you connect with a Yoofloe personal access token, then use your own Google provider setup for AI generation. Yoofloe provides grounded context and access control, but not the model."
     });
 
     containerEl.createEl("div", {
@@ -283,10 +258,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Step 1",
       "Connect Yoofloe",
       tokenBadgeState(this.plugin),
-      "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It does not replace Yoofloe CLI login, and it exposes personal-only data by design."
+      "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It exposes personal-only data by design."
     );
 
-    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. External access is included with Pro. Generate the token in the Yoofloe web app, review the external access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
+    createInfoCard(tokenSection, "What you need", "A Yoofloe personal access token with the pat_yfl_ prefix. Yoofloe for Obsidian is included with Free and Pro accounts. Generate the token in the Yoofloe web app, review the external access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
     createInfoCard(tokenSection, "External access notice", "Obsidian plugin mode uses your own Google provider setup directly from Obsidian. Yoofloe provides the PAT-protected bundle and brief, but Yoofloe does not receive your Google sign-in credentials.");
     createHelpDetails(tokenSection, "Need help finding your token?", [
       "Open the Yoofloe web app and go to Settings.",
@@ -389,92 +364,6 @@ export class YoofloeSettingTab extends PluginSettingTab {
             new Notice("Yoofloe token cleared from secure storage.");
             this.display();
           });
-      });
-
-    const agentDirectSection = createStepSection(
-      containerEl,
-      "Optional",
-      "Use with external agents",
-      { text: "Available", tone: "accent" },
-      "Use an external agent when you want Codex, Claude, or another tool to bring its own model while Yoofloe provides grounded context and safe vault writes. Files written into your vault remain local copies after revocation."
-    );
-
-    createInfoCard(agentDirectSection, "Choose the right path", "Use plugin generation for one-click output inside Obsidian. Use Agent Direct when an external agent should bring its own model and workflow. Obsidian uses a PAT; Yoofloe CLI and CLI MCP use app login.");
-    createChecklistCard(agentDirectSection, "Agent Direct rules", [
-      "Agent Direct does not reuse the plugin's Gemini OAuth setup or secrets.",
-      "The recommended MCP workflow is yoofloe_ai_document_context followed by yoofloe_write_ai_document.",
-      "Deep dive requires a non-empty focusInstruction.",
-      "The connected external agent processes content under its own provider terms.",
-      "Plugin and wrapper access are personal-only by design and do not expose couple/shared data."
-    ]);
-
-    new Setting(agentDirectSection)
-      .setName("Copy examples")
-      .setDesc("Copy ready-to-use prompts and mcp config snippets for external agents.")
-      .addButton((button) => {
-        button.setButtonText("Copy codex prompt").onClick(async () => {
-          try {
-            await copyTextToClipboard(buildCodexPrompt({
-              pluginVersion: this.plugin.manifest.version,
-              saveFolder: this.plugin.settings.savePath,
-              functionsBaseUrl: this.plugin.settings.functionsBaseUrl
-            }));
-            new Notice("Codex prompt copied.");
-          } catch (error) {
-            new Notice(error instanceof Error ? error.message : "Failed to copy the Codex prompt.");
-          }
-        });
-      })
-      .addButton((button) => {
-        button.setButtonText("Copy code prompt").onClick(async () => {
-          try {
-            await copyTextToClipboard(buildClaudeCodePrompt({
-              pluginVersion: this.plugin.manifest.version,
-              saveFolder: this.plugin.settings.savePath,
-              functionsBaseUrl: this.plugin.settings.functionsBaseUrl
-            }));
-            new Notice("Claude prompt copied.");
-          } catch (error) {
-            new Notice(error instanceof Error ? error.message : "Failed to copy the Claude prompt.");
-          }
-        });
-      })
-      .addButton((button) => {
-        button.setButtonText("Copy mcp config").onClick(async () => {
-          try {
-            await copyTextToClipboard(buildMcpConfigSnippet({
-              pluginVersion: this.plugin.manifest.version,
-              saveFolder: this.plugin.settings.savePath,
-              functionsBaseUrl: this.plugin.settings.functionsBaseUrl
-            }));
-            new Notice("Mcp config snippet copied.");
-          } catch (error) {
-            new Notice(error instanceof Error ? error.message : "Failed to copy the MCP config snippet.");
-          }
-        });
-      });
-
-    new Setting(agentDirectSection)
-      .setName("More actions")
-      .setDesc("Open the full guide or write a shareable setup note into your vault.")
-      .addButton((button) => {
-        button.setButtonText("Open agent direct guide").onClick(async () => {
-          try {
-            await this.plugin.openAgentDirectGuide();
-          } catch (error) {
-            new Notice(error instanceof Error ? error.message : "Failed to open the Agent Direct guide.");
-          }
-        });
-      })
-      .addButton((button) => {
-        button.setButtonText("Write agent setup note").onClick(async () => {
-          try {
-            const filePath = await this.plugin.writeAgentSetupNote();
-            new Notice(`Yoofloe agent setup note created: ${filePath}`);
-          } catch (error) {
-            new Notice(error instanceof Error ? error.message : "Failed to write the Yoofloe agent setup note.");
-          }
-        });
       });
 
     const providerSection = createStepSection(
