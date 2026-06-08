@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type YoofloePlugin from "./main";
 import { YoofloeClient } from "./api/yoofloe-client";
+import { buildClaudeCodePrompt, buildCodexPrompt, buildMcpConfigSnippet } from "./agent-guidance";
 import { describeStoredSecret, SECRET_STORAGE_REQUIRED_MESSAGE } from "./secrets";
 import { YOOFLOE_RANGES } from "./types";
 
@@ -67,6 +68,15 @@ function createHelpDetails(containerEl: HTMLElement, summaryText: string, items:
     list.createEl("li", { text: item });
   }
   return details;
+}
+
+async function copyTextToClipboard(label: string, text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    new Notice(`${label} copied.`);
+  } catch {
+    new Notice(`Could not copy ${label}. Open the public setup guide and copy it manually.`);
+  }
 }
 
 function tokenBadgeState(plugin: YoofloePlugin) {
@@ -228,7 +238,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Setup").setHeading();
     containerEl.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Yoofloe for Obsidian is included with free and pro accounts. In Obsidian, you connect with a personal access token from your account, then use your own Google provider setup for AI generation. Yoofloe provides grounded context and access control, but not the model."
+      text: "Yoofloe for Obsidian and Yoofloe Obsidian MCP are included with free and pro accounts. In Obsidian, you connect with a personal access token from your account, then use your own provider setup or connected agent model path for AI generation. Yoofloe provides grounded context and access control, but not the model."
     });
 
     containerEl.createEl("div", {
@@ -258,11 +268,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Step 1",
       "Connect Yoofloe",
       tokenBadgeState(this.plugin),
-      "This PAT lets the Obsidian plugin fetch grounded Yoofloe data. It exposes personal-only data by design."
+      "This PAT lets the Obsidian plugin and Obsidian MCP wrapper fetch grounded Yoofloe data. It exposes personal-only data by design."
     );
 
-    createInfoCard(tokenSection, "What you need", "A personal access token with the pat_yfl_ prefix. Yoofloe for Obsidian is included with free and pro accounts. Generate the token in the Yoofloe web app, review the external access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
-    createInfoCard(tokenSection, "External access notice", "Obsidian plugin mode uses your own Google provider setup directly from Obsidian. Yoofloe provides the PAT-protected bundle and brief, but Yoofloe does not receive your Google sign-in credentials.");
+    createInfoCard(tokenSection, "What you need", "A personal access token with the pat_yfl_ prefix. Yoofloe for Obsidian and Yoofloe Obsidian MCP are included with free and pro accounts. Generate the token in the Yoofloe web app, review the external access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
+    createInfoCard(tokenSection, "External access notice", "Obsidian plugin mode uses your own provider setup directly from Obsidian. Yoofloe Obsidian MCP uses your connected agent's model path. Yoofloe provides the PAT-protected bundle and brief, but does not receive your Google sign-in credentials or agent provider key.");
     createHelpDetails(tokenSection, "Need help finding your token?", [
       "Open the Yoofloe web app and go to Settings.",
       "Use Generate Obsidian Token.",
@@ -363,6 +373,45 @@ export class YoofloeSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             new Notice("Yoofloe token cleared from secure storage.");
             this.display();
+          });
+      });
+
+    const agentOptions = {
+      pluginVersion: this.plugin.manifest.version,
+      saveFolder: this.plugin.settings.savePath,
+      functionsBaseUrl: this.plugin.settings.functionsBaseUrl
+    };
+
+    const agentSection = createStepSection(
+      containerEl,
+      "Optional",
+      "Connect an MCP-capable agent",
+      { text: "Included", tone: "accent" },
+      "Use Yoofloe Obsidian MCP when Codex, Claude Code, or another MCP-capable agent should bring its own model path and write grounded documents into this vault."
+    );
+    createInfoCard(agentSection, "How Agent Direct works", "Download the Yoofloe Obsidian MCP wrapper from the latest release, point your MCP client at the bundled mcp-server.js, and provide YOOFLOE_PAT plus YOOFLOE_VAULT_PATH locally. Do not commit real PAT values into MCP config files.");
+    new Setting(agentSection)
+      .setName("Agent setup snippets")
+      .setDesc("Copy safe placeholders for your MCP client and agent prompt. Replace paths and PAT values locally.")
+      .addButton((button) => {
+        button
+          .setButtonText("Copy MCP config")
+          .onClick(() => {
+            void copyTextToClipboard("MCP config", buildMcpConfigSnippet(agentOptions));
+          });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Copy Codex prompt")
+          .onClick(() => {
+            void copyTextToClipboard("Codex prompt", buildCodexPrompt(agentOptions));
+          });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Copy Claude Code prompt")
+          .onClick(() => {
+            void copyTextToClipboard("Claude Code prompt", buildClaudeCodePrompt(agentOptions));
           });
       });
 

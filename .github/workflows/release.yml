@@ -20,9 +20,11 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run build:mcp
+      - run: npm run package:mcp
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             main.js
             manifest.json
             styles.css
+            yoofloe-obsidian-mcp-wrapper.zip

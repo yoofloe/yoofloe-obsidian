@@ -20,6 +20,17 @@ Public install guides and setup notes also live in the Yoofloe docs hub:
 2. Copy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/yoofloe/`.
 3. Enable `Yoofloe` in Obsidian Community Plugins.
 
+### Yoofloe Obsidian MCP
+
+Yoofloe Obsidian MCP is included for Free and Pro users through the same `pat_yfl_...` token flow. It is for MCP-capable agents such as Codex or Claude Code, and the connected agent calls its own model provider or API. Yoofloe does not provide the model for this wrapper.
+
+1. Download `yoofloe-obsidian-mcp-wrapper.zip` from the latest GitHub release.
+2. Unzip it somewhere local to the agent runtime.
+3. Configure the MCP client with `node`, the unzipped `mcp-server.js`, `YOOFLOE_PAT`, and `YOOFLOE_VAULT_PATH`.
+4. Keep real PAT values out of committed `.mcp.json`, shell profiles, logs, and prompts.
+
+See `docs/mcp-wrapper.md` and `docs/agent-direct.md` for full setup notes.
+
 ## Review notes
 
 For Obsidian Community Plugin review, the submission target is the `yoofloe` plugin itself:
@@ -36,6 +47,7 @@ Reviewer-facing disclosures:
 - calls Yoofloe API and Google Gemini endpoints
 - writes Markdown files locally into the vault
 - uses direct-provider Gemini calls with the user's own Google credentials
+- ships a separate GitHub release asset, `yoofloe-obsidian-mcp-wrapper.zip`, for MCP-capable agents; this wrapper is not part of the Obsidian Community Plugin Store payload
 
 ## Quick start
 
@@ -57,6 +69,8 @@ Yoofloe for Obsidian is included with Free and Pro accounts.
 The plugin uses a Yoofloe Personal Access Token to fetch read-only, personal-only Yoofloe context. The token does not include couple/shared exports and cannot decrypt v2 zero-knowledge ciphertext by itself.
 
 Yoofloe does not provide the AI model for plugin generation. Obsidian calls your selected Google Gemini setup directly with your own Google credentials and project.
+
+Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connected agent chooses and calls its own model path; Yoofloe provides bounded tools, access control, and vault-safe write boundaries.
 
 ## Choose your AI setup
 

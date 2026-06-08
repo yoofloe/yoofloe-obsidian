@@ -1,12 +1,13 @@
 {
   "name": "obsidian-yoofloe",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Yoofloe AI insight documents grounded in your data.",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node esbuild.config.mjs production",
     "build:mcp": "node esbuild.mcp.mjs production",
+    "package:mcp": "node scripts/package-mcp-wrapper.mjs",
     "dev": "node esbuild.config.mjs --watch",
     "dev:mcp": "node esbuild.mcp.mjs --watch",
     "start:mcp": "node mcp-server.js",

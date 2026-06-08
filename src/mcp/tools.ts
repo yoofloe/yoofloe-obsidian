@@ -535,10 +535,6 @@ function requireFocusInstruction(documentType: YoofloeAiDocumentType, focusInstr
 }
 
 export function readMcpConfig(env: NodeJS.ProcessEnv): YoofloeMcpConfig {
-  if (trimEnv(env.YOOFLOE_INTERNAL_PREVIEW) !== "1") {
-    throw new Error("Yoofloe MCP wrapper is an internal preview and is not available for public use yet.");
-  }
-
   const pat = trimEnv(env.YOOFLOE_PAT);
   if (!pat) {
     throw new Error(PAT_ENV_ERROR);
