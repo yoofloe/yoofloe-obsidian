@@ -238,7 +238,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Setup").setHeading();
     containerEl.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Yoofloe for Obsidian and Yoofloe Obsidian MCP are included with free and pro accounts. In Obsidian, you connect with a personal access token from your account, then use your own provider setup or connected agent model path for AI generation. Yoofloe provides grounded context and access control, but not the model."
+      text: "Yoofloe for Obsidian includes plugin access and the Obsidian agent bridge for free and pro accounts. In Obsidian, you connect with a personal access token from your account, then use your own provider setup or connected agent model path for AI generation. Yoofloe provides grounded context and access control, but not the model."
     });
 
     containerEl.createEl("div", {
@@ -392,24 +392,24 @@ export class YoofloeSettingTab extends PluginSettingTab {
     createInfoCard(agentSection, "How Agent Direct works", "Download the Yoofloe Obsidian MCP wrapper from the latest release, point your MCP client at the bundled mcp-server.js, and provide YOOFLOE_PAT plus YOOFLOE_VAULT_PATH locally. Do not commit real PAT values into MCP config files.");
     new Setting(agentSection)
       .setName("Agent setup snippets")
-      .setDesc("Copy safe placeholders for your MCP client and agent prompt. Replace paths and PAT values locally.")
+      .setDesc("Copy safe placeholders for your agent client and prompt. Replace paths and token values locally.")
       .addButton((button) => {
         button
-          .setButtonText("Copy MCP config")
+          .setButtonText("Copy config")
           .onClick(() => {
             void copyTextToClipboard("MCP config", buildMcpConfigSnippet(agentOptions));
           });
       })
       .addButton((button) => {
         button
-          .setButtonText("Copy Codex prompt")
+          .setButtonText("Copy codex prompt")
           .onClick(() => {
             void copyTextToClipboard("Codex prompt", buildCodexPrompt(agentOptions));
           });
       })
       .addButton((button) => {
         button
-          .setButtonText("Copy Claude Code prompt")
+          .setButtonText("Copy Claude code prompt")
           .onClick(() => {
             void copyTextToClipboard("Claude Code prompt", buildClaudeCodePrompt(agentOptions));
           });
