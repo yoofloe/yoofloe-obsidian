@@ -4,6 +4,13 @@ import { YoofloeClient } from "./api/yoofloe-client";
 import { buildClaudeCodePrompt, buildCodexPrompt, buildMcpConfigSnippet } from "./agent-guidance";
 import { describeStoredSecret, SECRET_STORAGE_REQUIRED_MESSAGE } from "./secrets";
 import { YOOFLOE_RANGES } from "./types";
+import {
+  YOOFLOE_PAIRING_PENDING_CONTRACT,
+  YOOFLOE_WEB_PAIRING_URL,
+  openYoofloeWebPairing,
+  startYoofloeWebPairingSession,
+  waitForYoofloeWebPairing
+} from "./yoofloe-web";
 
 type BadgeTone = "muted" | "accent" | "success" | "warning" | "danger";
 
@@ -258,7 +265,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     new Setting(quickStart).setName("Recommended first run").setHeading();
     const quickStartList = quickStart.createEl("ol", { cls: "yoofloe-step-list" });
     [
-      "Save your Yoofloe token and click Verify token.",
+      "Connect with Yoofloe web or paste a Yoofloe token, then click Verify token.",
       "Finish the Gemini setup below.",
       "Run insight brief to generate your first grounded document."
     ].forEach((item) => quickStartList.createEl("li", { text: item }));
@@ -271,14 +278,62 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "This PAT lets the Obsidian plugin and Obsidian MCP wrapper fetch grounded Yoofloe data. It exposes personal-only data by design."
     );
 
-    createInfoCard(tokenSection, "What you need", "A personal access token with the pat_yfl_ prefix. Yoofloe for Obsidian and Yoofloe Obsidian MCP are included with free and pro accounts. Generate the token in the Yoofloe web app, review the external access notice there, then paste the token here. Obsidian access is personal-only by design and does not include couple/shared exports.");
+    createInfoCard(tokenSection, "Connect with Yoofloe web", "Open Yoofloe in your browser and sign in there. For Yoofloe access, the plugin never asks for your password and stores only the returned PAT.");
+    createInfoCard(tokenSection, "What you need", "A personal access token with the pat_yfl_ prefix. Browser pairing can save it automatically, and manual paste remains available. Yoofloe for Obsidian and Yoofloe Obsidian MCP are included with free and pro accounts. Obsidian access is personal-only by design and does not include couple/shared exports.");
     createInfoCard(tokenSection, "External access notice", "Obsidian plugin mode uses your own provider setup directly from Obsidian. Yoofloe Obsidian MCP uses your connected agent's model path. Yoofloe provides the PAT-protected bundle and brief, but does not receive your Google sign-in credentials or agent provider key.");
+    createInfoCard(tokenSection, "Automatic pairing status", YOOFLOE_PAIRING_PENDING_CONTRACT);
     createHelpDetails(tokenSection, "Need help finding your token?", [
-      "Open the Yoofloe web app and go to Settings.",
-      "Use Generate Obsidian Token.",
-      "Copy the pat_yfl_ token and paste it here.",
-      "Click Save token, then Verify token."
+      `Click Connect with Yoofloe web or open ${YOOFLOE_WEB_PAIRING_URL}.`,
+      "Approve the pairing request after signing in with Yoofloe web.",
+      "Return to Obsidian after the token is saved.",
+      "If pairing fails, generate or reveal a pat_yfl_ token in web Settings and paste it here."
     ]);
+
+    new Setting(tokenSection)
+      .setName("Browser pairing")
+      .setDesc("Use your yoofloe web session to create an Obsidian token. Obsidian will not collect your email or password.")
+      .addButton((button) => {
+        button
+          .setButtonText("Connect with yoofloe web")
+          .setDisabled(!hasSecureStorage)
+          .onClick(async () => {
+            try {
+              if (!hasSecureStorage) {
+                new Notice(SECRET_STORAGE_REQUIRED_MESSAGE);
+                return;
+              }
+
+              button.setDisabled(true);
+              const session = await startYoofloeWebPairingSession(this.plugin.settings.functionsBaseUrl);
+              await openYoofloeWebPairing(session.verificationUrl);
+              new Notice("Yoofloe web opened. Sign in there and approve the Obsidian pairing request.");
+              const claim = await waitForYoofloeWebPairing(this.plugin.settings.functionsBaseUrl, session);
+              this.plugin.secretStore.setPat(claim.token);
+              this.plugin.tokenStatus = "saved";
+              await this.plugin.saveSettings();
+              new Notice("Yoofloe token saved in secure storage.");
+
+              try {
+                const client = new YoofloeClient(this.plugin.settings, claim.token);
+                const response = await client.testToken();
+                this.plugin.setLatestEntitlement(response.entitlement);
+                this.plugin.tokenStatus = "verified";
+                new Notice(response.entitlement.allowed
+                  ? "Yoofloe token is valid."
+                  : this.plugin.getEntitlementNoticeMessage());
+              } catch (verifyError) {
+                this.plugin.tokenStatus = "saved";
+                new Notice(this.plugin.getUserFacingErrorMessage(verifyError, "Yoofloe token saved. Verification failed."));
+              }
+
+              this.display();
+            } catch (error) {
+              new Notice(error instanceof Error ? error.message : "Failed to connect with Yoofloe web.");
+            } finally {
+              button.setDisabled(!hasSecureStorage);
+            }
+          });
+      });
 
     let pendingPat = "";
     new Setting(tokenSection)
