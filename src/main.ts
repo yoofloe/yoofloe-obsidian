@@ -1,14 +1,38 @@
-import { Notice, Plugin, normalizePath } from "obsidian";
+import { MarkdownView, Notice, Plugin, normalizePath } from "obsidian";
 import { runAiDocumentAnalysis } from "./ai/byok-client";
 import { getAiDocumentDefinition } from "./ai/prompts";
+import { buildAgentSetupNoteMarkdown } from "./agent-guidance";
 import { YoofloeApiError, YoofloeClient } from "./api/yoofloe-client";
+import { YOOFLOE_CAPTURE_VIEW_TYPE, YoofloeCaptureView } from "./capture-view";
 import { requestDeepDiveFocusInstruction } from "./focus-modal";
 import { renderAiNoteMarkdown } from "./generators/ai-note";
+import { hostedWriterSurface, renderHostedWriterInlineMarkdown, renderHostedWriterNoteMarkdown } from "./generators/hosted-writer";
 import { YoofloeGoogleAuthManager } from "./google-auth";
 import { migrateLegacySecretsFromSettings, SECRET_STORAGE_REQUIRED_MESSAGE, YoofloeSecretStore } from "./secrets";
 import { YoofloeSettingTab } from "./settings";
-import { YOOFLOE_DOMAINS } from "./types";
-import type { YoofloeAiDocumentType, YoofloeBundle, YoofloeEntitlement, YoofloePluginSettings } from "./types";
+import { YOOFLOE_DOMAINS, YOOFLOE_OUTPUT_TARGETS } from "./types";
+import { YOOFLOE_WRITER_VIEW_TYPE, YoofloeWriterView } from "./writer-view";
+import {
+  openYoofloeWebPairing,
+  startYoofloeWebPairingSession,
+  waitForYoofloeWebPairing,
+  type YoofloePairingAccess
+} from "./yoofloe-web";
+import type {
+  YoofloeAiDocumentType,
+  YoofloeBundle,
+  YoofloeDomain,
+  YoofloeEntitlement,
+  YoofloeHostedWriterRequest,
+  YoofloeHostedWriterResponse,
+  YoofloePluginSettings,
+  YoofloeWriteExecuteRequest,
+  YoofloeWriteExecuteResponse,
+  YoofloeWritePreviewRequest,
+  YoofloeWritePreviewResponse
+} from "./types";
+
+const DEFAULT_HOSTED_WRITER_DOMAINS: YoofloeDomain[] = ["schedule", "life", "wellness", "journal", "garden"];
 
 const DEFAULT_SETTINGS: YoofloePluginSettings = {
   apiToken: "",
@@ -18,10 +42,16 @@ const DEFAULT_SETTINGS: YoofloePluginSettings = {
   language: "en",
   defaultRange: "1M",
   defaultScope: "personal",
+  defaultDomains: DEFAULT_HOSTED_WRITER_DOMAINS,
+  defaultOutputTarget: "new-note",
+  defaultTone: "clear and practical",
   includeRawData: false,
   autoFrontmatter: true,
+  showAdvancedProvider: false,
+  showMcpSetup: false,
+  yoofloeAccessMode: "read",
   provider: {
-    type: "none",
+    type: "yoofloe-hosted",
     clientId: "",
     googleConnected: false,
     googleLastConnectState: "idle",
@@ -34,6 +64,7 @@ const DEFAULT_SETTINGS: YoofloePluginSettings = {
 };
 
 const SUPPORTED_PLUGIN_PROVIDERS = new Set<YoofloePluginSettings["provider"]["type"]>([
+  "yoofloe-hosted",
   "none",
   "gemini-google",
   "gemini-vertex"
@@ -66,6 +97,18 @@ function entitlementFromApiError(error: YoofloeApiError) {
 
 function isPaywallMessage(message: string) {
   return /pro|plan|subscription|upgrade|not entitled|entitlement|does not currently include obsidian access|obsidian access requires/i.test(message);
+}
+
+function sanitizeDefaultDomains(value: unknown): YoofloeDomain[] {
+  if (!Array.isArray(value)) return [...DEFAULT_HOSTED_WRITER_DOMAINS];
+  const domains = value.filter((domain): domain is YoofloeDomain => YOOFLOE_DOMAINS.includes(domain as YoofloeDomain));
+  return domains.length > 0 ? [...new Set(domains)] : [...DEFAULT_HOSTED_WRITER_DOMAINS];
+}
+
+function sanitizeOutputTarget(value: unknown): YoofloePluginSettings["defaultOutputTarget"] {
+  return YOOFLOE_OUTPUT_TARGETS.includes(value as YoofloePluginSettings["defaultOutputTarget"])
+    ? value as YoofloePluginSettings["defaultOutputTarget"]
+    : DEFAULT_SETTINGS.defaultOutputTarget;
 }
 
 type AiDocumentCommandDefinition = {
@@ -145,6 +188,14 @@ export default class YoofloePlugin extends Plugin {
     this.statusEl = this.addStatusBarItem();
     this.setStatus("Yoofloe idle");
 
+    this.registerView(YOOFLOE_WRITER_VIEW_TYPE, (leaf) => new YoofloeWriterView(leaf, this));
+    this.registerView(YOOFLOE_CAPTURE_VIEW_TYPE, (leaf) => new YoofloeCaptureView(leaf, this));
+    this.addRibbonIcon("sparkles", "Open Yoofloe AI writer", () => {
+      void this.openWriterView();
+    });
+    this.addRibbonIcon("send", "Open Yoofloe capture", () => {
+      void this.openCaptureView();
+    });
     this.addSettingTab(new YoofloeSettingTab(this.app, this));
     this.registerCommands();
 
@@ -170,6 +221,14 @@ export default class YoofloePlugin extends Plugin {
     this.settings = {
       ...DEFAULT_SETTINGS,
       ...saved,
+      defaultDomains: sanitizeDefaultDomains(saved?.defaultDomains),
+      defaultOutputTarget: sanitizeOutputTarget(saved?.defaultOutputTarget),
+      defaultTone: typeof saved?.defaultTone === "string" && saved.defaultTone.trim()
+        ? saved.defaultTone.trim()
+        : DEFAULT_SETTINGS.defaultTone,
+      showAdvancedProvider: !!saved?.showAdvancedProvider,
+      showMcpSetup: !!saved?.showMcpSetup,
+      yoofloeAccessMode: saved?.yoofloeAccessMode === "read-write" ? "read-write" : "read",
       provider: {
         type: rawProviderType as YoofloePluginSettings["provider"]["type"],
         clientId: typeof savedProvider.clientId === "string" ? savedProvider.clientId : DEFAULT_SETTINGS.provider.clientId,
@@ -225,6 +284,10 @@ export default class YoofloePlugin extends Plugin {
     this.settings.provider.location = this.settings.provider.location.trim() || DEFAULT_SETTINGS.provider.location;
     this.settings.provider.googleModel = this.settings.provider.googleModel.trim() || DEFAULT_SETTINGS.provider.googleModel;
     this.settings.provider.vertexModel = this.settings.provider.vertexModel.trim() || DEFAULT_SETTINGS.provider.vertexModel;
+    this.settings.defaultDomains = sanitizeDefaultDomains(this.settings.defaultDomains);
+    this.settings.defaultOutputTarget = sanitizeOutputTarget(this.settings.defaultOutputTarget);
+    this.settings.defaultTone = this.settings.defaultTone.trim() || DEFAULT_SETTINGS.defaultTone;
+    this.settings.yoofloeAccessMode = this.settings.yoofloeAccessMode === "read-write" ? "read-write" : "read";
     await this.saveData({
       ...this.settings,
       apiToken: "",
@@ -426,7 +489,230 @@ export default class YoofloePlugin extends Plugin {
     return token;
   }
 
+  getStoredPat() {
+    return this.secretStore?.isAvailable ? this.secretStore.getPat() : null;
+  }
+
+  async openWriterView() {
+    const existingLeaf = this.app.workspace.getLeavesOfType(YOOFLOE_WRITER_VIEW_TYPE)[0];
+    const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
+    await leaf.setViewState({ type: YOOFLOE_WRITER_VIEW_TYPE, active: true });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  async openCaptureView() {
+    const existingLeaf = this.app.workspace.getLeavesOfType(YOOFLOE_CAPTURE_VIEW_TYPE)[0];
+    const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
+    await leaf.setViewState({ type: YOOFLOE_CAPTURE_VIEW_TYPE, active: true });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  async connectYoofloeWeb(access: YoofloePairingAccess = "read") {
+    if (!this.secretStore.isAvailable) {
+      throw new Error(SECRET_STORAGE_REQUIRED_MESSAGE);
+    }
+
+    const session = await startYoofloeWebPairingSession(this.settings.functionsBaseUrl, access);
+    await openYoofloeWebPairing(session.verificationUrl);
+    new Notice(access === "read-write"
+      ? "Yoofloe web opened. Approve Obsidian Capture write access, then return here."
+      : "Yoofloe web opened. Sign in there and approve the Obsidian pairing request.");
+    const claim = await waitForYoofloeWebPairing(this.settings.functionsBaseUrl, session);
+    this.secretStore.setPat(claim.token);
+    this.settings.yoofloeAccessMode = access === "read-write" ? "read-write" : "read";
+    this.tokenStatus = "saved";
+    await this.saveSettings();
+    new Notice(access === "read-write"
+      ? "Yoofloe read & write token saved in secure storage."
+      : "Yoofloe token saved in secure storage.");
+    return claim;
+  }
+
+  private getMarkdownViewForWriter() {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (activeView) return activeView;
+
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      if (leaf.view instanceof MarkdownView) {
+        return leaf.view;
+      }
+    }
+
+    return null;
+  }
+
+  private withCurrentNoteContext(request: YoofloeHostedWriterRequest): YoofloeHostedWriterRequest {
+    if (!request.currentNoteContext?.enabled) {
+      return {
+        ...request,
+        currentNoteContext: { enabled: false }
+      };
+    }
+
+    const markdownView = this.getMarkdownViewForWriter();
+    if (!markdownView) {
+      return {
+        ...request,
+        currentNoteContext: { enabled: true }
+      };
+    }
+
+    const selection = markdownView.editor.getSelection();
+    const content = selection.trim() ? selection : markdownView.editor.getValue();
+    return {
+      ...request,
+      currentNoteContext: {
+        enabled: true,
+        path: markdownView.file?.path,
+        title: markdownView.file?.basename,
+        content,
+        selectionOnly: !!selection.trim()
+      }
+    };
+  }
+
+  private async writeHostedWriterOutput(response: YoofloeHostedWriterResponse, request: YoofloeHostedWriterRequest) {
+    const target = request.outputMode || this.settings.defaultOutputTarget;
+    const inlineMarkdown = renderHostedWriterInlineMarkdown(response);
+
+    if (target !== "new-note") {
+      const markdownView = this.getMarkdownViewForWriter();
+      if (markdownView) {
+        const editor = markdownView.editor;
+        if (target === "append-current") {
+          const lastLine = editor.lastLine();
+          const end = { line: lastLine, ch: editor.getLine(lastLine).length };
+          editor.replaceRange(`\n\n${inlineMarkdown}`, end);
+        } else if (target === "replace-selection") {
+          if (editor.getSelection()) {
+            editor.replaceSelection(inlineMarkdown);
+          } else {
+            editor.replaceRange(inlineMarkdown, editor.getCursor());
+          }
+        } else {
+          editor.replaceRange(inlineMarkdown, editor.getCursor());
+        }
+
+        return markdownView.file?.path || "current note";
+      }
+
+      new Notice("No active Markdown note found. Yoofloe created a new note instead.");
+    }
+
+    return this.writeContentFile(
+      hostedWriterSurface(request.documentType),
+      renderHostedWriterNoteMarkdown({
+        response,
+        request,
+        settings: this.settings,
+        pluginVersion: this.manifest.version
+      })
+    );
+  }
+
+  async runHostedWriterFromOptions(options: YoofloeHostedWriterRequest) {
+    try {
+      const token = this.requirePat();
+      const domains = sanitizeDefaultDomains(options.domains);
+      const request = this.withCurrentNoteContext({
+        ...options,
+        domains,
+        scope: "personal",
+        outputMode: sanitizeOutputTarget(options.outputMode),
+        tone: options.tone?.trim() || this.settings.defaultTone,
+        includeRaw: !!options.includeRaw
+      });
+
+      this.clearStatusResetTimer();
+      this.setStatus(`Yoofloe writing ${request.documentType}...`);
+
+      const client = new YoofloeClient(this.settings, token);
+      const response = await client.runHostedWriter(request);
+      this.ensureEntitlement(response.entitlement);
+      const target = await this.writeHostedWriterOutput(response, request);
+
+      this.tokenStatus = "verified";
+      this.setStatus("Yoofloe idle");
+      new Notice(`Yoofloe AI note ready: ${target}`);
+      return response;
+    } catch (error) {
+      this.setStatus("Yoofloe error");
+      if (error instanceof Error && /token|401|unauthorized|invalid jwt/i.test(error.message)) {
+        this.tokenStatus = "invalid";
+        this.latestEntitlement = null;
+      }
+      new Notice(this.normalizeUserFacingError(error, "Yoofloe AI Writer failed."));
+      this.queueIdleStatusReset();
+      throw error;
+    }
+  }
+
+  async previewCaptureWrite(request: YoofloeWritePreviewRequest): Promise<YoofloeWritePreviewResponse> {
+    const token = this.requirePat();
+    const client = new YoofloeClient(this.settings, token);
+    return client.previewWriteActions(request);
+  }
+
+  async executeCaptureWrite(request: YoofloeWriteExecuteRequest): Promise<YoofloeWriteExecuteResponse> {
+    const token = this.requirePat();
+    const client = new YoofloeClient(this.settings, token);
+    return client.executeWriteActions(request);
+  }
+
+  async createMcpSetupNote() {
+    const filePath = await this.writeContentFile(
+      "agent-direct-setup",
+      buildAgentSetupNoteMarkdown({
+        pluginVersion: this.manifest.version,
+        saveFolder: this.settings.savePath,
+        functionsBaseUrl: this.settings.functionsBaseUrl
+      })
+    );
+    new Notice(`Yoofloe MCP setup note created: ${filePath}`);
+    return filePath;
+  }
+
   private registerCommands() {
+    this.addCommand({
+      id: "open-ai-writer",
+      name: "Open AI writer",
+      callback: () => {
+        void this.openWriterView();
+      }
+    });
+
+    this.addCommand({
+      id: "open-capture",
+      name: "Open capture",
+      callback: () => {
+        void this.openCaptureView();
+      }
+    });
+
+    this.addCommand({
+      id: "create-first-ai-note",
+      name: "Create first AI note",
+      callback: () => {
+        void this.runHostedWriterFromOptions({
+          documentType: "daily-review",
+          domains: [...this.settings.defaultDomains],
+          range: "1W",
+          scope: "personal",
+          tone: this.settings.defaultTone,
+          outputMode: this.settings.defaultOutputTarget,
+          includeRaw: this.settings.includeRawData
+        });
+      }
+    });
+
+    this.addCommand({
+      id: "create-mcp-setup-note",
+      name: "Create MCP setup note",
+      callback: () => {
+        void this.createMcpSetupNote();
+      }
+    });
+
     const aiCommands: AiDocumentCommandDefinition[] = [
       { id: "ai-insight-brief", name: "AI insight brief", documentType: "insight-brief" },
       { id: "ai-decision-memo", name: "AI decision memo", documentType: "decision-memo" },
@@ -513,6 +799,20 @@ export default class YoofloePlugin extends Plugin {
 
       if (document.requiresFocusInstruction && !focusInstruction) {
         this.setStatus("Yoofloe idle");
+        return;
+      }
+
+      if (this.settings.provider.type === "yoofloe-hosted") {
+        await this.runHostedWriterFromOptions({
+          documentType: definition.documentType,
+          domains: [...this.settings.defaultDomains],
+          range: this.settings.defaultRange,
+          scope: "personal",
+          prompt: focusInstruction || undefined,
+          tone: this.settings.defaultTone,
+          outputMode: this.settings.defaultOutputTarget,
+          includeRaw: this.settings.includeRawData
+        });
         return;
       }
 

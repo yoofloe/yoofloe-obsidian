@@ -12,6 +12,7 @@ export type YoofloePairingSession = {
   verifier: string;
   verificationUrl: string;
   expiresAt: string;
+  requestedCapabilities?: string[];
 };
 
 export type YoofloePairingClaim = {
@@ -20,7 +21,26 @@ export type YoofloePairingClaim = {
   maskedToken?: string;
   expiresAt?: string;
   status?: string;
+  scope?: string;
+  capabilities?: string[];
 };
+
+export type YoofloePairingAccess = "read" | "read-write";
+
+const YOOFLOE_READ_WRITE_CAPABILITIES = [
+  "obsidian:read",
+  "obsidian:write:capture",
+  "obsidian:write:journal",
+  "obsidian:write:schedule",
+  "obsidian:write:goals",
+  "obsidian:write:study",
+  "obsidian:write:activity",
+  "obsidian:write:wellness",
+  "obsidian:write:exercise",
+  "obsidian:write:business",
+  "obsidian:write:finance",
+  "obsidian:write:delete"
+];
 
 function requireDesktopModule<T>(specifier: string): T {
   const desktopWindow = activeWindow as DesktopWindow;
@@ -83,16 +103,29 @@ export async function openYoofloeWebPairing(targetUrl = YOOFLOE_WEB_PAIRING_URL)
   await Promise.resolve(electron.shell.openExternal(targetUrl));
 }
 
-export async function startYoofloeWebPairingSession(functionsBaseUrl: string): Promise<YoofloePairingSession> {
+function requestedCapabilitiesForAccess(access: YoofloePairingAccess) {
+  return access === "read-write"
+    ? YOOFLOE_READ_WRITE_CAPABILITIES
+    : ["obsidian:read"];
+}
+
+export async function startYoofloeWebPairingSession(
+  functionsBaseUrl: string,
+  access: YoofloePairingAccess = "read"
+): Promise<YoofloePairingSession> {
   const verifier = randomVerifier();
   const verifierHash = await sha256Hex(verifier);
+  const requestedCapabilities = requestedCapabilitiesForAccess(access);
   const response = await postPairingJson<{
     pairingId?: string;
     verificationUrl?: string;
     expiresAt?: string;
+    requestedCapabilities?: string[];
   }>(functionsBaseUrl, "start-obsidian-pairing", {
     verifierHash,
-    label: "Obsidian plugin pairing"
+    label: access === "read-write" ? "Obsidian Capture write access" : "Obsidian plugin pairing",
+    access,
+    capabilities: requestedCapabilities
   });
 
   if (!response.pairingId || !response.verificationUrl || !response.expiresAt) {
@@ -103,7 +136,8 @@ export async function startYoofloeWebPairingSession(functionsBaseUrl: string): P
     pairingId: response.pairingId,
     verifier,
     verificationUrl: response.verificationUrl,
-    expiresAt: response.expiresAt
+    expiresAt: response.expiresAt,
+    requestedCapabilities: response.requestedCapabilities || requestedCapabilities
   };
 }
 

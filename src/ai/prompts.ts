@@ -10,6 +10,34 @@ export type YoofloeAiDocumentDefinition = {
 };
 
 const DOCUMENT_DEFINITIONS: Record<YoofloeAiDocumentType, YoofloeAiDocumentDefinition> = {
+  "daily-review": {
+    title: "Daily Yoofloe review",
+    type: "ai-daily-review",
+    surface: "ai-daily-review",
+    systemPrompt: "You are a practical daily review writer for Yoofloe data. Use only the provided facts, distinguish evidence from interpretation, and return Markdown only.",
+    userGoal: [
+      "Create a daily review grounded in the Yoofloe data.",
+      "Include: Today Snapshot, Key Signals, Friction, Next Actions, and Reflection Prompts.",
+      "Keep the document concise and useful for a personal daily note.",
+      "Do not include YAML frontmatter.",
+      "Do not wrap the result in code fences.",
+      "Do not add a top-level title."
+    ].join("\n")
+  },
+  "weekly-plan": {
+    title: "Weekly Yoofloe plan",
+    type: "ai-weekly-plan",
+    surface: "ai-weekly-plan",
+    systemPrompt: "You are a weekly planning assistant for Yoofloe data. Use only the provided facts, keep recommendations realistic, and return Markdown only.",
+    userGoal: [
+      "Create a weekly plan grounded in the Yoofloe data.",
+      "Include: Week Focus, Scheduled Commitments, Wellness Considerations, Priority Actions, and Watchouts.",
+      "Keep the plan practical and evidence-based.",
+      "Do not include YAML frontmatter.",
+      "Do not wrap the result in code fences.",
+      "Do not add a top-level title."
+    ].join("\n")
+  },
   "insight-brief": {
     title: "AI insight brief",
     type: "ai-insight-brief",
@@ -47,6 +75,47 @@ const DOCUMENT_DEFINITIONS: Record<YoofloeAiDocumentType, YoofloeAiDocumentDefin
       "Create an action plan grounded in the Yoofloe data.",
       "Include: Current State, Priority Actions, Recommended Sequence, Dependencies or Blockers, Watchouts, and Evidence Notes.",
       "Recommendations must stay realistic and directly tied to the data.",
+      "Do not include YAML frontmatter.",
+      "Do not wrap the result in code fences.",
+      "Do not add a top-level title."
+    ].join("\n")
+  },
+  "wellness-check": {
+    title: "Wellness check",
+    type: "ai-wellness-check",
+    surface: "ai-wellness-check",
+    systemPrompt: "You are a grounded wellness reflection writer for Yoofloe data. Use only the provided facts, avoid medical claims, and return Markdown only.",
+    userGoal: [
+      "Create a wellness check grounded in the Yoofloe data.",
+      "Include: Current Signals, Energy and Recovery, Helpful Patterns, Gentle Adjustments, and Questions to Notice.",
+      "Avoid diagnosis, treatment advice, or unsupported health claims.",
+      "Do not include YAML frontmatter.",
+      "Do not wrap the result in code fences.",
+      "Do not add a top-level title."
+    ].join("\n")
+  },
+  "finance-snapshot": {
+    title: "Finance snapshot",
+    type: "ai-finance-snapshot",
+    surface: "ai-finance-snapshot",
+    systemPrompt: "You are a finance snapshot writer for Yoofloe data. Use only the provided facts, avoid investment advice, and return Markdown only.",
+    userGoal: [
+      "Create a finance snapshot grounded in the Yoofloe data.",
+      "Include: Cashflow Signals, Spending or Income Changes, Risks to Watch, Practical Next Steps, and Open Questions.",
+      "Do not provide investment, tax, or legal advice.",
+      "Do not include YAML frontmatter.",
+      "Do not wrap the result in code fences.",
+      "Do not add a top-level title."
+    ].join("\n")
+  },
+  "free-prompt": {
+    title: "Yoofloe AI note",
+    type: "ai-free-prompt",
+    surface: "ai-free-prompt",
+    systemPrompt: "You are a grounded writing assistant for Yoofloe data. Use only the provided facts, separate evidence from interpretation, and return Markdown only.",
+    userGoal: [
+      "Create a Markdown document grounded in the Yoofloe data and the user's prompt.",
+      "If the prompt is broad, organize the answer into clear sections and identify uncertainty.",
       "Do not include YAML frontmatter.",
       "Do not wrap the result in code fences.",
       "Do not add a top-level title."

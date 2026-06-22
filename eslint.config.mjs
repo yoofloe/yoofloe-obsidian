@@ -31,7 +31,11 @@ export default [
       "@typescript-eslint": tseslint
     },
     rules: {
-      "obsidianmd/ui/sentence-case": ["error", { enforceCamelCaseLower: true }],
+      "obsidianmd/ui/sentence-case": ["error", {
+        enforceCamelCaseLower: true,
+        brands: ["Yoofloe", "Obsidian", "Gemini", "Google", "Vertex", "BYOK", "MCP", "Markdown", "Claude Code", "Supabase"],
+        acronyms: ["AI", "PAT", "ID", "URL", "JSON", "API", "YYYY-MM-DD"]
+      }],
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": ["error", { checksVoidReturn: { arguments: true } }],
       "@typescript-eslint/require-await": "error"

@@ -3,7 +3,8 @@ import type YoofloePlugin from "./main";
 import { YoofloeClient } from "./api/yoofloe-client";
 import { buildClaudeCodePrompt, buildCodexPrompt, buildMcpConfigSnippet } from "./agent-guidance";
 import { describeStoredSecret, SECRET_STORAGE_REQUIRED_MESSAGE } from "./secrets";
-import { YOOFLOE_RANGES } from "./types";
+import { YOOFLOE_DOMAINS, YOOFLOE_OUTPUT_TARGETS, YOOFLOE_RANGES } from "./types";
+import type { YoofloeDomain, YoofloeOutputTarget } from "./types";
 import {
   YOOFLOE_PAIRING_PENDING_CONTRACT,
   YOOFLOE_WEB_PAIRING_URL,
@@ -17,6 +18,40 @@ type BadgeTone = "muted" | "accent" | "success" | "warning" | "danger";
 const DEFAULT_MODEL_PLACEHOLDER = "gemini-2.5-flash-lite";
 const DEFAULT_PROJECT_PLACEHOLDER = "my-google-cloud-project";
 const DEFAULT_VERTEX_LOCATION = "us-central1";
+const SENSITIVE_DOMAINS = new Set<YoofloeDomain>(["finance", "business"]);
+
+function domainLabel(domain: YoofloeDomain) {
+  switch (domain) {
+    case "schedule":
+      return "Schedule";
+    case "life":
+      return "Life";
+    case "wellness":
+      return "Wellness";
+    case "finance":
+      return "Finance";
+    case "business":
+      return "Business";
+    case "journal":
+      return "Journal";
+    case "garden":
+      return "Garden";
+  }
+}
+
+function outputTargetLabel(target: YoofloeOutputTarget) {
+  switch (target) {
+    case "append-current":
+      return "Append to current note";
+    case "insert-cursor":
+      return "Insert at cursor";
+    case "replace-selection":
+      return "Replace selection";
+    case "new-note":
+    default:
+      return "New Yoofloe note";
+  }
+}
 
 function secureStorageWarning(hasSecureStorage: boolean) {
   if (!hasSecureStorage) {
@@ -101,6 +136,10 @@ function tokenBadgeState(plugin: YoofloePlugin) {
 }
 
 function providerChoiceStatus(provider: YoofloePlugin["settings"]["provider"]["type"]) {
+  if (provider === "yoofloe-hosted") {
+    return { text: "Default", tone: "success" as const };
+  }
+
   if (provider === "none") {
     return { text: "Not configured", tone: "warning" as const };
   }
@@ -120,8 +159,12 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
     return nextSteps;
   }
 
+  if (provider === "yoofloe-hosted") {
+    return nextSteps;
+  }
+
   if (provider === "none") {
-    nextSteps.push("Choose a Gemini setup to generate insight documents.");
+    nextSteps.push("Choose Yoofloe hosted or a Gemini BYOK setup to generate AI notes.");
     return nextSteps;
   }
 
@@ -150,13 +193,15 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
 
 function providerHelpText(provider: YoofloePlugin["settings"]["provider"]["type"]) {
   switch (provider) {
+    case "yoofloe-hosted":
+      return "Default. Yoofloe handles the model path so you can create grounded Markdown without Google Cloud setup.";
     case "gemini-google":
-      return "Recommended for most users. Sign in with Google in your browser, then use Gemini with your own Google cloud project.";
+      return "Advanced BYOK. Sign in with Google in your browser, then use Gemini with your own Google cloud project.";
     case "gemini-vertex":
       return "Advanced cloud setup. Use this if you specifically want the cloud setup and know your project and model.";
     case "none":
     default:
-      return "Yoofloe is designed to generate insight documents. Configure Gemini to start generating them.";
+      return "Choose Yoofloe hosted or configure an advanced BYOK provider to start generating AI notes.";
   }
 }
 
@@ -168,6 +213,12 @@ function providerReadiness(plugin: YoofloePlugin, hasSecureStorage: boolean) {
   const hasGoogleModel = !!plugin.settings.provider.googleModel.trim();
   const hasVertexModel = !!plugin.settings.provider.vertexModel.trim();
   const googleConnected = plugin.settings.provider.googleConnected || plugin.googleAuth.hasRefreshToken() || plugin.googleConnectionStatus === "connected";
+
+  if (provider === "yoofloe-hosted") {
+    return hasSecureStorage && plugin.tokenStatus !== "missing" && plugin.tokenStatus !== "invalid"
+      ? { text: "Ready", tone: "success" as const }
+      : { text: "Connect Yoofloe", tone: "warning" as const };
+  }
 
   if (provider === "none") {
     return { text: "Setup incomplete", tone: "warning" as const };
@@ -225,6 +276,29 @@ export class YoofloeSettingTab extends PluginSettingTab {
       this.plugin.settings.defaultRange = value;
       await this.plugin.saveSettings();
     };
+    const saveDefaultDomains = async (domain: YoofloeDomain, enabled: boolean) => {
+      const next = new Set(this.plugin.settings.defaultDomains);
+      if (enabled) {
+        next.add(domain);
+      } else {
+        next.delete(domain);
+      }
+      if (next.size === 0) {
+        new Notice("Keep at least one default Yoofloe source enabled.");
+        this.display();
+        return;
+      }
+      this.plugin.settings.defaultDomains = [...next];
+      await this.plugin.saveSettings();
+    };
+    const saveDefaultOutputTarget = async (value: YoofloeOutputTarget) => {
+      this.plugin.settings.defaultOutputTarget = value;
+      await this.plugin.saveSettings();
+    };
+    const saveDefaultTone = async (value: string) => {
+      this.plugin.settings.defaultTone = value.trim() || "clear and practical";
+      await this.plugin.saveSettings();
+    };
     const saveDateFormat = async (value: typeof this.plugin.settings.dateFormat) => {
       this.plugin.settings.dateFormat = value;
       await this.plugin.saveSettings();
@@ -242,10 +316,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
       await this.plugin.saveSettings();
     };
 
-    new Setting(containerEl).setName("Setup").setHeading();
+    new Setting(containerEl).setName("Getting started").setHeading();
     containerEl.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Yoofloe for Obsidian includes plugin access and the Obsidian agent bridge for free and pro accounts. In Obsidian, you connect with a personal access token from your account, then use your own provider setup or connected agent model path for AI generation. Yoofloe provides grounded context and access control, but not the model."
+      text: "Connect Yoofloe once, then create grounded Markdown notes from your personal Yoofloe data. Yoofloe-hosted AI writer is the default; Gemini BYOK and MCP stay available under advanced."
     });
 
     containerEl.createEl("div", {
@@ -262,25 +336,58 @@ export class YoofloeSettingTab extends PluginSettingTab {
     }
 
     const quickStart = containerEl.createDiv({ cls: "yoofloe-quick-start" });
-    new Setting(quickStart).setName("Recommended first run").setHeading();
+    new Setting(quickStart).setName("Start here").setHeading();
+    const statusRow = quickStart.createDiv({ cls: "yoofloe-settings-status-row" });
+    createBadge(statusRow, this.plugin.tokenStatus === "verified" || this.plugin.tokenStatus === "saved" ? "Connected" : this.plugin.tokenStatus === "invalid" ? "Reconnect Yoofloe" : "Connect Yoofloe", this.plugin.tokenStatus === "invalid" ? "danger" : this.plugin.tokenStatus === "missing" ? "warning" : "success");
+    createBadge(statusRow, "Personal only", "muted");
+    createBadge(statusRow, provider === "yoofloe-hosted" ? "Yoofloe AI ready" : provider === "none" ? "AI paused" : "BYOK provider", provider === "yoofloe-hosted" ? "success" : "accent");
+    createBadge(statusRow, this.plugin.settings.showAdvancedProvider ? "Advanced provider on" : "Advanced provider off", "muted");
     const quickStartList = quickStart.createEl("ol", { cls: "yoofloe-step-list" });
     [
-      "Connect with Yoofloe web or paste a Yoofloe token, then click Verify token.",
-      "Finish the Gemini setup below.",
-      "Run insight brief to generate your first grounded document."
+      "Connect Yoofloe.",
+      "Create your first AI note.",
+      "Tune defaults when you know what you want."
     ].forEach((item) => quickStartList.createEl("li", { text: item }));
+    new Setting(quickStart)
+      .setName("First AI note")
+      .setDesc("Open the writer pane or create a daily review immediately with the current defaults.")
+      .addButton((button) => {
+        button
+          .setButtonText("Open AI writer")
+          .onClick(() => {
+            void this.plugin.openWriterView();
+          });
+      })
+      .addButton((button) => {
+        button
+          .setButtonText("Create first note")
+          .setCta()
+          .onClick(() => {
+            void this.plugin.runHostedWriterFromOptions({
+              documentType: "daily-review",
+              domains: [...this.plugin.settings.defaultDomains],
+              range: "1W",
+              scope: "personal",
+              tone: this.plugin.settings.defaultTone,
+              outputMode: this.plugin.settings.defaultOutputTarget,
+              includeRaw: this.plugin.settings.includeRawData
+            });
+          });
+      });
 
     const tokenSection = createStepSection(
       containerEl,
       "Step 1",
       "Connect Yoofloe",
       tokenBadgeState(this.plugin),
-      "This PAT lets the Obsidian plugin and Obsidian MCP wrapper fetch grounded Yoofloe data. It exposes personal-only data by design."
+      "Connect through Yoofloe web. The plugin stores the returned PAT in Obsidian secure storage and uses personal-only access by design."
     );
 
-    createInfoCard(tokenSection, "Connect with Yoofloe web", "Open Yoofloe in your browser and sign in there. For Yoofloe access, the plugin never asks for your password and stores only the returned PAT.");
-    createInfoCard(tokenSection, "What you need", "A personal access token with the pat_yfl_ prefix. Browser pairing can save it automatically, and manual paste remains available. Yoofloe for Obsidian and Yoofloe Obsidian MCP are included with free and pro accounts. Obsidian access is personal-only by design and does not include couple/shared exports.");
-    createInfoCard(tokenSection, "External access notice", "Obsidian plugin mode uses your own provider setup directly from Obsidian. Yoofloe Obsidian MCP uses your connected agent's model path. Yoofloe provides the PAT-protected bundle and brief, but does not receive your Google sign-in credentials or agent provider key.");
+    createInfoCard(tokenSection, "Connect with Yoofloe web", "Open Yoofloe in your browser and sign in there. The plugin never asks for your password.");
+    const privacyDetails = tokenSection.createEl("details", { cls: "yoofloe-help-details" });
+    privacyDetails.createEl("summary", { text: "Privacy and access" });
+    createInfoCard(privacyDetails, "Personal-only scope", "Yoofloe for Obsidian and Yoofloe Obsidian MCP are included with free and pro accounts. Obsidian access is personal-only and does not include couple/shared exports.");
+    createInfoCard(privacyDetails, "Hosted writer disclosure", "Yoofloe-hosted AI writer uses the Yoofloe AI service for Markdown generation. Advanced BYOK keeps Google/Gemini calls in your own provider setup.");
     createInfoCard(tokenSection, "Automatic pairing status", YOOFLOE_PAIRING_PENDING_CONTRACT);
     createHelpDetails(tokenSection, "Need help finding your token?", [
       `Click Connect with Yoofloe web or open ${YOOFLOE_WEB_PAIRING_URL}.`,
@@ -291,10 +398,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
 
     new Setting(tokenSection)
       .setName("Browser pairing")
-      .setDesc("Use your yoofloe web session to create an Obsidian token. Obsidian will not collect your email or password.")
+      .setDesc("Use your Yoofloe web session to create an Obsidian token. Obsidian will not collect your email or password.")
       .addButton((button) => {
         button
-          .setButtonText("Connect with yoofloe web")
+          .setButtonText("Connect with Yoofloe web")
           .setDisabled(!hasSecureStorage)
           .onClick(async () => {
             try {
@@ -309,6 +416,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               new Notice("Yoofloe web opened. Sign in there and approve the Obsidian pairing request.");
               const claim = await waitForYoofloeWebPairing(this.plugin.settings.functionsBaseUrl, session);
               this.plugin.secretStore.setPat(claim.token);
+              this.plugin.settings.yoofloeAccessMode = "read";
               this.plugin.tokenStatus = "saved";
               await this.plugin.saveSettings();
               new Notice("Yoofloe token saved in secure storage.");
@@ -335,8 +443,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
           });
       });
 
+    const manualTokenDetails = tokenSection.createEl("details", { cls: "yoofloe-help-details" });
+    manualTokenDetails.createEl("summary", { text: "Use token manually" });
+
     let pendingPat = "";
-    new Setting(tokenSection)
+    new Setting(manualTokenDetails)
       .setName("Yoofloe API token")
       .setDesc(hasSecureStorage
         ? `Stored in secure storage. ${describeStoredSecret(pat, 8)}`
@@ -363,12 +474,13 @@ export class YoofloeSettingTab extends PluginSettingTab {
             }
 
             if (!pendingPat) {
-              new Notice("Paste a yoofloe token before saving.");
+              new Notice("Paste a Yoofloe token before saving.");
               return;
             }
 
             try {
               this.plugin.secretStore.setPat(pendingPat);
+              this.plugin.settings.yoofloeAccessMode = "read";
               this.plugin.tokenStatus = "saved";
               pendingPat = "";
               await this.plugin.saveSettings();
@@ -423,6 +535,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
           .setDisabled(!hasSecureStorage || !pat)
           .onClick(async () => {
             this.plugin.secretStore.clearPat();
+            this.plugin.settings.yoofloeAccessMode = "read";
             this.plugin.tokenStatus = "missing";
             this.plugin.latestEntitlement = null;
             await this.plugin.saveSettings();
@@ -437,8 +550,16 @@ export class YoofloeSettingTab extends PluginSettingTab {
       functionsBaseUrl: this.plugin.settings.functionsBaseUrl
     };
 
+    const mcpDetails = containerEl.createEl("details", { cls: "yoofloe-help-details yoofloe-advanced-panel" });
+    mcpDetails.open = this.plugin.settings.showMcpSetup;
+    mcpDetails.createEl("summary", { text: "Advanced: Obsidian MCP wrapper" });
+    mcpDetails.addEventListener("toggle", () => {
+      this.plugin.settings.showMcpSetup = mcpDetails.open;
+      void this.plugin.saveSettings();
+    });
+
     const agentSection = createStepSection(
-      containerEl,
+      mcpDetails,
       "Optional",
       "Connect an MCP-capable agent",
       { text: "Included", tone: "accent" },
@@ -448,6 +569,13 @@ export class YoofloeSettingTab extends PluginSettingTab {
     new Setting(agentSection)
       .setName("Agent setup snippets")
       .setDesc("Copy safe placeholders for your agent client and prompt. Replace paths and token values locally.")
+      .addButton((button) => {
+        button
+          .setButtonText("Create setup note")
+          .onClick(() => {
+            void this.plugin.createMcpSetupNote();
+          });
+      })
       .addButton((button) => {
         button
           .setButtonText("Copy config")
@@ -464,30 +592,39 @@ export class YoofloeSettingTab extends PluginSettingTab {
       })
       .addButton((button) => {
         button
-          .setButtonText("Copy Claude code prompt")
+          .setButtonText("Copy Claude Code prompt")
           .onClick(() => {
             void copyTextToClipboard("Claude Code prompt", buildClaudeCodePrompt(agentOptions));
           });
       });
 
+    const providerDetails = containerEl.createEl("details", { cls: "yoofloe-help-details yoofloe-advanced-panel" });
+    providerDetails.open = this.plugin.settings.showAdvancedProvider;
+    providerDetails.createEl("summary", { text: "Advanced: use my own provider" });
+    providerDetails.addEventListener("toggle", () => {
+      this.plugin.settings.showAdvancedProvider = providerDetails.open;
+      void this.plugin.saveSettings();
+    });
+
     const providerSection = createStepSection(
-      containerEl,
+      providerDetails,
       "Step 2",
-      "Choose your provider",
+      "Choose AI provider",
       providerChoice,
-      "Choose the setup for insight brief, decision memo, action plan, and deep dive."
+      "Keep Yoofloe hosted for the simplest path, or switch to Gemini BYOK if you want your own provider setup."
     );
 
-    createInfoCard(providerSection, "Recommended choice", "Most people should start with the Google setup. Choose the Vertex setup only if you specifically want your own Vertex project.");
+    createInfoCard(providerSection, "Recommended choice", "Most people should stay with Yoofloe hosted. Choose Gemini only if you specifically want your own Google project and model path.");
 
     new Setting(providerSection)
       .setName("Model provider")
-      .setDesc("Choose the setup yoofloe should use for insight brief, decision memo, action plan, and deep dive.")
+          .setDesc("Choose the setup Yoofloe should use for insight brief, decision memo, action plan, and deep dive.")
       .addDropdown((dropdown) => {
         dropdown
+          .addOption("yoofloe-hosted", "Yoofloe hosted")
           .addOption("none", "None")
-          .addOption("gemini-google", "Google setup")
-          .addOption("gemini-vertex", "Vertex setup");
+          .addOption("gemini-google", "Gemini BYOK")
+          .addOption("gemini-vertex", "Vertex BYOK");
 
         dropdown.setValue(provider).onChange((value) => {
           void saveProviderType(value as typeof this.plugin.settings.provider.type);
@@ -500,13 +637,15 @@ export class YoofloeSettingTab extends PluginSettingTab {
     });
 
     const setupSection = createStepSection(
-      containerEl,
+      providerDetails,
       "Step 3",
       "Finish setup",
       providerStatus,
-      provider === "none"
-        ? "Configure Gemini to start generating insight documents."
-        : "Save each required field below. When this step is ready, you can run insight brief."
+      provider === "yoofloe-hosted"
+        ? "No Google setup is required for the default Yoofloe AI Writer."
+        : provider === "none"
+          ? "Choose Yoofloe hosted or configure Gemini BYOK to start generating AI notes."
+          : "Save each required field below. When this step is ready, you can run AI commands."
     );
 
     if (provider !== "none" && nextSteps.length > 0) {
@@ -802,12 +941,16 @@ export class YoofloeSettingTab extends PluginSettingTab {
       }
     }
 
+    if (provider === "yoofloe-hosted") {
+      createInfoCard(setupSection, "Ready by default", "Yoofloe-hosted AI Writer uses your connected Yoofloe PAT and does not require Google client IDs, secrets, or Vertex project settings.");
+    }
+
     if (provider === "none") {
-      createInfoCard(setupSection, "Gemini setup required", "Yoofloe only generates insight documents. Select the Google setup or the Vertex setup to continue.");
+      createInfoCard(setupSection, "AI generation paused", "Choose Yoofloe hosted or an advanced BYOK setup to generate AI notes.");
     }
 
     const advancedSection = containerEl.createEl("details", { cls: "yoofloe-help-details" });
-    advancedSection.createEl("summary", { text: "Advanced defaults" });
+    advancedSection.createEl("summary", { text: "Tune defaults" });
 
     new Setting(advancedSection)
       .setName("Save path")
@@ -828,6 +971,48 @@ export class YoofloeSettingTab extends PluginSettingTab {
         dropdown.setValue(this.plugin.settings.defaultRange).onChange((value) => {
           void saveDefaultRange(value as typeof this.plugin.settings.defaultRange);
         });
+      });
+
+    const defaultDomainsSection = advancedSection.createDiv({ cls: "yoofloe-default-domain-section" });
+    defaultDomainsSection.createEl("div", { cls: "yoofloe-info-card-title", text: "Default sources" });
+    defaultDomainsSection.createEl("p", {
+      cls: "yoofloe-setting-note",
+      text: "Used by the AI writer and hosted command defaults. Finance and business stay off unless you select them."
+    });
+    const defaultDomainGrid = defaultDomainsSection.createDiv({ cls: "yoofloe-domain-grid" });
+    for (const domain of YOOFLOE_DOMAINS) {
+      const label = defaultDomainGrid.createEl("label", { cls: "yoofloe-domain-toggle" });
+      const checkbox = label.createEl("input", { attr: { type: "checkbox" } });
+      checkbox.checked = this.plugin.settings.defaultDomains.includes(domain);
+      checkbox.addEventListener("change", () => {
+        void saveDefaultDomains(domain, checkbox.checked);
+      });
+      label.createEl("span", { text: domainLabel(domain) });
+      if (SENSITIVE_DOMAINS.has(domain)) {
+        label.createEl("span", { cls: "yoofloe-sensitive-label", text: "Sensitive" });
+      }
+    }
+
+    new Setting(advancedSection)
+      .setName("Default output target")
+      .setDesc("Where the AI writer sends generated Markdown by default.")
+      .addDropdown((dropdown) => {
+        YOOFLOE_OUTPUT_TARGETS.forEach((target) => {
+          dropdown.addOption(target, outputTargetLabel(target));
+        });
+        dropdown.setValue(this.plugin.settings.defaultOutputTarget).onChange((value) => {
+          void saveDefaultOutputTarget(value as YoofloeOutputTarget);
+        });
+      });
+
+    new Setting(advancedSection)
+      .setName("Default tone")
+      .setDesc("Optional style guidance for hosted AI writer output.")
+      .addText((text) => {
+        text.setValue(this.plugin.settings.defaultTone).onChange((value) => {
+          void saveDefaultTone(value);
+        });
+        text.inputEl.classList.add("yoofloe-input-wide");
       });
 
     new Setting(advancedSection)
@@ -853,7 +1038,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
 
     new Setting(advancedSection)
       .setName("Write frontmatter")
-      .setDesc("Adds yoofloe metadata frontmatter to each generated note.")
+      .setDesc("Adds Yoofloe metadata frontmatter to each generated note.")
       .addToggle((toggle) => {
         toggle.setValue(this.plugin.settings.autoFrontmatter).onChange((value) => {
           void saveAutoFrontmatter(value);
@@ -862,7 +1047,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
 
     new Setting(advancedSection)
       .setName("Functions base URL")
-      .setDesc("Defaults to the yoofloe supabase edge functions base URL.")
+      .setDesc("Defaults to the Yoofloe Supabase edge functions base URL.")
       .addText((text) => {
         text.setValue(this.plugin.settings.functionsBaseUrl).onChange((value) => {
           void saveFunctionsBaseUrl(value);

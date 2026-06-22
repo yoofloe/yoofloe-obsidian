@@ -166,3 +166,342 @@
   width: 100%;
   resize: vertical;
 }
+
+.yoofloe-settings-status-row,
+.yoofloe-writer-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0.8rem;
+}
+
+.yoofloe-advanced-panel {
+  margin-top: 1rem;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 0.75rem;
+}
+
+.yoofloe-writer-view,
+.yoofloe-capture-view {
+  padding: 1rem;
+}
+
+.yoofloe-writer-header {
+  margin-bottom: 1rem;
+}
+
+.yoofloe-writer-header h2 {
+  margin: 0.15rem 0 0.35rem;
+}
+
+.yoofloe-writer-header p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.yoofloe-writer-kicker {
+  color: var(--text-accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.yoofloe-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.yoofloe-preset-button {
+  min-height: 6.25rem;
+  padding: 0.8rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 14px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  text-align: left;
+  cursor: pointer;
+}
+
+.yoofloe-preset-button:hover,
+.yoofloe-preset-button:focus-visible,
+.yoofloe-preset-button.is-active {
+  border-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
+}
+
+.yoofloe-preset-title {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.yoofloe-preset-description {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.yoofloe-sensitive-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.25rem;
+  padding: 0.05rem 0.45rem;
+  margin-left: 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-orange) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-orange) 40%, transparent);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.yoofloe-writer-prompt {
+  min-height: 5rem;
+  width: min(36rem, 100%);
+  resize: vertical;
+}
+
+.yoofloe-writer-customize {
+  margin: 1rem 0;
+}
+
+.yoofloe-domain-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.yoofloe-domain-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-primary);
+}
+
+.yoofloe-context-preview,
+.yoofloe-default-domain-section {
+  margin: 1rem 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-primary);
+}
+
+.yoofloe-context-preview p {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+}
+
+.yoofloe-writer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.yoofloe-writer-generate {
+  min-height: 2.5rem;
+  min-width: 9rem;
+}
+
+.yoofloe-capture-source-row,
+.yoofloe-capture-target-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.yoofloe-capture-section-label {
+  margin: 1rem 0 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.yoofloe-capture-domain-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.65rem;
+  margin: 0 0 1rem;
+}
+
+.yoofloe-capture-domain {
+  min-height: 6rem;
+}
+
+.yoofloe-capture-domain.is-sensitive {
+  border-color: color-mix(in srgb, var(--color-orange) 38%, var(--background-modifier-border));
+}
+
+.yoofloe-capture-domain-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.yoofloe-domain-status-ready {
+  background: color-mix(in srgb, var(--color-green) 16%, transparent);
+  color: var(--text-normal);
+}
+
+.yoofloe-domain-status-gated,
+.yoofloe-domain-status-future {
+  background: color-mix(in srgb, var(--color-orange) 14%, transparent);
+  color: var(--text-muted);
+}
+
+.yoofloe-domain-status-blocked {
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  color: var(--text-muted);
+}
+
+.yoofloe-capture-toggle {
+  min-height: 2.3rem;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.yoofloe-capture-toggle:hover,
+.yoofloe-capture-toggle:focus-visible,
+.yoofloe-capture-toggle.is-active {
+  border-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
+}
+
+.yoofloe-capture-input {
+  width: 100%;
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.yoofloe-capture-target {
+  min-height: 5rem;
+  min-width: min(10rem, 100%);
+}
+
+.yoofloe-capture-message {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary));
+  color: var(--text-normal);
+}
+
+.yoofloe-capture-preview h3,
+.yoofloe-capture-results h3 {
+  margin: 1.1rem 0 0.65rem;
+}
+
+.yoofloe-capture-card {
+  margin: 0.75rem 0;
+  padding: 0.85rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 14px;
+  background: var(--background-primary-alt);
+}
+
+.yoofloe-capture-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin-bottom: 0.5rem;
+}
+
+.yoofloe-capture-card-title {
+  font-weight: 700;
+}
+
+.yoofloe-capture-card-subtitle,
+.yoofloe-capture-snippet {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.yoofloe-capture-card-subtitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.yoofloe-capture-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.2rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.yoofloe-risk-high {
+  background: color-mix(in srgb, var(--color-orange) 16%, transparent);
+}
+
+.yoofloe-capture-snippet {
+  margin: 0.4rem 0 0.75rem;
+}
+
+.yoofloe-capture-textarea {
+  width: 100%;
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.yoofloe-capture-textarea-small {
+  width: 100%;
+  min-height: 3.5rem;
+  resize: vertical;
+}
+
+.yoofloe-capture-warning {
+  margin-top: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.yoofloe-capture-result {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0.45rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
+.yoofloe-capture-result-applied {
+  border-color: color-mix(in srgb, var(--color-green) 45%, var(--background-modifier-border));
+}
+
+.yoofloe-capture-result-conflict,
+.yoofloe-capture-result-failed {
+  border-color: color-mix(in srgb, var(--color-red) 45%, var(--background-modifier-border));
+}
+
+.yoofloe-capture-result-needs-confirmation,
+.yoofloe-capture-result-blocked {
+  border-color: color-mix(in srgb, var(--color-orange) 45%, var(--background-modifier-border));
+}

@@ -14,9 +14,14 @@ const MCP_SERVER_PATH_EXAMPLE = "C:/absolute/path/to/mcp-server.js";
 const VAULT_PATH_EXAMPLE = "C:/Users/you/Documents/Obsidian Vault";
 
 const DOCUMENT_TYPE_SUMMARIES: Record<YoofloeAiDocumentType, string> = {
+  "daily-review": "Daily snapshot, signals, friction, next actions, and reflection prompts.",
+  "weekly-plan": "Weekly focus, commitments, wellness considerations, priorities, and watchouts.",
   "insight-brief": "Strongest signals, tensions, opportunities, risks, and suggested questions.",
   "decision-memo": "Situation framing, tradeoffs, recommended direction, evidence, and open questions.",
   "action-plan": "Priorities, recommended sequence, dependencies, blockers, watchouts, and evidence notes.",
+  "wellness-check": "Wellness signals, recovery, helpful patterns, gentle adjustments, and questions.",
+  "finance-snapshot": "Cashflow signals, spending or income changes, risks, next steps, and open questions.",
+  "free-prompt": "A custom grounded Markdown note from Yoofloe data and the user's prompt.",
   "deep-dive": "Focused analysis on one theme or concern. Requires a non-empty focusInstruction."
 };
 
@@ -157,7 +162,8 @@ export function buildAgentSetupNoteMarkdown(options: AgentGuidanceOptions) {
     "",
     "## Choose The Right Path",
     "",
-    "- Use Plugin AI for one-click generation inside Obsidian with Gemini.",
+    "- Use the Yoofloe AI Writer for one-click hosted generation inside Obsidian.",
+    "- Use Advanced BYOK if you want the plugin to call Gemini from your own Google setup.",
     "- Use Agent Direct when Codex, Claude Code, or another external agent should bring its own model and workflow.",
     "- Agent Direct does not reuse the plugin's Gemini OAuth setup or secrets.",
     "",

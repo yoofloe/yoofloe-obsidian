@@ -9,15 +9,32 @@ export const YOOFLOE_DOMAINS = [
 ] as const;
 
 export const YOOFLOE_RANGES = ["1W", "1M", "6M", "1Y", "All"] as const;
-export const YOOFLOE_AI_DOCUMENT_TYPES = ["insight-brief", "decision-memo", "action-plan", "deep-dive"] as const;
+export const YOOFLOE_AI_DOCUMENT_TYPES = [
+  "daily-review",
+  "weekly-plan",
+  "insight-brief",
+  "decision-memo",
+  "action-plan",
+  "wellness-check",
+  "finance-snapshot",
+  "free-prompt",
+  "deep-dive"
+] as const;
+export const YOOFLOE_OUTPUT_TARGETS = ["new-note", "append-current", "insert-cursor", "replace-selection"] as const;
+export const YOOFLOE_CAPTURE_TARGETS = ["memo", "task", "journal"] as const;
 
 export type YoofloeDomain = (typeof YOOFLOE_DOMAINS)[number];
 export type YoofloeRange = (typeof YOOFLOE_RANGES)[number];
 export type YoofloeScope = "personal";
 export type YoofloeDateFormat = "YYYY-MM-DD" | "YYYYMMDD" | "YYYY.MM.DD";
 export type YoofloeGardenerSurface = "brief" | "plan" | "prompt" | "export";
-export type YoofloeAiProviderType = "none" | "gemini-google" | "gemini-vertex";
+export type YoofloeAiProviderType = "yoofloe-hosted" | "none" | "gemini-google" | "gemini-vertex";
 export type YoofloeAiDocumentType = (typeof YOOFLOE_AI_DOCUMENT_TYPES)[number];
+export type YoofloeOutputTarget = (typeof YOOFLOE_OUTPUT_TARGETS)[number];
+export type YoofloeCaptureTarget = (typeof YOOFLOE_CAPTURE_TARGETS)[number];
+export type YoofloeAccessMode = "read" | "read-write";
+export type YoofloeCaptureAction = string;
+export type YoofloeCaptureResultStatus = "applied" | "blocked" | "needs_confirmation" | "conflict" | "failed" | "skipped";
 
 export interface MarkdownRenderOptions {
   autoFrontmatter: boolean;
@@ -74,8 +91,14 @@ export interface YoofloePluginSettings {
   language: string;
   defaultRange: YoofloeRange;
   defaultScope: YoofloeScope;
+  defaultDomains: YoofloeDomain[];
+  defaultOutputTarget: YoofloeOutputTarget;
+  defaultTone: string;
   includeRawData: boolean;
   autoFrontmatter: boolean;
+  showAdvancedProvider: boolean;
+  showMcpSetup: boolean;
+  yoofloeAccessMode: YoofloeAccessMode;
   provider: YoofloeByokSettings;
 }
 
@@ -121,3 +144,112 @@ export interface YoofloeGardenerApiResponse<TData = Record<string, unknown>> {
   data: TData;
   rendered?: string;
 }
+
+export interface YoofloeWriterSource {
+  domain: YoofloeDomain;
+  title: string;
+  citation: string;
+  summary: string;
+}
+
+export interface YoofloeWriterUnavailable {
+  code: string;
+  message: string;
+}
+
+export interface YoofloeCurrentNoteContext {
+  enabled: boolean;
+  path?: string;
+  title?: string;
+  content?: string;
+  selectionOnly?: boolean;
+}
+
+export interface YoofloeHostedWriterRequest {
+  documentType: YoofloeAiDocumentType;
+  domains: YoofloeDomain[];
+  range: YoofloeRange;
+  scope: YoofloeScope;
+  prompt?: string;
+  tone?: string;
+  outputMode?: YoofloeOutputTarget;
+  includeRaw?: boolean;
+  currentNoteContext?: YoofloeCurrentNoteContext;
+}
+
+export interface YoofloeHostedWriterResponse {
+  success: boolean;
+  requestId?: string;
+  title: string;
+  markdownBody: string;
+  sources: YoofloeWriterSource[];
+  unavailable: YoofloeWriterUnavailable[];
+  entitlement?: YoofloeEntitlement;
+  rateLimit?: YoofloeRateLimit;
+  security?: YoofloeExternalAccessSecurityContract;
+  provider?: {
+    type?: string;
+    label?: string;
+    model?: string;
+    hosted?: boolean;
+  };
+}
+
+export interface YoofloeCaptureCandidate {
+  candidateId: string;
+  action: YoofloeCaptureAction;
+  domain?: string;
+  menu?: string;
+  riskTier?: string;
+  itemType: "memo" | "journal" | "task";
+  title: string;
+  normalizedFields: Record<string, unknown>;
+  sourceSnippet?: string | null;
+  confidence?: number;
+  warnings?: string[];
+  requiresConfirmation?: boolean;
+}
+
+export interface YoofloeWritePreviewRequest {
+  source: "manual" | "selection";
+  text: string;
+  notePath?: string;
+  selectionOnly?: boolean;
+  target: YoofloeCaptureTarget;
+  domain?: YoofloeCaptureDomain;
+  scope: YoofloeScope;
+}
+
+export interface YoofloeWritePreviewResponse {
+  success: boolean;
+  previewId: string;
+  expiresAt: string;
+  candidates: YoofloeCaptureCandidate[];
+  unavailable?: YoofloeWriterUnavailable[];
+  security?: Record<string, unknown>;
+}
+
+export interface YoofloeWriteExecuteRequest {
+  previewId: string;
+  approvedCandidateIds: string[];
+  editedFields: Record<string, Record<string, unknown>>;
+  confirmations: {
+    confirmSoftDelete?: boolean;
+  };
+  clientRequestId: string;
+  scope: YoofloeScope;
+}
+
+export interface YoofloeWriteExecuteResult {
+  candidateId: string;
+  status: YoofloeCaptureResultStatus;
+  itemId?: string;
+  message?: string;
+}
+
+export interface YoofloeWriteExecuteResponse {
+  success: boolean;
+  previewId: string;
+  results: YoofloeWriteExecuteResult[];
+}
+import type { YoofloeCaptureDomain } from "./capture-registry";

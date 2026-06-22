@@ -3,9 +3,15 @@ import type {
   YoofloeDataApiResponse,
   YoofloeDomain,
   YoofloeGardenerApiResponse,
+  YoofloeHostedWriterRequest,
+  YoofloeHostedWriterResponse,
   YoofloePluginSettings,
   YoofloeRange,
-  YoofloeScope
+  YoofloeScope,
+  YoofloeWriteExecuteRequest,
+  YoofloeWriteExecuteResponse,
+  YoofloeWritePreviewRequest,
+  YoofloeWritePreviewResponse
 } from "../types";
 
 type BundleRequest = {
@@ -41,7 +47,7 @@ export class YoofloeApiError extends Error {
   }
 }
 
-async function postJson<T>(settings: YoofloeClientSettings, token: string, path: string, body: Record<string, unknown>): Promise<T> {
+async function postJson<T>(settings: YoofloeClientSettings, token: string, path: string, body: object): Promise<T> {
   const trimmedToken = token.trim();
   if (!trimmedToken) {
     throw new Error("Yoofloe API token is missing.");
@@ -95,5 +101,17 @@ export class YoofloeClient {
       scope: request.scope,
       format: request.format
     });
+  }
+
+  async runHostedWriter(request: YoofloeHostedWriterRequest): Promise<YoofloeHostedWriterResponse> {
+    return postJson<YoofloeHostedWriterResponse>(this.settings, this.token, "obsidian-ai-writer-api", request);
+  }
+
+  async previewWriteActions(request: YoofloeWritePreviewRequest): Promise<YoofloeWritePreviewResponse> {
+    return postJson<YoofloeWritePreviewResponse>(this.settings, this.token, "obsidian-write-preview", request);
+  }
+
+  async executeWriteActions(request: YoofloeWriteExecuteRequest): Promise<YoofloeWriteExecuteResponse> {
+    return postJson<YoofloeWriteExecuteResponse>(this.settings, this.token, "obsidian-write-execute", request);
   }
 }
