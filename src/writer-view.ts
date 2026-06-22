@@ -109,6 +109,38 @@ function domainLabel(domain: YoofloeDomain) {
   }
 }
 
+function createTextareaField(
+  container: HTMLElement,
+  args: {
+    id: string;
+    label: string;
+    description: string;
+    placeholder: string;
+    value: string;
+    className: string;
+    onChange: (value: string) => void;
+  }
+) {
+  const field = container.createDiv({ cls: "yoofloe-pane-field" });
+  const label = field.createEl("label", {
+    cls: "yoofloe-pane-field-label",
+    text: args.label,
+    attr: { for: args.id }
+  });
+  label.createEl("span", { cls: "yoofloe-pane-field-description", text: args.description });
+  const textarea = field.createEl("textarea", {
+    cls: args.className,
+    attr: {
+      id: args.id,
+      placeholder: args.placeholder,
+      rows: "4"
+    }
+  });
+  textarea.value = args.value;
+  textarea.addEventListener("input", () => args.onChange(textarea.value));
+  return textarea;
+}
+
 export class YoofloeWriterView extends ItemView {
   private documentType: YoofloeAiDocumentType = "daily-review";
   private selectedDomains = new Set<YoofloeDomain>(DEFAULT_WRITER_DOMAINS);
@@ -202,28 +234,31 @@ export class YoofloeWriterView extends ItemView {
     for (const preset of PRESETS) {
       const button = presetGrid.createEl("button", {
         cls: `yoofloe-preset-button${preset.id === this.documentType ? " is-active" : ""}`,
-        attr: { type: "button" }
+        attr: {
+          type: "button",
+          "aria-pressed": preset.id === this.documentType ? "true" : "false"
+        }
       });
-      button.createEl("span", { cls: "yoofloe-preset-title", text: preset.label });
+      const titleRow = button.createSpan({ cls: "yoofloe-card-title-row" });
+      titleRow.createEl("span", { cls: "yoofloe-preset-title", text: preset.label });
       if (preset.sensitive) {
-        button.createEl("span", { cls: "yoofloe-sensitive-label", text: "Sensitive" });
+        titleRow.createEl("span", { cls: "yoofloe-sensitive-label", text: "Sensitive" });
       }
       button.createEl("span", { cls: "yoofloe-preset-description", text: preset.description });
       button.addEventListener("click", () => this.applyPreset(preset));
     }
 
-    new Setting(container)
-      .setName("Free prompt")
-      .setDesc("Optional. Required only when the preset needs your own instruction.")
-      .addTextArea((text) => {
-        text
-          .setPlaceholder("What should Yoofloe help you write?")
-          .setValue(this.prompt)
-          .onChange((value) => {
-            this.prompt = value;
-          });
-        text.inputEl.classList.add("yoofloe-writer-prompt");
-      });
+    createTextareaField(container, {
+      id: "yoofloe-writer-free-prompt",
+      label: "Free prompt",
+      description: "Optional. Required only when the preset needs your own instruction.",
+      placeholder: "What should Yoofloe help you write?",
+      value: this.prompt,
+      className: "yoofloe-writer-prompt",
+      onChange: (value) => {
+        this.prompt = value;
+      }
+    });
 
     const customize = container.createEl("details", { cls: "yoofloe-writer-customize" });
     customize.createEl("summary", { text: "Customize sources" });

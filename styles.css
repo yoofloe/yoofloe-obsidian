@@ -60,12 +60,14 @@
 .yoofloe-status-badge {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   min-height: 1.8rem;
   padding: 0.15rem 0.65rem;
   border-radius: 999px;
   font-size: 0.8rem;
   font-weight: 600;
-  white-space: nowrap;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
   border: 1px solid transparent;
 }
 
@@ -100,6 +102,7 @@
 }
 
 .yoofloe-info-card {
+  min-width: 0;
   margin: 0 0 0.9rem;
   padding: 0.8rem 0.9rem;
   border-radius: 12px;
@@ -183,7 +186,38 @@
 
 .yoofloe-writer-view,
 .yoofloe-capture-view {
-  padding: 1rem;
+  padding: 0.75rem;
+  container-type: inline-size;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.yoofloe-writer-view *,
+.yoofloe-capture-view * {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.yoofloe-writer-view .setting-item,
+.yoofloe-capture-view .setting-item {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.65rem 0;
+}
+
+.yoofloe-writer-view .setting-item-info,
+.yoofloe-capture-view .setting-item-info,
+.yoofloe-writer-view .setting-item-control,
+.yoofloe-capture-view .setting-item-control {
+  width: 100%;
+}
+
+.yoofloe-writer-view .setting-item-control,
+.yoofloe-capture-view .setting-item-control {
+  justify-content: flex-start;
 }
 
 .yoofloe-writer-header {
@@ -197,6 +231,8 @@
 .yoofloe-writer-header p {
   margin: 0;
   color: var(--text-muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .yoofloe-writer-kicker {
@@ -209,20 +245,25 @@
 
 .yoofloe-preset-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.65rem;
   margin: 1rem 0;
 }
 
 .yoofloe-preset-button {
-  min-height: 6.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  min-height: 0;
   padding: 0.8rem;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--background-secondary);
   color: var(--text-normal);
   text-align: left;
   cursor: pointer;
+  line-height: 1.35;
 }
 
 .yoofloe-preset-button:hover,
@@ -233,9 +274,9 @@
 }
 
 .yoofloe-preset-title {
-  display: block;
+  display: inline;
   font-weight: 700;
-  margin-bottom: 0.35rem;
+  overflow-wrap: anywhere;
 }
 
 .yoofloe-preset-description {
@@ -243,25 +284,63 @@
   color: var(--text-muted);
   font-size: 0.85rem;
   line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.yoofloe-card-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  width: 100%;
 }
 
 .yoofloe-sensitive-label {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
+  max-width: 100%;
   min-height: 1.25rem;
   padding: 0.05rem 0.45rem;
-  margin-left: 0.35rem;
+  margin-left: 0;
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-orange) 16%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-orange) 40%, transparent);
   color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 700;
+  line-height: 1.15;
+}
+
+.yoofloe-pane-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.9rem 0;
+  padding: 0.75rem;
+  border-radius: 12px;
+  background: var(--background-primary-alt);
+}
+
+.yoofloe-pane-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: var(--text-normal);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.yoofloe-pane-field-description {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+  overflow-wrap: anywhere;
 }
 
 .yoofloe-writer-prompt {
   min-height: 5rem;
-  width: min(36rem, 100%);
+  width: 100%;
   resize: vertical;
 }
 
@@ -271,7 +350,7 @@
 
 .yoofloe-domain-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
   margin: 0.75rem 0 1rem;
 }
@@ -279,6 +358,7 @@
 .yoofloe-domain-toggle {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.45rem;
   min-height: 2.5rem;
   padding: 0.45rem 0.6rem;
@@ -316,8 +396,8 @@
 
 .yoofloe-capture-source-row,
 .yoofloe-capture-target-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.65rem;
   margin: 1rem 0;
 }
@@ -333,13 +413,13 @@
 
 .yoofloe-capture-domain-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.65rem;
   margin: 0 0 1rem;
 }
 
 .yoofloe-capture-domain {
-  min-height: 6rem;
+  min-height: 0;
 }
 
 .yoofloe-capture-domain.is-sensitive {
@@ -351,6 +431,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 0.35rem;
+  width: 100%;
 }
 
 .yoofloe-domain-status-ready {
@@ -370,6 +451,7 @@
 }
 
 .yoofloe-capture-toggle {
+  width: 100%;
   min-height: 2.3rem;
   padding: 0.35rem 0.8rem;
   border: 1px solid var(--background-modifier-border);
@@ -393,8 +475,8 @@
 }
 
 .yoofloe-capture-target {
-  min-height: 5rem;
-  min-width: min(10rem, 100%);
+  min-height: 0;
+  min-width: 0;
 }
 
 .yoofloe-capture-message {
@@ -426,8 +508,13 @@
   margin-bottom: 0.5rem;
 }
 
+.yoofloe-capture-card-header > *:last-child {
+  min-width: 0;
+}
+
 .yoofloe-capture-card-title {
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .yoofloe-capture-card-subtitle,
@@ -490,6 +577,19 @@
   border: 1px solid var(--background-modifier-border);
   border-radius: 10px;
   background: var(--background-secondary);
+  overflow-wrap: anywhere;
+}
+
+@container (min-width: 520px) {
+  .yoofloe-preset-grid,
+  .yoofloe-capture-domain-grid,
+  .yoofloe-capture-target-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .yoofloe-capture-source-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .yoofloe-capture-result-applied {

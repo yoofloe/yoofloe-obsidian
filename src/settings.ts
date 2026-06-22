@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type YoofloePlugin from "./main";
 import { YoofloeClient } from "./api/yoofloe-client";
 import { buildClaudeCodePrompt, buildCodexPrompt, buildMcpConfigSnippet } from "./agent-guidance";
@@ -256,9 +256,14 @@ export class YoofloeSettingTab extends PluginSettingTab {
     const googleClientSecret = hasSecureStorage ? this.plugin.secretStore.getGoogleClientSecret() : null;
     const provider = this.plugin.settings.provider.type;
     const usesGoogleOauth = provider === "gemini-google" || provider === "gemini-vertex";
+    const isDesktopApp = Platform.isDesktopApp;
+    const mobileByokBlocked = usesGoogleOauth && !isDesktopApp;
     const isVertexProvider = provider === "gemini-vertex";
     const providerChoice = providerChoiceStatus(provider);
     const providerStatus = providerReadiness(this.plugin, hasSecureStorage);
+    const effectiveProviderStatus = mobileByokBlocked
+      ? { text: "Desktop only", tone: "warning" as const }
+      : providerStatus;
     const nextSteps = providerNextSteps(this.plugin, hasSecureStorage);
     const effectiveGoogleStatus = this.plugin.settings.provider.googleConnected || this.plugin.googleAuth.hasRefreshToken()
       ? "connected"
@@ -383,7 +388,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Connect through Yoofloe web. The plugin stores the returned PAT in Obsidian secure storage and uses personal-only access by design."
     );
 
-    createInfoCard(tokenSection, "Connect with Yoofloe web", "Open Yoofloe in your browser and sign in there. The plugin never asks for your password.");
+    createInfoCard(tokenSection, "Connect with Yoofloe web", "Open Yoofloe in your browser and sign in there. The plugin never asks for your password. On mobile, Obsidian may copy the pairing link if the browser cannot open automatically.");
     const privacyDetails = tokenSection.createEl("details", { cls: "yoofloe-help-details" });
     privacyDetails.createEl("summary", { text: "Privacy and access" });
     createInfoCard(privacyDetails, "Personal-only scope", "Yoofloe for Obsidian and Yoofloe Obsidian MCP are included with free and pro accounts. Obsidian access is personal-only and does not include couple/shared exports.");
@@ -412,8 +417,8 @@ export class YoofloeSettingTab extends PluginSettingTab {
 
               button.setDisabled(true);
               const session = await startYoofloeWebPairingSession(this.plugin.settings.functionsBaseUrl);
-              await openYoofloeWebPairing(session.verificationUrl);
-              new Notice("Yoofloe web opened. Sign in there and approve the Obsidian pairing request.");
+              const openResult = await openYoofloeWebPairing(session.verificationUrl);
+              new Notice(openResult.message);
               const claim = await waitForYoofloeWebPairing(this.plugin.settings.functionsBaseUrl, session);
               this.plugin.secretStore.setPat(claim.token);
               this.plugin.settings.yoofloeAccessMode = "read";
@@ -622,11 +627,20 @@ export class YoofloeSettingTab extends PluginSettingTab {
       .addDropdown((dropdown) => {
         dropdown
           .addOption("yoofloe-hosted", "Yoofloe hosted")
-          .addOption("none", "None")
-          .addOption("gemini-google", "Gemini BYOK")
-          .addOption("gemini-vertex", "Vertex BYOK");
+          .addOption("none", "None");
+        if (isDesktopApp || provider === "gemini-google") {
+          dropdown.addOption("gemini-google", isDesktopApp ? "Gemini BYOK" : "Gemini BYOK (desktop only)");
+        }
+        if (isDesktopApp || provider === "gemini-vertex") {
+          dropdown.addOption("gemini-vertex", isDesktopApp ? "Vertex BYOK" : "Vertex BYOK (desktop only)");
+        }
 
         dropdown.setValue(provider).onChange((value) => {
+          if (!isDesktopApp && (value === "gemini-google" || value === "gemini-vertex")) {
+            new Notice("Advanced Google BYOK setup is desktop-only in this version. Use Yoofloe hosted on mobile and tablet.");
+            this.display();
+            return;
+          }
           void saveProviderType(value as typeof this.plugin.settings.provider.type);
         });
       });
@@ -640,19 +654,36 @@ export class YoofloeSettingTab extends PluginSettingTab {
       providerDetails,
       "Step 3",
       "Finish setup",
-      providerStatus,
+      effectiveProviderStatus,
       provider === "yoofloe-hosted"
         ? "No Google setup is required for the default Yoofloe AI Writer."
         : provider === "none"
           ? "Choose Yoofloe hosted or configure Gemini BYOK to start generating AI notes."
+          : mobileByokBlocked
+            ? "Advanced Google BYOK setup uses desktop OAuth. Switch to Yoofloe hosted on mobile and tablet."
           : "Save each required field below. When this step is ready, you can run AI commands."
     );
 
-    if (provider !== "none" && nextSteps.length > 0) {
+    if (mobileByokBlocked) {
+      createInfoCard(setupSection, "Desktop-only provider", "Google BYOK uses a local desktop OAuth callback. Yoofloe-hosted AI Writer and Capture remain available on mobile and tablet.");
+      new Setting(setupSection)
+        .setName("Mobile AI setup")
+        .setDesc("Switch to Yoofloe hosted to generate grounded notes on this device.")
+        .addButton((button) => {
+          button
+            .setButtonText("Use Yoofloe hosted")
+            .setCta()
+            .onClick(() => {
+              void saveProviderType("yoofloe-hosted");
+            });
+        });
+    }
+
+    if (provider !== "none" && !mobileByokBlocked && nextSteps.length > 0) {
       createChecklistCard(setupSection, "What is still missing", nextSteps);
     }
 
-    if (usesGoogleOauth) {
+    if (usesGoogleOauth && isDesktopApp) {
       let pendingClientId = this.plugin.settings.provider.clientId;
       let pendingClientSecret = "";
       let pendingProject = this.plugin.settings.provider.project;

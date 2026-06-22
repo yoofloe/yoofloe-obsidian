@@ -1,4 +1,4 @@
-import { requestUrl } from "obsidian";
+import { Platform, requestUrl } from "obsidian";
 import type { YoofloeSecretStore } from "./secrets";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -8,7 +8,9 @@ const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/generative-language.retriever"
 ];
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
-type DesktopWindow = Window & { require?: NodeJS.Require; };
+const DESKTOP_ONLY_GOOGLE_MESSAGE = "Advanced Google BYOK setup is desktop-only in this version. Use Yoofloe hosted on mobile and tablet.";
+type RuntimeRequire = (specifier: string) => unknown;
+type DesktopWindow = Window & { require?: RuntimeRequire; };
 
 type GoogleTokenResponse = {
   access_token?: string;
@@ -21,7 +23,7 @@ type GoogleTokenResponse = {
 function requireDesktopModule<T>(specifier: string): T {
   const desktopWindow = activeWindow as DesktopWindow;
   const runtimeRequire = typeof require === "function"
-    ? require
+    ? require as RuntimeRequire
     : desktopWindow.require;
 
   if (!runtimeRequire) {
@@ -300,6 +302,10 @@ export class YoofloeGoogleAuthManager {
   }
 
   async connect(clientIdInput: string, clientSecretInput?: string | null) {
+    if (!Platform.isDesktopApp) {
+      throw new Error(DESKTOP_ONLY_GOOGLE_MESSAGE);
+    }
+
     const clientId = assertGoogleClientId(clientIdInput);
     const codeVerifier = randomBase64Url(64);
     const codeChallenge = await sha256Base64Url(codeVerifier);
@@ -339,6 +345,10 @@ export class YoofloeGoogleAuthManager {
   }
 
   async getAccessToken(clientIdInput: string, clientSecretInput?: string | null) {
+    if (!Platform.isDesktopApp) {
+      throw new Error(DESKTOP_ONLY_GOOGLE_MESSAGE);
+    }
+
     const clientId = assertGoogleClientId(clientIdInput);
     if (this.accessToken && Date.now() < this.accessTokenExpiresAt) {
       return this.accessToken;

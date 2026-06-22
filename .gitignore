@@ -3,3 +3,5 @@ node_modules
 *.js.map
 main.js
 mcp-server.js
+dist/
+yoofloe-obsidian-mcp-wrapper.zip

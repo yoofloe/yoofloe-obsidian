@@ -24,6 +24,9 @@ const PAT_ENV_ERROR = "YOOFLOE_PAT environment variable is required and must con
 const VAULT_ENV_ERROR = "YOOFLOE_VAULT_PATH environment variable is required and must point to your Obsidian vault root.";
 const DATE_FORMATS: YoofloeDateFormat[] = ["YYYY-MM-DD", "YYYYMMDD", "YYYY.MM.DD"];
 const AI_DOCUMENT_TYPES = YOOFLOE_AI_DOCUMENT_TYPES;
+const BUNDLED_PLUGIN_VERSION = typeof __YOOFLOE_PLUGIN_VERSION__ === "string" && __YOOFLOE_PLUGIN_VERSION__.trim()
+  ? __YOOFLOE_PLUGIN_VERSION__.trim()
+  : "0.3.17";
 
 type ReportPreset = {
   title: string;
@@ -337,7 +340,7 @@ function resolveConfigVersion() {
     // Fall through to the hard-coded safe default.
   }
 
-  return "0.3.0";
+  return BUNDLED_PLUGIN_VERSION;
 }
 
 function buildReportPayload(args: {
@@ -534,7 +537,7 @@ function requireFocusInstruction(documentType: YoofloeAiDocumentType, focusInstr
   return normalized || undefined;
 }
 
-export function readMcpConfig(env: NodeJS.ProcessEnv): YoofloeMcpConfig {
+export function readMcpConfig(env: Record<string, string | undefined>): YoofloeMcpConfig {
   const pat = trimEnv(env.YOOFLOE_PAT);
   if (!pat) {
     throw new Error(PAT_ENV_ERROR);

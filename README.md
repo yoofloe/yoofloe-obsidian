@@ -41,15 +41,15 @@ For Obsidian Community Plugin review, the submission target is the `yoofloe` plu
 
 Reviewer-facing disclosures:
 
-- desktop-only plugin
+- works in Obsidian desktop, tablet, and mobile for Yoofloe-hosted AI Writer and Capture
 - requires a Yoofloe `pat_yfl_...` token
 - available to Yoofloe Free and Pro accounts
 - calls Yoofloe API endpoints, including the hosted AI Writer and Capture preview/execute endpoints
 - writes Markdown files locally into the vault
 - can write approved personal memo, journal, and schedule-task actions back to Yoofloe after a read-write pairing approval
 - uses Yoofloe-hosted AI Writer by default
-- optionally uses direct-provider Gemini calls with the user's own Google credentials when Advanced BYOK is enabled
-- ships a separate GitHub release asset, `yoofloe-obsidian-mcp-wrapper.zip`, for MCP-capable agents; this wrapper is not part of the Obsidian Community Plugin Store payload
+- optionally uses direct-provider Gemini calls with the user's own Google credentials when Advanced BYOK is enabled on desktop
+- ships a separate GitHub release asset, `yoofloe-obsidian-mcp-wrapper.zip`, for desktop MCP-capable agents; this wrapper is not part of the Obsidian Community Plugin Store payload
 
 ## Quick start
 
@@ -69,13 +69,15 @@ Recommended first AI choice:
 
 Yoofloe for Obsidian is included with Free and Pro accounts.
 
+Yoofloe-hosted AI Writer and Yoofloe Capture are available in Obsidian desktop, tablet, and mobile. Advanced Google BYOK setup remains desktop-only because it uses Google OAuth with a local callback.
+
 The plugin uses a Yoofloe Personal Access Token to fetch read-only, personal-only Yoofloe context. Capture writeback asks you to reconnect with a capability-scoped read-write token before applying anything to Yoofloe. Tokens do not include couple/shared exports and cannot decrypt v2 zero-knowledge ciphertext by themselves.
 
 Yoofloe-hosted AI Writer is the default generation path. It uses Yoofloe's hosted AI service with your PAT-protected, personal-only context and returns Markdown plus source and provider metadata.
 
 Yoofloe Capture is a separate preview-first writeback path. It can create personal Journal/Memo records, create or complete personal Schedule tasks, and move directly approved recent items to the Yoofloe Recycle Bin. It does not expose Finance, Business, folders, bulk mutation, hard delete, or couple/shared writeback in v1.
 
-Advanced BYOK remains available. In that mode, Obsidian calls your selected Google Gemini setup directly with your own Google credentials and project.
+Advanced BYOK remains available on desktop. In that mode, Obsidian calls your selected Google Gemini setup directly with your own Google credentials and project.
 
 Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connected agent chooses and calls its own model path; Yoofloe provides bounded tools, access control, and vault-safe write boundaries.
 
@@ -91,6 +93,7 @@ Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connect
 ### Gemini (Google AI)
 
 - Advanced BYOK option
+- Desktop-only in this version
 - Uses Google OAuth in your browser
 - Requires:
   - a Desktop App OAuth client ID from your own Google Cloud project
@@ -100,6 +103,7 @@ Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connect
 ### Gemini (Vertex AI)
 
 - Advanced Google Cloud option
+- Desktop-only in this version
 - Uses Google OAuth in your browser
 - Requires:
   - a Desktop App OAuth client ID from your own Google Cloud project
@@ -127,7 +131,7 @@ Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connect
 - All network traffic uses Obsidian `requestUrl`.
 - The plugin pulls read-only Yoofloe data and writes Markdown files locally in your vault. Capture writeback requires a separate read-write pairing approval.
 - A Yoofloe Personal Access Token is required.
-- The plugin is desktop-only.
+- The Yoofloe-hosted AI Writer and Capture flows support Obsidian desktop, tablet, and mobile.
 - Yoofloe requires Obsidian `1.11.5+` and stores your PAT, Google OAuth client secret, and Google OAuth refresh token in Obsidian secure storage instead of `data.json`.
 - Google access tokens are kept in memory only and refreshed from secure storage when needed.
 - Google OAuth credentials are used only for Advanced BYOK Gemini requests. They are not sent to Yoofloe backend.
@@ -172,7 +176,7 @@ Plugin AI providers currently support:
 
 Yoofloe hosted is the default and needs no Google setup.
 
-Google providers share one Google OAuth desktop connection and your own Google Cloud project:
+Google providers share one Google OAuth desktop connection and your own Google Cloud project. They are desktop-only in this version:
 
 - `Gemini (Google AI)` calls Gemini Developer API with OAuth
 - `Gemini (Vertex AI)` calls Vertex AI Standard with OAuth

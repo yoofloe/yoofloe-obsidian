@@ -1,4 +1,4 @@
-import { ItemView, MarkdownView, Notice, Setting, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, Setting, WorkspaceLeaf } from "obsidian";
 import { buildLocalCaptureCandidates } from "./capture";
 import {
   getCaptureDomainOption,
@@ -67,6 +67,38 @@ function resultLabel(status: YoofloeWriteExecuteResult["status"]) {
   }
 }
 
+function createTextareaField(
+  container: HTMLElement,
+  args: {
+    id: string;
+    label: string;
+    description: string;
+    placeholder: string;
+    value: string;
+    className: string;
+    onChange: (value: string) => void;
+  }
+) {
+  const field = container.createDiv({ cls: "yoofloe-pane-field" });
+  const label = field.createEl("label", {
+    cls: "yoofloe-pane-field-label",
+    text: args.label,
+    attr: { for: args.id }
+  });
+  label.createEl("span", { cls: "yoofloe-pane-field-description", text: args.description });
+  const textarea = field.createEl("textarea", {
+    cls: args.className,
+    attr: {
+      id: args.id,
+      placeholder: args.placeholder,
+      rows: "5"
+    }
+  });
+  textarea.value = args.value;
+  textarea.addEventListener("input", () => args.onChange(textarea.value));
+  return textarea;
+}
+
 export class YoofloeCaptureView extends ItemView {
   private source: CaptureSource = "manual";
   private domain: YoofloeCaptureDomain = "auto";
@@ -102,18 +134,8 @@ export class YoofloeCaptureView extends ItemView {
     return Promise.resolve();
   }
 
-  private getActiveMarkdownView() {
-    return this.app.workspace.getActiveViewOfType(MarkdownView);
-  }
-
   private getSelectedTextPayload() {
-    const view = this.getActiveMarkdownView();
-    const selection = view?.editor.getSelection() || "";
-    return {
-      text: selection.trim(),
-      path: view?.file?.path,
-      selectionOnly: true
-    };
+    return this.plugin.getCaptureSelectionPayload();
   }
 
   private currentText() {
@@ -337,12 +359,18 @@ export class YoofloeCaptureView extends ItemView {
     });
     status.createEl("span", { cls: "yoofloe-status-badge yoofloe-status-muted", text: "Preview before apply" });
 
-    const sourceRow = container.createDiv({ cls: "yoofloe-capture-source-row" });
+    const sourceRow = container.createDiv({
+      cls: "yoofloe-capture-source-row",
+      attr: { role: "group", "aria-label": "Capture source" }
+    });
     for (const source of ["manual", "selection"] as CaptureSource[]) {
       const button = sourceRow.createEl("button", {
         cls: `yoofloe-capture-toggle${this.source === source ? " is-active" : ""}`,
         text: source === "manual" ? "Write manually" : "Use selected text",
-        attr: { type: "button" }
+        attr: {
+          type: "button",
+          "aria-pressed": this.source === source ? "true" : "false"
+        }
       });
       button.addEventListener("click", () => {
         this.source = source;
@@ -355,18 +383,17 @@ export class YoofloeCaptureView extends ItemView {
     }
 
     if (this.source === "manual") {
-      new Setting(container)
-        .setName("Capture text")
-        .setDesc("Write the memo, journal entry, or task you want to send to Yoofloe.")
-        .addTextArea((text) => {
-          text
-            .setPlaceholder("Capture to Yoofloe...")
-            .setValue(this.text)
-            .onChange((value) => {
-              this.text = value;
-            });
-          text.inputEl.classList.add("yoofloe-capture-input");
-        });
+      createTextareaField(container, {
+        id: "yoofloe-capture-text",
+        label: "Capture text",
+        description: "Write the memo, journal entry, or task you want to send to Yoofloe.",
+        placeholder: "Capture to Yoofloe...",
+        value: this.text,
+        className: "yoofloe-capture-input",
+        onChange: (value) => {
+          this.text = value;
+        }
+      });
     } else {
       const selected = this.getSelectedTextPayload();
       container.createEl("div", {
@@ -382,7 +409,10 @@ export class YoofloeCaptureView extends ItemView {
     for (const option of YOOFLOE_CAPTURE_DOMAIN_OPTIONS) {
       const button = domainGrid.createEl("button", {
         cls: `yoofloe-preset-button yoofloe-capture-domain${this.domain === option.domain ? " is-active" : ""}${option.sensitive ? " is-sensitive" : ""}`,
-        attr: { type: "button" }
+        attr: {
+          type: "button",
+          "aria-pressed": this.domain === option.domain ? "true" : "false"
+        }
       });
       const titleRow = button.createDiv({ cls: "yoofloe-capture-domain-title-row" });
       titleRow.createEl("span", { cls: "yoofloe-preset-title", text: option.label });
@@ -408,9 +438,13 @@ export class YoofloeCaptureView extends ItemView {
     for (const target of YOOFLOE_CAPTURE_TARGETS) {
       const button = targetGrid.createEl("button", {
         cls: `yoofloe-preset-button yoofloe-capture-target${this.target === target ? " is-active" : ""}`,
-        attr: { type: "button" }
+        attr: {
+          type: "button",
+          "aria-pressed": this.target === target ? "true" : "false"
+        }
       });
-      button.createEl("span", { cls: "yoofloe-preset-title", text: targetLabel(target) });
+      const titleRow = button.createSpan({ cls: "yoofloe-card-title-row" });
+      titleRow.createEl("span", { cls: "yoofloe-preset-title", text: targetLabel(target) });
       button.createEl("span", {
         cls: "yoofloe-preset-description",
         text: target === "task"

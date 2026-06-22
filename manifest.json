@@ -1,10 +1,10 @@
 {
   "id": "yoofloe",
   "name": "Yoofloe",
-  "version": "0.3.16",
+  "version": "0.3.17",
   "minAppVersion": "1.11.5",
   "description": "Yoofloe AI insight documents grounded in your data.",
   "author": "Henry0304",
   "authorUrl": "https://github.com/Henry0304",
-  "isDesktopOnly": true
+  "isDesktopOnly": false
 }

@@ -172,6 +172,7 @@ export default class YoofloePlugin extends Plugin {
   latestEntitlement: YoofloeEntitlement | null = null;
   private statusEl: HTMLElement | null = null;
   private statusResetTimer: number | null = null;
+  private lastCaptureSelection: { text: string; path?: string; selectionOnly: true; } | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -501,6 +502,7 @@ export default class YoofloePlugin extends Plugin {
   }
 
   async openCaptureView() {
+    this.lastCaptureSelection = this.readMarkdownSelectionPayload();
     const existingLeaf = this.app.workspace.getLeavesOfType(YOOFLOE_CAPTURE_VIEW_TYPE)[0];
     const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
     await leaf.setViewState({ type: YOOFLOE_CAPTURE_VIEW_TYPE, active: true });
@@ -513,10 +515,10 @@ export default class YoofloePlugin extends Plugin {
     }
 
     const session = await startYoofloeWebPairingSession(this.settings.functionsBaseUrl, access);
-    await openYoofloeWebPairing(session.verificationUrl);
+    const openResult = await openYoofloeWebPairing(session.verificationUrl);
     new Notice(access === "read-write"
-      ? "Yoofloe web opened. Approve Obsidian Capture write access, then return here."
-      : "Yoofloe web opened. Sign in there and approve the Obsidian pairing request.");
+      ? openResult.message.replace("Approve the pairing request", "Approve Obsidian Capture write access")
+      : openResult.message);
     const claim = await waitForYoofloeWebPairing(this.settings.functionsBaseUrl, session);
     this.secretStore.setPat(claim.token);
     this.settings.yoofloeAccessMode = access === "read-write" ? "read-write" : "read";
@@ -526,6 +528,26 @@ export default class YoofloePlugin extends Plugin {
       ? "Yoofloe read & write token saved in secure storage."
       : "Yoofloe token saved in secure storage.");
     return claim;
+  }
+
+  private readMarkdownSelectionPayload() {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const selection = activeView?.editor.getSelection().trim() || "";
+    return {
+      text: selection,
+      path: activeView?.file?.path,
+      selectionOnly: true as const
+    };
+  }
+
+  getCaptureSelectionPayload() {
+    const current = this.readMarkdownSelectionPayload();
+    if (current.text) {
+      this.lastCaptureSelection = current;
+      return current;
+    }
+
+    return this.lastCaptureSelection || current;
   }
 
   private getMarkdownViewForWriter() {

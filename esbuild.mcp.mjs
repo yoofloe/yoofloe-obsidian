@@ -1,4 +1,7 @@
 import esbuild from "esbuild";
+import { readFileSync } from "node:fs";
+
+const packageJson = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
 
 const production = process.argv.includes("production");
 const watch = process.argv.includes("--watch");
@@ -12,6 +15,9 @@ const context = await esbuild.context({
   target: "node20",
   sourcemap: production ? false : "inline",
   logLevel: "info",
+  define: {
+    __YOOFLOE_PLUGIN_VERSION__: JSON.stringify(packageJson.version)
+  },
   banner: {
     js: "#!/usr/bin/env node"
   }

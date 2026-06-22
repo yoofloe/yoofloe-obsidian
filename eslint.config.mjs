@@ -24,7 +24,8 @@ export default [
       },
       globals: {
         ...globals.browser,
-        ...globals.node
+        ...globals.node,
+        __YOOFLOE_PLUGIN_VERSION__: "readonly"
       }
     },
     plugins: {
@@ -39,6 +40,12 @@ export default [
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": ["error", { checksVoidReturn: { arguments: true } }],
       "@typescript-eslint/require-await": "error"
+    }
+  },
+  {
+    files: ["src/mcp/**/*.ts"],
+    rules: {
+      "import/no-nodejs-modules": "off"
     }
   }
 ];

@@ -1,11 +1,19 @@
-import { requestUrl } from "obsidian";
+import { Platform, requestUrl } from "obsidian";
 
 const YOOFLOE_WEB_BASE_URL = "https://www.yoofloe.com";
 
 export const YOOFLOE_WEB_PAIRING_URL = `${YOOFLOE_WEB_BASE_URL}/settings`;
 export const YOOFLOE_PAIRING_PENDING_CONTRACT = "Browser pairing opens Yoofloe web, lets you sign in there with Google or email/password, and returns only a short-lived Obsidian PAT to this plugin. Obsidian never collects your Yoofloe password.";
 
-type DesktopWindow = Window & { require?: NodeJS.Require; };
+type RuntimeRequire = (specifier: string) => unknown;
+type DesktopWindow = Window & { require?: RuntimeRequire; };
+
+export type YoofloeExternalOpenResult = {
+  url: string;
+  opened: boolean;
+  copied: boolean;
+  message: string;
+};
 
 export type YoofloePairingSession = {
   pairingId: string;
@@ -45,7 +53,7 @@ const YOOFLOE_READ_WRITE_CAPABILITIES = [
 function requireDesktopModule<T>(specifier: string): T {
   const desktopWindow = activeWindow as DesktopWindow;
   const runtimeRequire = typeof require === "function"
-    ? require
+    ? require as RuntimeRequire
     : desktopWindow.require;
 
   if (!runtimeRequire) {
@@ -98,9 +106,55 @@ async function postPairingJson<T>(functionsBaseUrl: string, path: string, body: 
   return (payload || {}) as T;
 }
 
-export async function openYoofloeWebPairing(targetUrl = YOOFLOE_WEB_PAIRING_URL) {
-  const electron = requireDesktopModule<{ shell: { openExternal: (target: string) => Promise<void> | void; }; }>("electron");
-  await Promise.resolve(electron.shell.openExternal(targetUrl));
+async function copyUrlToClipboard(targetUrl: string) {
+  try {
+    const clipboard = activeWindow.navigator.clipboard;
+    if (!clipboard?.writeText) {
+      return false;
+    }
+
+    await clipboard.writeText(targetUrl);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function openYoofloeWebPairing(targetUrl = YOOFLOE_WEB_PAIRING_URL): Promise<YoofloeExternalOpenResult> {
+  if (Platform.isDesktopApp) {
+    const electron = requireDesktopModule<{ shell: { openExternal: (target: string) => Promise<void> | void; }; }>("electron");
+    await Promise.resolve(electron.shell.openExternal(targetUrl));
+    return {
+      url: targetUrl,
+      opened: true,
+      copied: false,
+      message: "Yoofloe web opened. Approve the pairing request, then return to Obsidian."
+    };
+  }
+
+  try {
+    const openedWindow = activeWindow.open(targetUrl, "_blank", "noopener,noreferrer");
+    if (openedWindow) {
+      return {
+        url: targetUrl,
+        opened: true,
+        copied: false,
+        message: "Yoofloe web opened. Approve the pairing request, then return to Obsidian."
+      };
+    }
+  } catch {
+    // Fall through to clipboard/manual fallback.
+  }
+
+  const copied = await copyUrlToClipboard(targetUrl);
+  return {
+    url: targetUrl,
+    opened: false,
+    copied,
+    message: copied
+      ? "Yoofloe pairing link copied. Open it in your browser, approve access, then return to Obsidian."
+      : `Open this Yoofloe pairing link in your browser, approve access, then return to Obsidian: ${targetUrl}`
+  };
 }
 
 function requestedCapabilitiesForAccess(access: YoofloePairingAccess) {
