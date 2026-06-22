@@ -95,7 +95,7 @@ function buildMcpSessionStatus(config: YoofloeMcpConfig) {
     scope: {
       current: "personal",
       coupleScopeEnabled: false,
-      coupleScopeReason: "temporarily_disabled_until_shared_encryption_is_fully_externalized"
+      coupleScopeReason: "personal_only_by_design"
     },
     security: buildExternalAccessSecurityContract(),
     vault: {
