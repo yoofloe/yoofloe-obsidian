@@ -173,6 +173,8 @@ function safeErrorMessage(status: number, code?: string) {
       return "Yoofloe AI is rate limited. Try again shortly.";
     case "AI_PROVIDER_UNAVAILABLE":
       return "Yoofloe AI provider is temporarily unavailable.";
+    case "SENSITIVE_SOURCE_DISABLED":
+      return "A sensitive Yoofloe source is off for this request.";
     default:
       break;
   }
@@ -199,7 +201,10 @@ function buildResponseError(
   const providerRequestId = typeof payload.providerRequestId === "string" ? payload.providerRequestId : undefined;
   const providerModel = typeof payload.providerModel === "string" ? payload.providerModel : undefined;
   const providerLocation = typeof payload.providerLocation === "string" ? payload.providerLocation : undefined;
-  const message = safeErrorMessage(status, code);
+  const responseMessage = typeof payload.error === "string" ? payload.error.trim() : "";
+  const message = code === "SENSITIVE_SOURCE_DISABLED" && responseMessage
+    ? responseMessage
+    : safeErrorMessage(status, code);
 
   return new YoofloeApiError(message, {
     status,

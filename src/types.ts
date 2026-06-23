@@ -187,9 +187,18 @@ export interface YoofloeWriterContextPlan {
   mode: YoofloeContextMode;
   intent: string;
   domains: YoofloeDomain[];
+  domainsRead?: YoofloeDomain[];
+  domainsBlocked?: YoofloeDomain[];
   omittedDomains: YoofloeDomain[];
   primaryDomains?: YoofloeDomain[];
   supportingDomains?: YoofloeDomain[];
+  readPlan?: Array<{
+    domain: YoofloeDomain;
+    reads: string[];
+    reason?: string;
+    sensitive?: boolean;
+  }>;
+  recordsRead?: Partial<Record<YoofloeDomain, number>>;
   sourceCount?: number;
   estimatedInputTokens?: number;
 }

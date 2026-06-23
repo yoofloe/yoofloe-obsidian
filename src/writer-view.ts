@@ -8,7 +8,8 @@ import type {
   YoofloeHostedWriterRequest,
   YoofloeOutputTarget,
   YoofloeRange,
-  YoofloeSourceDisplay
+  YoofloeSourceDisplay,
+  YoofloeWriterContextPlan
 } from "./types";
 
 export const YOOFLOE_WRITER_VIEW_TYPE = "yoofloe-ai-writer";
@@ -118,6 +119,15 @@ function isWorkoutPrompt(prompt: string) {
   return /(운동|운동계획|헬스|러닝|달리기|걷기|근력|유산소|workout|exercise|running|cardio|strength|fitness)/i.test(prompt);
 }
 
+function describeContextPlan(plan?: YoofloeWriterContextPlan) {
+  const readDomains = (plan?.domainsRead ?? plan?.domains ?? []).map(domainLabel);
+  if (!readDomains.length) return "";
+  const recordCount = plan?.recordsRead
+    ? Object.values(plan.recordsRead).reduce((total, count) => total + (typeof count === "number" ? count : 0), 0)
+    : 0;
+  return `Read: ${readDomains.join(", ")}${recordCount > 0 ? ` (${recordCount} compact records)` : ""}.`;
+}
+
 function createTextareaField(
   container: HTMLElement,
   args: {
@@ -164,6 +174,7 @@ export class YoofloeWriterView extends ItemView {
   private prompt = "";
   private includeRaw = false;
   private includeCurrentNoteContext = false;
+  private customizeSourcesOpen = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -223,6 +234,16 @@ export class YoofloeWriterView extends ItemView {
       this.newNoteTitleEdited = false;
     }
     this.lastOutputStatus = null;
+    this.render();
+  }
+
+  private clearOutputStatus() {
+    this.lastOutputStatus = null;
+  }
+
+  private refreshAfterContextChange() {
+    this.clearOutputStatus();
+    this.customizeSourcesOpen = true;
     this.render();
   }
 
@@ -415,11 +436,15 @@ export class YoofloeWriterView extends ItemView {
         if (this.documentType === "free-prompt" && !this.newNoteTitleEdited) {
           this.newNoteTitle = this.suggestedNewNoteTitle();
         }
-        this.lastOutputStatus = null;
+        this.clearOutputStatus();
       }
     });
 
     const customize = container.createEl("details", { cls: "yoofloe-writer-customize" });
+    customize.open = this.customizeSourcesOpen;
+    customize.addEventListener("toggle", () => {
+      this.customizeSourcesOpen = customize.open;
+    });
     customize.createEl("summary", { text: "Customize sources" });
 
     const domainGrid = customize.createDiv({ cls: "yoofloe-domain-grid" });
@@ -433,6 +458,7 @@ export class YoofloeWriterView extends ItemView {
         } else {
           this.selectedDomains.delete(domain);
         }
+        this.refreshAfterContextChange();
       });
       label.createEl("span", { text: domainLabel(domain) });
       if (SENSITIVE_DOMAINS.has(domain)) {
@@ -449,6 +475,7 @@ export class YoofloeWriterView extends ItemView {
         }
         dropdown.setValue(this.range).onChange((value) => {
           this.range = value as YoofloeRange;
+          this.refreshAfterContextChange();
         });
       });
 
@@ -458,6 +485,7 @@ export class YoofloeWriterView extends ItemView {
       .addText((text) => {
         text.setValue(this.tone).onChange((value) => {
           this.tone = value;
+          this.clearOutputStatus();
         });
       });
 
@@ -467,8 +495,7 @@ export class YoofloeWriterView extends ItemView {
       .addToggle((toggle) => {
         toggle.setValue(this.contextMode === "smart").onChange((value) => {
           this.contextMode = value ? "smart" : "manual";
-          this.lastOutputStatus = null;
-          this.render();
+          this.refreshAfterContextChange();
         });
       });
 
@@ -478,6 +505,7 @@ export class YoofloeWriterView extends ItemView {
       .addToggle((toggle) => {
         toggle.setValue(this.includeRaw).onChange((value) => {
           this.includeRaw = value;
+          this.refreshAfterContextChange();
         });
       });
 
@@ -487,7 +515,7 @@ export class YoofloeWriterView extends ItemView {
       .addToggle((toggle) => {
         toggle.setValue(this.sourceDisplay !== "hidden").onChange((value) => {
           this.sourceDisplay = value ? "summary" : "hidden";
-          this.lastOutputStatus = null;
+          this.refreshAfterContextChange();
         });
       });
 
@@ -497,6 +525,7 @@ export class YoofloeWriterView extends ItemView {
       .addToggle((toggle) => {
         toggle.setValue(this.includeCurrentNoteContext).onChange((value) => {
           this.includeCurrentNoteContext = value;
+          this.refreshAfterContextChange();
         });
       });
 
@@ -566,9 +595,11 @@ export class YoofloeWriterView extends ItemView {
           if (result.output.mode === "blocked") {
             this.lastOutputStatus = { kind: "warning", message: result.output.message };
           } else if (result.output.mode === "current-note") {
-            this.lastOutputStatus = { kind: "success", message: `Inserted into ${result.output.path}.` };
+            const contextSummary = describeContextPlan(result.response?.contextPlan);
+            this.lastOutputStatus = { kind: "success", message: `Inserted into ${result.output.path}.${contextSummary ? ` ${contextSummary}` : ""}` };
           } else {
-            this.lastOutputStatus = { kind: "success", message: `Created and opened ${result.output.path}.` };
+            const contextSummary = describeContextPlan(result.response?.contextPlan);
+            this.lastOutputStatus = { kind: "success", message: `Created and opened ${result.output.path}.${contextSummary ? ` ${contextSummary}` : ""}` };
           }
           this.render();
         } catch (error) {
