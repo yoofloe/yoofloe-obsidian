@@ -58,8 +58,8 @@ const DEFAULT_SETTINGS: YoofloePluginSettings = {
     googleLastConnectMessage: "",
     project: "",
     location: "us-central1",
-    googleModel: "gemini-2.5-flash-lite",
-    vertexModel: "gemini-2.5-flash-lite"
+    googleModel: "gemini-3.5-flash",
+    vertexModel: "gemini-3.5-flash"
   }
 };
 

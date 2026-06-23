@@ -1,6 +1,6 @@
 {
   "name": "obsidian-yoofloe",
-  "version": "0.3.24",
+  "version": "0.3.25",
   "description": "Yoofloe AI insight documents grounded in your data.",
   "private": true,
   "type": "module",

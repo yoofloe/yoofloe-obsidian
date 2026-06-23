@@ -14,8 +14,57 @@ import {
 } from "./yoofloe-web";
 
 type BadgeTone = "muted" | "accent" | "success" | "warning" | "danger";
+type ByokModelTier = "recommended" | "fast" | "preview" | "compatibility";
 
-const DEFAULT_MODEL_PLACEHOLDER = "gemini-2.5-flash-lite";
+interface GeminiByokModel {
+  id: string;
+  label: string;
+  tier: ByokModelTier;
+  description: string;
+}
+
+const RECOMMENDED_BYOK_MODEL = "gemini-3.5-flash";
+const CUSTOM_BYOK_MODEL_OPTION = "__custom_model__";
+const GEMINI_BYOK_MODELS: GeminiByokModel[] = [
+  {
+    id: "gemini-3.5-flash",
+    label: "Gemini 3.5 Flash",
+    tier: "recommended",
+    description: "Recommended latest stable Gemini model for BYOK writing."
+  },
+  {
+    id: "gemini-3.1-flash-lite",
+    label: "Gemini 3.1 Flash-Lite",
+    tier: "fast",
+    description: "Fast, lower-cost Gemini 3.1 option for lightweight writing."
+  },
+  {
+    id: "gemini-3.1-pro-preview",
+    label: "Gemini 3.1 Pro Preview",
+    tier: "preview",
+    description: "Advanced reasoning preview; availability and limits may vary."
+  },
+  {
+    id: "gemini-2.5-flash",
+    label: "Gemini 2.5 Flash",
+    tier: "compatibility",
+    description: "Compatibility option for existing Google projects."
+  },
+  {
+    id: "gemini-2.5-flash-lite",
+    label: "Gemini 2.5 Flash-Lite",
+    tier: "compatibility",
+    description: "Older low-cost compatibility option."
+  },
+  {
+    id: "gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
+    tier: "compatibility",
+    description: "Older high-reasoning compatibility option."
+  }
+];
+
+const DEFAULT_MODEL_PLACEHOLDER = RECOMMENDED_BYOK_MODEL;
 const DEFAULT_PROJECT_PLACEHOLDER = "my-google-cloud-project";
 const DEFAULT_VERTEX_LOCATION = "us-central1";
 const SENSITIVE_DOMAINS = new Set<YoofloeDomain>(["finance", "business"]);
@@ -66,6 +115,147 @@ function createBadge(containerEl: HTMLElement, text: string, tone: BadgeTone) {
     cls: `yoofloe-status-badge yoofloe-status-${tone}`,
     text
   });
+}
+
+function findByokModel(model: string) {
+  const normalized = model.trim();
+  return GEMINI_BYOK_MODELS.find((option) => option.id === normalized) ?? null;
+}
+
+function byokModelDropdownValue(model: string) {
+  const normalized = model.trim();
+  return findByokModel(normalized) ? normalized : CUSTOM_BYOK_MODEL_OPTION;
+}
+
+function byokModelTierLabel(tier: ByokModelTier) {
+  switch (tier) {
+    case "recommended":
+      return "Recommended";
+    case "fast":
+      return "Fast / low cost";
+    case "preview":
+      return "Preview";
+    case "compatibility":
+      return "Compatibility";
+  }
+}
+
+function byokModelTierTone(tier: ByokModelTier): BadgeTone {
+  switch (tier) {
+    case "recommended":
+      return "success";
+    case "fast":
+      return "accent";
+    case "preview":
+      return "warning";
+    case "compatibility":
+      return "muted";
+  }
+}
+
+function byokModelOptionLabel(option: GeminiByokModel) {
+  return `${option.label} - ${byokModelTierLabel(option.tier)}`;
+}
+
+function createByokModelStatus(
+  containerEl: HTMLElement,
+  model: string,
+  onUseRecommended: () => Promise<void>
+) {
+  const normalized = model.trim() || RECOMMENDED_BYOK_MODEL;
+  const option = findByokModel(normalized);
+  const row = containerEl.createDiv({ cls: "yoofloe-model-status" });
+
+  if (option) {
+    createBadge(row, byokModelTierLabel(option.tier), byokModelTierTone(option.tier));
+    row.createEl("span", {
+      cls: "yoofloe-model-status-text",
+      text: `${option.id}: ${option.description}`
+    });
+  } else {
+    createBadge(row, "Custom", "accent");
+    row.createEl("span", {
+      cls: "yoofloe-model-status-text",
+      text: `${normalized}: custom model ID. Verify that your Google project and location can access it.`
+    });
+  }
+
+  if (normalized !== RECOMMENDED_BYOK_MODEL) {
+    const action = row.createEl("button", {
+      cls: "yoofloe-inline-action",
+      text: "Use recommended"
+    });
+    action.type = "button";
+    action.addEventListener("click", () => {
+      void onUseRecommended();
+    });
+  }
+}
+
+function createByokModelSetting(
+  containerEl: HTMLElement,
+  config: {
+    name: string;
+    desc: string;
+    currentModel: string;
+    emptyNotice: string;
+    onSave: (model: string) => Promise<void>;
+    onUseRecommended: () => Promise<void>;
+  }
+) {
+  const normalizedCurrent = config.currentModel.trim() || RECOMMENDED_BYOK_MODEL;
+  let selectedValue = byokModelDropdownValue(normalizedCurrent);
+  let pendingCustomModel = selectedValue === CUSTOM_BYOK_MODEL_OPTION ? normalizedCurrent : "";
+
+  let customInput: HTMLInputElement | null = null;
+  const syncCustomInput = () => {
+    if (!customInput) return;
+    customInput.toggleAttribute("hidden", selectedValue !== CUSTOM_BYOK_MODEL_OPTION);
+    customInput.disabled = selectedValue !== CUSTOM_BYOK_MODEL_OPTION;
+  };
+
+  new Setting(containerEl)
+    .setName(config.name)
+    .setDesc(config.desc)
+    .addDropdown((dropdown) => {
+      for (const option of GEMINI_BYOK_MODELS) {
+        dropdown.addOption(option.id, byokModelOptionLabel(option));
+      }
+      dropdown.addOption(CUSTOM_BYOK_MODEL_OPTION, "Custom model ID...");
+      dropdown.setValue(selectedValue).onChange((value) => {
+        selectedValue = value;
+        syncCustomInput();
+      });
+    })
+    .addText((text) => {
+      text
+        .setPlaceholder(DEFAULT_MODEL_PLACEHOLDER)
+        .setValue(pendingCustomModel)
+        .onChange((value) => {
+          pendingCustomModel = value.trim();
+        });
+      text.inputEl.classList.add("yoofloe-input-wide");
+      customInput = text.inputEl;
+      syncCustomInput();
+    })
+    .addButton((button) => {
+      button
+        .setButtonText("Save model")
+        .onClick(async () => {
+          const nextModel = selectedValue === CUSTOM_BYOK_MODEL_OPTION
+            ? pendingCustomModel.trim()
+            : selectedValue;
+
+          if (!nextModel || nextModel === CUSTOM_BYOK_MODEL_OPTION) {
+            new Notice(config.emptyNotice);
+            return;
+          }
+
+          await config.onSave(nextModel);
+        });
+    });
+
+  createByokModelStatus(containerEl, normalizedCurrent, config.onUseRecommended);
 }
 
 function createStepSection(
@@ -687,8 +877,6 @@ export class YoofloeSettingTab extends PluginSettingTab {
       let pendingClientId = this.plugin.settings.provider.clientId;
       let pendingClientSecret = "";
       let pendingProject = this.plugin.settings.provider.project;
-      let pendingGoogleModel = this.plugin.settings.provider.googleModel;
-      let pendingVertexModel = this.plugin.settings.provider.vertexModel;
       let pendingVertexLocation = this.plugin.settings.provider.location;
 
       createInfoCard(setupSection, "How Google setup works", "You will sign in with Google in your browser. The plugin stores a refresh token in secure storage and uses it only for generation requests. Google calls are made directly from Obsidian with your own Google credentials and project.");
@@ -887,63 +1075,45 @@ export class YoofloeSettingTab extends PluginSettingTab {
         });
 
       if (provider === "gemini-google") {
-        new Setting(setupSection)
-          .setName("Gemini model")
-          .setDesc("Recommended for most users. The default model is shown below.")
-          .addText((text) => {
-            text
-              .setPlaceholder(DEFAULT_MODEL_PLACEHOLDER)
-              .setValue(this.plugin.settings.provider.googleModel)
-              .onChange((value) => {
-                pendingGoogleModel = value.trim();
-              });
-            text.inputEl.classList.add("yoofloe-input-wide");
-          })
-          .addButton((button) => {
-            button
-              .setButtonText("Save model")
-              .onClick(async () => {
-                if (!pendingGoogleModel) {
-                  new Notice("Add a model name before saving.");
-                  return;
-                }
-
-                this.plugin.settings.provider.googleModel = pendingGoogleModel;
-                await this.plugin.saveSettings();
-                new Notice("Gemini model saved.");
-                this.display();
-              });
-          });
+        createByokModelSetting(setupSection, {
+          name: "Gemini BYOK model",
+          desc: "Only used when Model provider is Gemini BYOK. Yoofloe hosted uses Yoofloe's server-selected model.",
+          currentModel: this.plugin.settings.provider.googleModel,
+          emptyNotice: "Choose a Gemini model or enter a custom model ID before saving.",
+          onSave: async (model) => {
+            this.plugin.settings.provider.googleModel = model;
+            await this.plugin.saveSettings();
+            new Notice("Gemini BYOK model saved.");
+            this.display();
+          },
+          onUseRecommended: async () => {
+            this.plugin.settings.provider.googleModel = RECOMMENDED_BYOK_MODEL;
+            await this.plugin.saveSettings();
+            new Notice("Gemini BYOK model updated to the recommended model.");
+            this.display();
+          }
+        });
       }
 
       if (isVertexProvider) {
-        new Setting(setupSection)
-          .setName("Vertex model")
-          .setDesc("Use this only if you specifically want the cloud setup. The default model is shown below.")
-          .addText((text) => {
-            text
-              .setPlaceholder(DEFAULT_MODEL_PLACEHOLDER)
-              .setValue(this.plugin.settings.provider.vertexModel)
-              .onChange((value) => {
-                pendingVertexModel = value.trim();
-              });
-            text.inputEl.classList.add("yoofloe-input-wide");
-          })
-          .addButton((button) => {
-            button
-              .setButtonText("Save model")
-              .onClick(async () => {
-                if (!pendingVertexModel) {
-                  new Notice("Add a cloud model before saving.");
-                  return;
-                }
-
-                this.plugin.settings.provider.vertexModel = pendingVertexModel;
-                await this.plugin.saveSettings();
-                new Notice("Vertex model saved.");
-                this.display();
-              });
-          });
+        createByokModelSetting(setupSection, {
+          name: "Vertex BYOK model",
+          desc: "Only used when Model provider is Vertex BYOK. Yoofloe hosted uses Yoofloe's server-selected model. Availability can depend on your Google project and Vertex location.",
+          currentModel: this.plugin.settings.provider.vertexModel,
+          emptyNotice: "Choose a Vertex model or enter a custom model ID before saving.",
+          onSave: async (model) => {
+            this.plugin.settings.provider.vertexModel = model;
+            await this.plugin.saveSettings();
+            new Notice("Vertex BYOK model saved.");
+            this.display();
+          },
+          onUseRecommended: async () => {
+            this.plugin.settings.provider.vertexModel = RECOMMENDED_BYOK_MODEL;
+            await this.plugin.saveSettings();
+            new Notice("Vertex BYOK model updated to the recommended model.");
+            this.display();
+          }
+        });
 
         const advanced = setupSection.createEl("details", { cls: "yoofloe-help-details" });
         advanced.createEl("summary", { text: "Advanced cloud settings" });
@@ -973,7 +1143,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     }
 
     if (provider === "yoofloe-hosted") {
-      createInfoCard(setupSection, "Ready by default", "Yoofloe-hosted AI Writer uses your connected Yoofloe PAT and does not require Google client IDs, secrets, or Vertex project settings.");
+      createInfoCard(setupSection, "Hosted model is managed by Yoofloe", "Yoofloe-hosted AI Writer uses your connected Yoofloe PAT and Yoofloe's server-selected model. The BYOK model dropdown only affects advanced Gemini or Vertex BYOK generation.");
     }
 
     if (provider === "none") {

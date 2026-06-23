@@ -88,7 +88,8 @@ Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connect
 - Default for most users
 - Requires only Yoofloe connection
 - Creates Markdown through `Yoofloe: Open AI Writer` or the AI document commands
-- Includes source, unavailable-data, and provider metadata in generated results
+- Uses Yoofloe's server-managed model path. The BYOK model dropdown does not affect hosted generation.
+- Includes source, unavailable-data, and provider metadata in generated results when enabled by the writer output settings.
 
 ### Gemini (Google AI)
 
@@ -98,7 +99,8 @@ Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connect
 - Requires:
   - a Desktop App OAuth client ID from your own Google Cloud project
   - a Google Cloud Project ID
-  - a Gemini model such as `gemini-2.5-flash-lite`
+  - a Gemini BYOK model such as `gemini-3.5-flash`
+- Recommended model options include `gemini-3.5-flash`, `gemini-3.1-flash-lite`, and `gemini-3.1-pro-preview`. Compatibility options such as `gemini-2.5-flash`, `gemini-2.5-flash-lite`, and `gemini-2.5-pro` remain available.
 
 ### Gemini (Vertex AI)
 
@@ -108,9 +110,10 @@ Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connect
 - Requires:
   - a Desktop App OAuth client ID from your own Google Cloud project
   - a Google Cloud Project ID
-  - a Vertex model such as `gemini-2.5-flash-lite`
+  - a Vertex BYOK model such as `gemini-3.5-flash`
 - Optional:
   - Vertex location, default `us-central1`
+- Vertex model availability can vary by Google Cloud project and location. Use the custom model field only after confirming your Vertex region supports that model.
 
 ## Common errors
 
