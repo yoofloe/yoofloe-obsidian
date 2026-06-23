@@ -25,6 +25,7 @@ type WriterDestinationMode = "new-note" | "current-note";
 type WriterOutputStatus = {
   kind: "success" | "warning" | "error";
   message: string;
+  diagnostics?: string;
 };
 
 const DEFAULT_WRITER_DOMAINS: YoofloeDomain[] = ["schedule", "life", "wellness", "journal", "garden"];
@@ -433,14 +434,31 @@ export class YoofloeWriterView extends ItemView {
     this.renderDestination(container);
 
     if (this.lastOutputStatus) {
-      container.createDiv({
+      const outputStatus = container.createDiv({
         cls: `yoofloe-writer-output-status is-${this.lastOutputStatus.kind}`,
-        text: this.lastOutputStatus.message,
         attr: {
           role: "status",
           "aria-live": "polite"
         }
       });
+      outputStatus.createEl("span", { text: this.lastOutputStatus.message });
+      if (this.lastOutputStatus.diagnostics) {
+        const copyButton = outputStatus.createEl("button", {
+          cls: "yoofloe-writer-copy-diagnostics",
+          text: "Copy diagnostics",
+          attr: { type: "button" }
+        });
+        copyButton.addEventListener("click", () => {
+          void (async () => {
+            try {
+              await activeWindow.navigator.clipboard.writeText(this.lastOutputStatus?.diagnostics || "");
+              new Notice("Yoofloe diagnostics copied.");
+            } catch {
+              new Notice("Unable to copy diagnostics from this device.");
+            }
+          })();
+        });
+      }
     }
 
     const actionRow = container.createDiv({ cls: "yoofloe-writer-actions" });
@@ -479,9 +497,17 @@ export class YoofloeWriterView extends ItemView {
           }
           this.render();
         } catch (error) {
+          const outputMode = this.buildRequest().outputMode || "new-note";
+          const currentTarget = this.destinationMode === "current-note"
+            ? this.plugin.getCurrentWriterMarkdownTarget()
+            : null;
           this.lastOutputStatus = {
             kind: "error",
-            message: this.plugin.getUserFacingErrorDetails(error, "Yoofloe AI Writer failed.")
+            message: this.plugin.getUserFacingErrorDetails(error, "Yoofloe AI Writer failed."),
+            diagnostics: this.plugin.getApiErrorDiagnostics(error, {
+              outputMode,
+              hasCurrentNoteTarget: Boolean(currentTarget)
+            })
           };
           this.render();
         } finally {

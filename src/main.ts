@@ -78,21 +78,7 @@ function isBlockedEntitlement(entitlement: YoofloeEntitlement | null | undefined
 }
 
 function entitlementFromApiError(error: YoofloeApiError) {
-  const body = error.body;
-  if (!body || typeof body !== "object") return null;
-
-  const entitlement = (body as Record<string, unknown>).entitlement;
-  if (!entitlement || typeof entitlement !== "object") return null;
-
-  const candidate = entitlement as Partial<YoofloeEntitlement>;
-  return typeof candidate.allowed === "boolean"
-    ? {
-      allowed: candidate.allowed,
-      tier: typeof candidate.tier === "string" ? candidate.tier : "",
-      source: typeof candidate.source === "string" ? candidate.source : "",
-      status: typeof candidate.status === "string" ? candidate.status : null
-    }
-    : null;
+  return error.entitlement;
 }
 
 function isPaywallMessage(message: string) {
@@ -453,12 +439,16 @@ export default class YoofloePlugin extends Plugin {
     }
 
     const details: string[] = [];
+    if (error.status > 0) {
+      details.push(`Status: ${error.status}`);
+    }
     if (error.code) {
       details.push(`Code: ${error.code}`);
     }
     if (error.requestId) {
       details.push(`Request ID: ${error.requestId}`);
     }
+    details.push(`Function reached: ${String(error.reachedFunction)}`);
     if (error.status === 401) {
       details.push("Reconnect Yoofloe in Settings.");
     } else if (error.status === 403) {
@@ -468,6 +458,28 @@ export default class YoofloePlugin extends Plugin {
     }
 
     return details.length ? `${message} ${details.join(" ")}` : message;
+  }
+
+  getApiErrorDiagnostics(
+    error: unknown,
+    context: { outputMode?: string; hasCurrentNoteTarget?: boolean } = {}
+  ) {
+    if (!(error instanceof YoofloeApiError)) return "";
+
+    const lines = [
+      "Yoofloe Obsidian diagnostics",
+      `pluginVersion=${this.manifest.version}`,
+      `host=${error.host}`,
+      `function=${error.functionSlug}`,
+      `status=${error.status || "unknown"}`,
+      `code=${error.code || "unknown"}`,
+      `requestId=${error.requestId || "none"}`,
+      `reachedFunction=${String(error.reachedFunction)}`,
+      `outputMode=${context.outputMode || "unknown"}`,
+      `currentNoteTarget=${context.hasCurrentNoteTarget ? "present" : "absent"}`
+    ];
+
+    return lines.join("\n");
   }
 
   setLatestEntitlement(entitlement: YoofloeEntitlement | null | undefined) {

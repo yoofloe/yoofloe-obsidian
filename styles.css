@@ -519,6 +519,10 @@
 }
 
 .yoofloe-writer-output-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.55rem;
   margin: 0.75rem 0;
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--background-modifier-border);
@@ -542,6 +546,21 @@
 .yoofloe-writer-output-status.is-error {
   border-color: color-mix(in srgb, var(--color-red) 42%, var(--background-modifier-border));
   background: color-mix(in srgb, var(--color-red) 10%, var(--background-secondary));
+}
+
+.yoofloe-writer-copy-diagnostics {
+  height: auto;
+  min-height: 2rem;
+  max-width: 100%;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 28%, var(--background-modifier-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-secondary-alt) 72%, var(--background-secondary));
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .yoofloe-writer-actions {
