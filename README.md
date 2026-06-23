@@ -131,6 +131,7 @@ Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connect
 ## Security & privacy
 
 - Vault content is not uploaded to Yoofloe unless you explicitly type Capture text, choose `Use selected text`, or opt into current-note context in the AI Writer.
+- For Capture selection, select text before opening Capture or select text in the note and click `Refresh selected text` in the Capture pane.
 - All network traffic uses Obsidian `requestUrl`.
 - The plugin pulls read-only Yoofloe data and writes Markdown files locally in your vault. Capture writeback requires a separate read-write pairing approval.
 - A Yoofloe Personal Access Token is required.

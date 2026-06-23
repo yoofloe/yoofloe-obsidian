@@ -73,6 +73,13 @@ const SUPPORTED_PLUGIN_PROVIDERS = new Set<YoofloePluginSettings["provider"]["ty
 const OBSIDIAN_ACCESS_UNAVAILABLE_NOTICE = "Yoofloe for Obsidian is included with free and pro accounts. Check your Yoofloe token or try again later.";
 const OBSIDIAN_ACCESS_UNAVAILABLE_SETTINGS_MESSAGE = "Yoofloe for Obsidian is included with free and pro accounts. Generate a fresh Obsidian token in Yoofloe settings if verification fails.";
 
+export type CaptureSelectionPayload = {
+  text: string;
+  path?: string;
+  source: "editor" | "cached" | "dom" | "none";
+  selectionOnly: true;
+};
+
 function isBlockedEntitlement(entitlement: YoofloeEntitlement | null | undefined) {
   return entitlement?.allowed === false;
 }
@@ -200,7 +207,7 @@ export default class YoofloePlugin extends Plugin {
   latestEntitlement: YoofloeEntitlement | null = null;
   private statusEl: HTMLElement | null = null;
   private statusResetTimer: number | null = null;
-  private lastCaptureSelection: { text: string; path?: string; selectionOnly: true; } | null = null;
+  private lastCaptureSelection: CaptureSelectionPayload | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -615,7 +622,8 @@ export default class YoofloePlugin extends Plugin {
   }
 
   async openCaptureView() {
-    this.lastCaptureSelection = this.readMarkdownSelectionPayload();
+    const selection = this.readMarkdownSelectionPayload();
+    this.lastCaptureSelection = selection.text ? selection : null;
     const leaf = this.getYoofloeViewLeaf(YOOFLOE_CAPTURE_VIEW_TYPE);
     await leaf.setViewState({ type: YOOFLOE_CAPTURE_VIEW_TYPE, active: true });
     await this.app.workspace.revealLeaf(leaf);
@@ -642,24 +650,89 @@ export default class YoofloePlugin extends Plugin {
     return claim;
   }
 
-  private readMarkdownSelectionPayload() {
+  private emptyCaptureSelection(): CaptureSelectionPayload {
+    return {
+      text: "",
+      source: "none",
+      selectionOnly: true
+    };
+  }
+
+  private readEditorSelectionPayload(): CaptureSelectionPayload {
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
     const selection = activeView?.editor.getSelection().trim() || "";
     return {
       text: selection,
       path: activeView?.file?.path,
+      source: selection ? "editor" : "none",
       selectionOnly: true as const
     };
   }
 
-  getCaptureSelectionPayload() {
+  private findMarkdownViewForNode(node: Node | null) {
+    if (!node) return null;
+
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      if (leaf.view instanceof MarkdownView && leaf.view.containerEl.contains(node)) {
+        return leaf.view;
+      }
+    }
+
+    return null;
+  }
+
+  private readDomMarkdownSelectionPayload(): CaptureSelectionPayload {
+    const selection = activeWindow.getSelection();
+    const text = selection?.toString().trim() || "";
+    if (!text || !selection?.anchorNode || !selection.focusNode) {
+      return this.emptyCaptureSelection();
+    }
+
+    const anchorView = this.findMarkdownViewForNode(selection.anchorNode);
+    const focusView = this.findMarkdownViewForNode(selection.focusNode);
+    if (!anchorView || anchorView !== focusView) {
+      return this.emptyCaptureSelection();
+    }
+
+    return {
+      text,
+      path: anchorView.file?.path,
+      source: "dom",
+      selectionOnly: true
+    };
+  }
+
+  private readMarkdownSelectionPayload(): CaptureSelectionPayload {
+    const editorSelection = this.readEditorSelectionPayload();
+    if (editorSelection.text) {
+      return editorSelection;
+    }
+
+    return this.readDomMarkdownSelectionPayload();
+  }
+
+  getCaptureSelectionPayload(options: { allowCached?: boolean } = {}) {
+    const allowCached = options.allowCached ?? true;
     const current = this.readMarkdownSelectionPayload();
     if (current.text) {
       this.lastCaptureSelection = current;
       return current;
     }
 
-    return this.lastCaptureSelection || current;
+    if (allowCached && this.lastCaptureSelection?.text) {
+      return {
+        ...this.lastCaptureSelection,
+        source: "cached" as const
+      };
+    }
+
+    return current;
+  }
+
+  refreshCaptureSelectionPayload() {
+    const current = this.getCaptureSelectionPayload({ allowCached: false });
+    this.lastCaptureSelection = current.text ? current : null;
+    return current;
   }
 
   private getMarkdownViewForWriter() {

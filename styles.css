@@ -158,6 +158,16 @@
   color: var(--text-muted);
 }
 
+.yoofloe-selection-card {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.yoofloe-selection-refresh {
+  width: fit-content;
+  max-width: 100%;
+}
+
 .yoofloe-help-details {
   margin: 0 0 1rem;
   padding: 0.1rem 0;

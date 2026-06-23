@@ -7,6 +7,7 @@ import {
   type YoofloeCaptureDomain
 } from "./capture-registry";
 import type YoofloePlugin from "./main";
+import type { CaptureSelectionPayload } from "./main";
 import { YOOFLOE_CAPTURE_TARGETS } from "./types";
 import type {
   YoofloeCaptureCandidate,
@@ -29,6 +30,25 @@ function targetLabel(target: YoofloeCaptureTarget) {
     default:
       return "Memo";
   }
+}
+
+function noteLabel(path: string | undefined) {
+  if (!path) return "current note";
+  return path.split(/[\\/]/).pop() || path;
+}
+
+function selectionStatusTitle(selection: CaptureSelectionPayload) {
+  if (!selection.text) return "No selected text";
+  return selection.source === "cached" ? "Last selected text" : "Selected text ready";
+}
+
+function selectionStatusBody(selection: CaptureSelectionPayload) {
+  if (!selection.text) {
+    return "Click the note, select text, then use Refresh selected text.";
+  }
+
+  const sourceHint = selection.source === "cached" ? "last captured from" : "from";
+  return `${selection.text.length} characters ${sourceHint} ${noteLabel(selection.path)}.`;
 }
 
 function actionLabel(action: string) {
@@ -134,8 +154,18 @@ export class YoofloeCaptureView extends ItemView {
     return Promise.resolve();
   }
 
-  private getSelectedTextPayload() {
-    return this.plugin.getCaptureSelectionPayload();
+  private getSelectedTextPayload(allowCached = true) {
+    return this.plugin.getCaptureSelectionPayload({ allowCached });
+  }
+
+  private refreshSelectedText() {
+    const selection = this.plugin.refreshCaptureSelectionPayload();
+    this.message = selection.text
+      ? `Selected text ready (${selection.text.length} characters from ${noteLabel(selection.path)}).`
+      : "No selected text found. Click the note body, select text, then try again.";
+    this.preview = null;
+    this.results = [];
+    this.render();
   }
 
   private currentText() {
@@ -146,10 +176,11 @@ export class YoofloeCaptureView extends ItemView {
   }
 
   private async previewCapture() {
-    const text = this.currentText();
+    const selectionPayload = this.source === "selection" ? this.getSelectedTextPayload(true) : null;
+    const text = this.source === "selection" ? selectionPayload?.text || "" : this.text.trim();
     if (!text) {
       this.message = this.source === "selection"
-        ? "Select text in an open note before previewing."
+        ? "No selected text found. Click the note body, select text, then use Refresh selected text before previewing."
         : "Add something to capture before previewing.";
       this.preview = null;
       this.results = [];
@@ -186,7 +217,6 @@ export class YoofloeCaptureView extends ItemView {
     }
 
     try {
-      const selectionPayload = this.source === "selection" ? this.getSelectedTextPayload() : null;
       const response = await this.plugin.previewCaptureWrite({
         source: this.source,
         text,
@@ -375,8 +405,10 @@ export class YoofloeCaptureView extends ItemView {
       button.addEventListener("click", () => {
         this.source = source;
         if (source === "selection") {
-          const selected = this.getSelectedTextPayload().text;
-          this.message = selected ? "Selected text will be sent only when you click Preview." : "Select text in an open note first.";
+          const selected = this.getSelectedTextPayload(false);
+          this.message = selected.text
+            ? "Selected text will be sent only when you click Preview."
+            : "Select text in an open note first, or use Refresh selected text after selecting.";
         }
         this.render();
       });
@@ -396,12 +428,17 @@ export class YoofloeCaptureView extends ItemView {
       });
     } else {
       const selected = this.getSelectedTextPayload();
-      container.createEl("div", {
-        cls: "yoofloe-info-card",
-        text: selected.text
-          ? `Selected text ready (${selected.text.length} characters).`
-          : "No selected text found in the active note."
+      const selectionCard = container.createDiv({ cls: "yoofloe-info-card yoofloe-selection-card" });
+      selectionCard.createEl("div", { cls: "yoofloe-info-card-title", text: selectionStatusTitle(selected) });
+      selectionCard.createEl("p", { cls: "yoofloe-info-card-body", text: selectionStatusBody(selected) });
+      const refreshButton = selectionCard.createEl("button", {
+        cls: "yoofloe-inline-action yoofloe-selection-refresh",
+        text: "Refresh selected text",
+        attr: {
+          type: "button"
+        }
       });
+      refreshButton.addEventListener("click", () => this.refreshSelectedText());
     }
 
     container.createDiv({ cls: "yoofloe-capture-section-label", text: "Menu" });
