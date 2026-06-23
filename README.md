@@ -1,6 +1,6 @@
 # Yoofloe for Obsidian
 
-Yoofloe turns your Yoofloe data into grounded AI documents inside Obsidian and can safely capture approved personal notes or tasks back to Yoofloe.
+Yoofloe turns your Yoofloe data into grounded AI documents inside Obsidian and can safely capture approved personal records back to Yoofloe.
 
 Public install guides and setup notes also live in the Yoofloe docs hub:
 
@@ -46,7 +46,7 @@ Reviewer-facing disclosures:
 - available to Yoofloe Free and Pro accounts
 - calls Yoofloe API endpoints, including the hosted AI Writer and Capture preview/execute endpoints
 - writes Markdown files locally into the vault
-- can write approved personal memo, journal, and schedule-task actions back to Yoofloe after a read-write pairing approval
+- can write approved personal Capture cards back to Yoofloe after a read-write pairing approval
 - uses Yoofloe-hosted AI Writer by default
 - optionally uses direct-provider Gemini calls with the user's own Google credentials when Advanced BYOK is enabled on desktop
 - ships a separate GitHub release asset, `yoofloe-obsidian-mcp-wrapper.zip`, for desktop MCP-capable agents; this wrapper is not part of the Obsidian Community Plugin Store payload
@@ -58,7 +58,7 @@ Reviewer-facing disclosures:
 3. Click `Connect with Yoofloe web`, approve the pairing request, and return to Obsidian.
 4. Click `Open AI Writer`.
 5. Choose a preset such as `Daily review`, then click `Generate note`.
-6. Optional: click `Open Yoofloe Capture`, preview a memo/task/journal card, then approve selected cards after reconnecting with write access.
+6. Optional: click `Open Yoofloe Capture`, choose what you want to create, preview the exact fields, then apply selected cards after reconnecting with write access.
 
 Recommended first AI choice:
 
@@ -75,7 +75,7 @@ The plugin uses a Yoofloe Personal Access Token to fetch read-only, personal-onl
 
 Yoofloe-hosted AI Writer is the default generation path. It uses Yoofloe's hosted AI service with your PAT-protected, personal-only context and returns Markdown plus source and provider metadata.
 
-Yoofloe Capture is a separate preview-first writeback path. It can create personal Journal/Memo records, create or complete personal Schedule tasks, and move directly approved recent items to the Yoofloe Recycle Bin. It does not expose Finance, Business, folders, bulk mutation, hard delete, or couple/shared writeback in v1.
+Yoofloe Capture is a separate preview-first writeback path. It can create approved personal records for Journal/Memo, Schedule, Goals, Study, Activity Log, Wellness, Exercise, Business, and Finance after showing the exact fields that will be written. Finance and Business require an explicit sensitive confirmation. Garden and Workspace overview are insight sources only. Capture does not expose folders, bulk mutation, hard delete, or couple/shared writeback.
 
 Advanced BYOK remains available on desktop. In that mode, Obsidian calls your selected Google Gemini setup directly with your own Google credentials and project.
 
@@ -140,7 +140,7 @@ Yoofloe Obsidian MCP uses the same PAT class for MCP-capable agents. The connect
 - Google access tokens are kept in memory only and refreshed from secure storage when needed.
 - Google OAuth credentials are used only for Advanced BYOK Gemini requests. They are not sent to Yoofloe backend.
 - Yoofloe-hosted AI Writer may process selected Yoofloe context through Yoofloe's hosted AI service according to Yoofloe AI terms.
-- Yoofloe Capture sends only the typed capture text or explicitly selected text for preview, and applies only candidate cards you approve.
+- Yoofloe Capture sends only the typed capture text or explicitly selected text for preview, shows the exact candidate fields first, and applies only candidate cards you approve.
 - External providers may process content under their own terms and privacy practices when you choose Advanced BYOK.
 
 ## Data flow

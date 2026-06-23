@@ -21,20 +21,20 @@ export type YoofloeCaptureDomainOption = {
   status: YoofloeCaptureStatus;
   riskTier: "low" | "medium" | "high" | "read_only";
   sensitive?: boolean;
-  defaultTarget?: "memo" | "task" | "journal";
+  defaultTarget?: "auto" | "memo" | "journal" | "task" | "event" | "goal" | "study-item" | "study-lecture" | "study-plan" | "activity" | "condition" | "meal" | "ritual" | "exercise" | "business-item" | "finance-transaction";
 };
 
 export const YOOFLOE_CAPTURE_DOMAIN_OPTIONS: YoofloeCaptureDomainOption[] = [
-  { domain: "auto", label: "Auto suggest", description: "Let Yoofloe choose memo, task, or journal from your text.", status: "ready", riskTier: "low", defaultTarget: "memo" },
+  { domain: "auto", label: "Auto suggest", description: "Let Yoofloe suggest the best personal write target from your text.", status: "ready", riskTier: "low", defaultTarget: "auto" },
   { domain: "journal", label: "Journal/Memo", description: "Create personal memos or journal entries.", status: "ready", riskTier: "low", defaultTarget: "memo" },
-  { domain: "schedule", label: "Schedule", description: "Create personal tasks now; events are gated next.", status: "ready", riskTier: "low", defaultTarget: "task" },
-  { domain: "goals", label: "Goals", description: "Goal create and progress updates are next.", status: "gated", riskTier: "medium" },
-  { domain: "study", label: "Study", description: "Study logs, lectures, and plans are planned after core capture.", status: "gated", riskTier: "medium" },
-  { domain: "activity", label: "Activity Log", description: "Life activity capture is planned with learning/life domains.", status: "gated", riskTier: "medium" },
-  { domain: "wellness", label: "Wellness", description: "Condition, meal, and ritual capture need health-data review.", status: "gated", riskTier: "medium" },
-  { domain: "exercise", label: "Exercise", description: "Workout capture is planned with health-domain capture.", status: "gated", riskTier: "medium" },
-  { domain: "business", label: "Business", description: "Sensitive business writeback needs explicit confirmation.", status: "gated", riskTier: "high", sensitive: true },
-  { domain: "finance", label: "Finance", description: "Sensitive transaction writeback needs amount review.", status: "gated", riskTier: "high", sensitive: true },
+  { domain: "schedule", label: "Schedule", description: "Create personal tasks or calendar events.", status: "ready", riskTier: "low", defaultTarget: "task" },
+  { domain: "goals", label: "Goals", description: "Create personal goals from selected or written notes.", status: "ready", riskTier: "medium", defaultTarget: "goal" },
+  { domain: "study", label: "Study", description: "Create study items, lectures, or study plans.", status: "ready", riskTier: "medium", defaultTarget: "study-item" },
+  { domain: "activity", label: "Activity Log", description: "Create personal life activity records.", status: "ready", riskTier: "medium", defaultTarget: "activity" },
+  { domain: "wellness", label: "Wellness", description: "Create condition, meal, or ritual records after review.", status: "ready", riskTier: "medium", defaultTarget: "condition" },
+  { domain: "exercise", label: "Exercise", description: "Create workout and exercise records.", status: "ready", riskTier: "medium", defaultTarget: "exercise" },
+  { domain: "business", label: "Business", description: "Create personal business items with explicit confirmation.", status: "ready", riskTier: "high", sensitive: true, defaultTarget: "business-item" },
+  { domain: "finance", label: "Finance", description: "Create personal finance transactions with amount review.", status: "ready", riskTier: "high", sensitive: true, defaultTarget: "finance-transaction" },
   { domain: "garden", label: "Garden", description: "Garden is an insight source, not a writeback target.", status: "blocked", riskTier: "read_only" },
   { domain: "agent", label: "Workspace overview", description: "Overview is an insight source, not a direct mutation target.", status: "blocked", riskTier: "read_only" }
 ];

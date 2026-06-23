@@ -23,7 +23,24 @@ export const YOOFLOE_AI_DOCUMENT_TYPES = [
 export const YOOFLOE_OUTPUT_TARGETS = ["new-note", "append-current", "insert-cursor", "replace-selection"] as const;
 export const YOOFLOE_CONTEXT_MODES = ["smart", "manual"] as const;
 export const YOOFLOE_SOURCE_DISPLAYS = ["hidden", "summary", "details"] as const;
-export const YOOFLOE_CAPTURE_TARGETS = ["memo", "task", "journal"] as const;
+export const YOOFLOE_CAPTURE_TARGETS = [
+  "auto",
+  "memo",
+  "journal",
+  "task",
+  "event",
+  "goal",
+  "study-item",
+  "study-lecture",
+  "study-plan",
+  "activity",
+  "condition",
+  "meal",
+  "ritual",
+  "exercise",
+  "business-item",
+  "finance-transaction"
+] as const;
 
 export type YoofloeDomain = (typeof YOOFLOE_DOMAINS)[number];
 export type YoofloeRange = (typeof YOOFLOE_RANGES)[number];
@@ -228,7 +245,7 @@ export interface YoofloeCaptureCandidate {
   domain?: string;
   menu?: string;
   riskTier?: string;
-  itemType: "memo" | "journal" | "task";
+  itemType: Exclude<YoofloeCaptureTarget, "auto">;
   title: string;
   normalizedFields: Record<string, unknown>;
   sourceSnippet?: string | null;
@@ -262,6 +279,8 @@ export interface YoofloeWriteExecuteRequest {
   editedFields: Record<string, Record<string, unknown>>;
   confirmations: {
     confirmSoftDelete?: boolean;
+    confirmSensitive?: boolean;
+    [key: string]: boolean | undefined;
   };
   clientRequestId: string;
   scope: YoofloeScope;
