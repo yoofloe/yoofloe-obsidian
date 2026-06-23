@@ -3,10 +3,12 @@ import type YoofloePlugin from "./main";
 import { YOOFLOE_DOMAINS, YOOFLOE_RANGES } from "./types";
 import type {
   YoofloeAiDocumentType,
+  YoofloeContextMode,
   YoofloeDomain,
   YoofloeHostedWriterRequest,
   YoofloeOutputTarget,
-  YoofloeRange
+  YoofloeRange,
+  YoofloeSourceDisplay
 } from "./types";
 
 export const YOOFLOE_WRITER_VIEW_TYPE = "yoofloe-ai-writer";
@@ -106,6 +108,16 @@ function domainLabel(domain: YoofloeDomain) {
   }
 }
 
+function compactPromptTitle(prompt: string) {
+  const normalized = prompt.trim().replace(/\s+/g, " ");
+  if (!normalized) return "Yoofloe AI note";
+  return normalized.length > 60 ? `${normalized.slice(0, 57).trimEnd()}...` : normalized;
+}
+
+function isWorkoutPrompt(prompt: string) {
+  return /(운동|운동계획|헬스|러닝|달리기|걷기|근력|유산소|workout|exercise|running|cardio|strength|fitness)/i.test(prompt);
+}
+
 function createTextareaField(
   container: HTMLElement,
   args: {
@@ -139,11 +151,13 @@ function createTextareaField(
 }
 
 export class YoofloeWriterView extends ItemView {
-  private documentType: YoofloeAiDocumentType = "daily-review";
+  private documentType: YoofloeAiDocumentType = "free-prompt";
   private selectedDomains = new Set<YoofloeDomain>(DEFAULT_WRITER_DOMAINS);
   private range: YoofloeRange = "1W";
+  private contextMode: YoofloeContextMode = "smart";
+  private sourceDisplay: YoofloeSourceDisplay = "hidden";
   private destinationMode: WriterDestinationMode = "new-note";
-  private newNoteTitle = "Daily review";
+  private newNoteTitle = "Yoofloe AI note";
   private newNoteTitleEdited = false;
   private lastOutputStatus: WriterOutputStatus | null = null;
   private tone = "clear and practical";
@@ -171,10 +185,13 @@ export class YoofloeWriterView extends ItemView {
   }
 
   onOpen(): Promise<void> {
+    this.documentType = "free-prompt";
     this.selectedDomains = new Set(this.plugin.settings.defaultDomains.length
       ? this.plugin.settings.defaultDomains
       : DEFAULT_WRITER_DOMAINS);
     this.range = this.plugin.settings.defaultRange;
+    this.contextMode = "smart";
+    this.sourceDisplay = "hidden";
     this.destinationMode = destinationFromOutputTarget(this.plugin.settings.defaultOutputTarget);
     this.tone = this.plugin.settings.defaultTone || "clear and practical";
     this.includeRaw = this.plugin.settings.includeRawData;
@@ -190,6 +207,9 @@ export class YoofloeWriterView extends ItemView {
   }
 
   private suggestedNewNoteTitle() {
+    if (this.documentType === "free-prompt") {
+      return compactPromptTitle(this.prompt);
+    }
     return this.currentPreset().label;
   }
 
@@ -217,6 +237,8 @@ export class YoofloeWriterView extends ItemView {
       tone: this.tone.trim() || undefined,
       outputMode,
       includeRaw: this.includeRaw,
+      contextMode: this.contextMode,
+      sourceDisplay: this.sourceDisplay,
       currentNoteContext: {
         enabled: this.includeCurrentNoteContext
       }
@@ -228,11 +250,39 @@ export class YoofloeWriterView extends ItemView {
       return "Choose at least one Yoofloe source.";
     }
 
+    if (this.documentType === "free-prompt" && !this.prompt.trim()) {
+      return "Write what you want Yoofloe to create, or choose a preset.";
+    }
+
     if (this.destinationMode === "current-note" && !this.plugin.getCurrentWriterMarkdownTarget()) {
       return "Open a Markdown note before choosing Current note.";
     }
 
     return null;
+  }
+
+  private getSmartContextPreview() {
+    const selected = new Set(this.selectedDomains);
+    if (this.contextMode === "manual") {
+      return `Manual context: ${[...selected].map(domainLabel).join(", ") || "No Yoofloe domains selected"} over ${this.range}.`;
+    }
+
+    if (isWorkoutPrompt(this.prompt)) {
+      const labels = [
+        selected.has("wellness") ? "Exercise" : null,
+        selected.has("schedule") ? "Schedule" : null,
+        selected.has("wellness") ? "Wellness" : null,
+        selected.has("life") ? "Life" : null
+      ].filter((label): label is string => Boolean(label));
+      return `Smart context: ${labels.join(", ") || "selected Yoofloe sources"} over ${this.range}.`;
+    }
+
+    const labels = [...selected]
+      .filter((domain) => domain !== "finance" && domain !== "business")
+      .slice(0, 4)
+      .map(domainLabel);
+    const sensitive = [...selected].filter((domain) => domain === "finance" || domain === "business").map(domainLabel);
+    return `Smart context: ${labels.join(", ") || "selected Yoofloe sources"} over ${this.range}.${sensitive.length ? ` Sensitive: ${sensitive.join(", ")}.` : ""}`;
   }
 
   private renderDestination(container: HTMLElement) {
@@ -320,7 +370,7 @@ export class YoofloeWriterView extends ItemView {
     header.createEl("div", { cls: "yoofloe-writer-kicker", text: "Yoofloe AI writer" });
     header.createEl("h2", { text: "Create a grounded note" });
     header.createEl("p", {
-      text: "Choose a preset, review the sources, then generate Markdown from your personal Yoofloe data."
+      text: "Write what you want, then let Yoofloe choose focused personal context for the note."
     });
 
     const status = header.createDiv({ cls: "yoofloe-writer-status-row" });
@@ -362,6 +412,10 @@ export class YoofloeWriterView extends ItemView {
       className: "yoofloe-writer-prompt",
       onChange: (value) => {
         this.prompt = value;
+        if (this.documentType === "free-prompt" && !this.newNoteTitleEdited) {
+          this.newNoteTitle = this.suggestedNewNoteTitle();
+        }
+        this.lastOutputStatus = null;
       }
     });
 
@@ -408,11 +462,32 @@ export class YoofloeWriterView extends ItemView {
       });
 
     new Setting(customize)
+      .setName("Smart context")
+      .setDesc("Use only selected sources that match your prompt to reduce input tokens.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.contextMode === "smart").onChange((value) => {
+          this.contextMode = value ? "smart" : "manual";
+          this.lastOutputStatus = null;
+          this.render();
+        });
+      });
+
+    new Setting(customize)
       .setName("Include raw data")
-      .setDesc("Adds raw context to the hosted writer request when available.")
+      .setDesc("Advanced. Used only when smart context is off.")
       .addToggle((toggle) => {
         toggle.setValue(this.includeRaw).onChange((value) => {
           this.includeRaw = value;
+        });
+      });
+
+    new Setting(customize)
+      .setName("Include source details in note")
+      .setDesc("Off by default. Adds a short collapsed context summary to the generated note.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.sourceDisplay !== "hidden").onChange((value) => {
+          this.sourceDisplay = value ? "summary" : "hidden";
+          this.lastOutputStatus = null;
         });
       });
 
@@ -428,7 +503,7 @@ export class YoofloeWriterView extends ItemView {
     const preview = container.createDiv({ cls: "yoofloe-context-preview" });
     preview.createEl("div", { cls: "yoofloe-info-card-title", text: "Context preview" });
     preview.createEl("p", {
-      text: `${[...this.selectedDomains].map(domainLabel).join(", ") || "No Yoofloe domains selected"} over ${this.range}. Finance and Business stay off unless selected.`
+      text: `${this.getSmartContextPreview()} Finance and Business stay off unless selected.`
     });
 
     this.renderDestination(container);

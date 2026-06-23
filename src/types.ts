@@ -21,6 +21,8 @@ export const YOOFLOE_AI_DOCUMENT_TYPES = [
   "deep-dive"
 ] as const;
 export const YOOFLOE_OUTPUT_TARGETS = ["new-note", "append-current", "insert-cursor", "replace-selection"] as const;
+export const YOOFLOE_CONTEXT_MODES = ["smart", "manual"] as const;
+export const YOOFLOE_SOURCE_DISPLAYS = ["hidden", "summary", "details"] as const;
 export const YOOFLOE_CAPTURE_TARGETS = ["memo", "task", "journal"] as const;
 
 export type YoofloeDomain = (typeof YOOFLOE_DOMAINS)[number];
@@ -31,6 +33,8 @@ export type YoofloeGardenerSurface = "brief" | "plan" | "prompt" | "export";
 export type YoofloeAiProviderType = "yoofloe-hosted" | "none" | "gemini-google" | "gemini-vertex";
 export type YoofloeAiDocumentType = (typeof YOOFLOE_AI_DOCUMENT_TYPES)[number];
 export type YoofloeOutputTarget = (typeof YOOFLOE_OUTPUT_TARGETS)[number];
+export type YoofloeContextMode = (typeof YOOFLOE_CONTEXT_MODES)[number];
+export type YoofloeSourceDisplay = (typeof YOOFLOE_SOURCE_DISPLAYS)[number];
 export type YoofloeCaptureTarget = (typeof YOOFLOE_CAPTURE_TARGETS)[number];
 export type YoofloeAccessMode = "read" | "read-write";
 export type YoofloeCaptureAction = string;
@@ -174,7 +178,20 @@ export interface YoofloeHostedWriterRequest {
   tone?: string;
   outputMode?: YoofloeOutputTarget;
   includeRaw?: boolean;
+  contextMode?: YoofloeContextMode;
+  sourceDisplay?: YoofloeSourceDisplay;
   currentNoteContext?: YoofloeCurrentNoteContext;
+}
+
+export interface YoofloeWriterContextPlan {
+  mode: YoofloeContextMode;
+  intent: string;
+  domains: YoofloeDomain[];
+  omittedDomains: YoofloeDomain[];
+  primaryDomains?: YoofloeDomain[];
+  supportingDomains?: YoofloeDomain[];
+  sourceCount?: number;
+  estimatedInputTokens?: number;
 }
 
 export interface YoofloeHostedWriterResponse {
@@ -184,6 +201,7 @@ export interface YoofloeHostedWriterResponse {
   markdownBody: string;
   sources: YoofloeWriterSource[];
   unavailable: YoofloeWriterUnavailable[];
+  contextPlan?: YoofloeWriterContextPlan;
   entitlement?: YoofloeEntitlement;
   rateLimit?: YoofloeRateLimit;
   security?: YoofloeExternalAccessSecurityContract;
