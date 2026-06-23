@@ -44,6 +44,8 @@ export interface YoofloeApiDiagnostics {
   requestId?: string;
   providerStatus?: number;
   providerRequestId?: string;
+  providerModel?: string;
+  providerLocation?: string;
   functionSlug: string;
   host: string;
   reachedFunction: YoofloeReachedFunction;
@@ -56,6 +58,8 @@ export class YoofloeApiError extends Error {
   requestId?: string;
   providerStatus?: number;
   providerRequestId?: string;
+  providerModel?: string;
+  providerLocation?: string;
   functionSlug: string;
   host: string;
   reachedFunction: YoofloeReachedFunction;
@@ -69,6 +73,8 @@ export class YoofloeApiError extends Error {
     this.requestId = diagnostics.requestId;
     this.providerStatus = diagnostics.providerStatus;
     this.providerRequestId = diagnostics.providerRequestId;
+    this.providerModel = diagnostics.providerModel;
+    this.providerLocation = diagnostics.providerLocation;
     this.functionSlug = diagnostics.functionSlug;
     this.host = diagnostics.host;
     this.reachedFunction = diagnostics.reachedFunction;
@@ -82,6 +88,8 @@ export class YoofloeApiError extends Error {
       requestId: this.requestId,
       providerStatus: this.providerStatus,
       providerRequestId: this.providerRequestId,
+      providerModel: this.providerModel,
+      providerLocation: this.providerLocation,
       functionSlug: this.functionSlug,
       host: this.host,
       reachedFunction: this.reachedFunction
@@ -189,6 +197,8 @@ function buildResponseError(
   const requestId = typeof payload.requestId === "string" ? payload.requestId : undefined;
   const providerStatus = typeof payload.providerStatus === "number" ? payload.providerStatus : undefined;
   const providerRequestId = typeof payload.providerRequestId === "string" ? payload.providerRequestId : undefined;
+  const providerModel = typeof payload.providerModel === "string" ? payload.providerModel : undefined;
+  const providerLocation = typeof payload.providerLocation === "string" ? payload.providerLocation : undefined;
   const message = safeErrorMessage(status, code);
 
   return new YoofloeApiError(message, {
@@ -197,6 +207,8 @@ function buildResponseError(
     requestId,
     providerStatus,
     providerRequestId,
+    providerModel,
+    providerLocation,
     functionSlug,
     host,
     reachedFunction: inferReachedFunction(status, payload),

@@ -458,6 +458,12 @@ export default class YoofloePlugin extends Plugin {
     if (error.providerRequestId) {
       details.push(`Provider request ID: ${error.providerRequestId}`);
     }
+    if (error.providerModel) {
+      details.push(`Provider model: ${error.providerModel}`);
+    }
+    if (error.providerLocation) {
+      details.push(`Provider location: ${error.providerLocation}`);
+    }
     details.push(`Function reached: ${String(error.reachedFunction)}`);
     if (isProviderErrorCode(error.code)) {
       details.push("This is a Yoofloe hosted AI provider configuration issue. Share diagnostics if it repeats.");
@@ -488,6 +494,8 @@ export default class YoofloePlugin extends Plugin {
       `requestId=${error.requestId || "none"}`,
       `providerStatus=${error.providerStatus || "none"}`,
       `providerRequestId=${error.providerRequestId || "none"}`,
+      `providerModel=${error.providerModel || "none"}`,
+      `providerLocation=${error.providerLocation || "none"}`,
       `reachedFunction=${String(error.reachedFunction)}`,
       `outputMode=${context.outputMode || "unknown"}`,
       `currentNoteTarget=${context.hasCurrentNoteTarget ? "present" : "absent"}`
