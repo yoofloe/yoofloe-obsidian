@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, Plugin, normalizePath } from "obsidian";
+import { MarkdownView, Notice, Platform, Plugin, WorkspaceLeaf, WorkspaceMobileDrawer, normalizePath } from "obsidian";
 import { runAiDocumentAnalysis } from "./ai/byok-client";
 import { getAiDocumentDefinition } from "./ai/prompts";
 import { buildAgentSetupNoteMarkdown } from "./agent-guidance";
@@ -494,17 +494,30 @@ export default class YoofloePlugin extends Plugin {
     return this.secretStore?.isAvailable ? this.secretStore.getPat() : null;
   }
 
+  private isMobileDrawerLeaf(leaf: WorkspaceLeaf) {
+    return leaf.parent instanceof WorkspaceMobileDrawer;
+  }
+
+  private getYoofloeViewLeaf(viewType: string) {
+    const existingLeaves = this.app.workspace.getLeavesOfType(viewType);
+
+    if (Platform.isPhone) {
+      const existingMainLeaf = existingLeaves.find((leaf) => !this.isMobileDrawerLeaf(leaf));
+      return existingMainLeaf ?? this.app.workspace.getLeaf("tab");
+    }
+
+    return existingLeaves[0] ?? this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
+  }
+
   async openWriterView() {
-    const existingLeaf = this.app.workspace.getLeavesOfType(YOOFLOE_WRITER_VIEW_TYPE)[0];
-    const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
+    const leaf = this.getYoofloeViewLeaf(YOOFLOE_WRITER_VIEW_TYPE);
     await leaf.setViewState({ type: YOOFLOE_WRITER_VIEW_TYPE, active: true });
     await this.app.workspace.revealLeaf(leaf);
   }
 
   async openCaptureView() {
     this.lastCaptureSelection = this.readMarkdownSelectionPayload();
-    const existingLeaf = this.app.workspace.getLeavesOfType(YOOFLOE_CAPTURE_VIEW_TYPE)[0];
-    const leaf = existingLeaf ?? this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
+    const leaf = this.getYoofloeViewLeaf(YOOFLOE_CAPTURE_VIEW_TYPE);
     await leaf.setViewState({ type: YOOFLOE_CAPTURE_VIEW_TYPE, active: true });
     await this.app.workspace.revealLeaf(leaf);
   }

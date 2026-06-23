@@ -26,7 +26,7 @@ const DATE_FORMATS: YoofloeDateFormat[] = ["YYYY-MM-DD", "YYYYMMDD", "YYYY.MM.DD
 const AI_DOCUMENT_TYPES = YOOFLOE_AI_DOCUMENT_TYPES;
 const BUNDLED_PLUGIN_VERSION = typeof __YOOFLOE_PLUGIN_VERSION__ === "string" && __YOOFLOE_PLUGIN_VERSION__.trim()
   ? __YOOFLOE_PLUGIN_VERSION__.trim()
-  : "0.3.17";
+  : "0.3.18";
 
 type ReportPreset = {
   title: string;

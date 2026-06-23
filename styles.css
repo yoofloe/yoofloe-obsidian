@@ -68,6 +68,7 @@
   font-weight: 600;
   line-height: 1.2;
   overflow-wrap: anywhere;
+  white-space: normal;
   border: 1px solid transparent;
 }
 
@@ -250,11 +251,17 @@
   margin: 1rem 0;
 }
 
+/* Obsidian applies global button height and nowrap rules; these buttons are content cards. */
 .yoofloe-preset-button {
+  appearance: none;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 0.3rem;
   width: 100%;
+  max-width: 100%;
+  height: auto;
   min-height: 0;
   padding: 0.8rem;
   border: 1px solid var(--background-modifier-border);
@@ -263,7 +270,10 @@
   color: var(--text-normal);
   text-align: left;
   cursor: pointer;
+  font: inherit;
   line-height: 1.35;
+  white-space: normal;
+  overflow: hidden;
 }
 
 .yoofloe-preset-button:hover,
@@ -274,17 +284,27 @@
 }
 
 .yoofloe-preset-title {
-  display: inline;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   font-weight: 700;
   overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .yoofloe-preset-description {
   display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   color: var(--text-muted);
   font-size: 0.85rem;
   line-height: 1.35;
+  text-align: left;
   overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .yoofloe-card-title-row {
@@ -293,6 +313,10 @@
   flex-wrap: wrap;
   gap: 0.35rem;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: normal;
 }
 
 .yoofloe-sensitive-label {
@@ -310,6 +334,8 @@
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1.15;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .yoofloe-pane-field {
@@ -419,6 +445,7 @@
 }
 
 .yoofloe-capture-domain {
+  height: auto;
   min-height: 0;
 }
 
@@ -432,6 +459,10 @@
   flex-wrap: wrap;
   gap: 0.35rem;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: normal;
 }
 
 .yoofloe-domain-status-ready {
@@ -475,6 +506,7 @@
 }
 
 .yoofloe-capture-target {
+  height: auto;
   min-height: 0;
   min-width: 0;
 }
@@ -533,6 +565,7 @@
 .yoofloe-capture-meta-chip {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   min-height: 1.2rem;
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
@@ -540,6 +573,8 @@
   color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 700;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .yoofloe-risk-high {
@@ -589,6 +624,42 @@
 
   .yoofloe-capture-source-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 360px) {
+  .yoofloe-writer-view,
+  .yoofloe-capture-view {
+    padding: 0.65rem;
+    padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+  }
+
+  .yoofloe-writer-status-row,
+  .yoofloe-settings-status-row {
+    gap: 0.35rem;
+  }
+
+  .yoofloe-status-badge {
+    min-height: 1.55rem;
+    padding: 0.12rem 0.5rem;
+    font-size: 0.74rem;
+  }
+
+  .yoofloe-preset-grid,
+  .yoofloe-capture-domain-grid,
+  .yoofloe-capture-target-grid {
+    gap: 0.5rem;
+    margin: 0.75rem 0;
+  }
+
+  .yoofloe-preset-button {
+    gap: 0.25rem;
+    padding: 0.65rem;
+    border-radius: 10px;
+  }
+
+  .yoofloe-preset-description {
+    font-size: 0.8rem;
   }
 }
 
