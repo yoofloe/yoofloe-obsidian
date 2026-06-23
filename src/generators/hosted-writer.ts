@@ -24,14 +24,16 @@ export function renderHostedWriterNoteMarkdown({
   response,
   request,
   settings,
-  pluginVersion
+  pluginVersion,
+  titleOverride
 }: {
   response: YoofloeHostedWriterResponse;
   request: YoofloeHostedWriterRequest;
   settings: MarkdownRenderOptions;
   pluginVersion: string;
+  titleOverride?: string;
 }) {
-  const title = response.title?.trim() || "Yoofloe AI note";
+  const title = titleOverride?.trim() || response.title?.trim() || "Yoofloe AI note";
   const body = normalizeBody(response.markdownBody || "");
   const providerType = response.provider?.type || "yoofloe-hosted";
   const model = response.provider?.model || "";

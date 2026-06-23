@@ -1,6 +1,6 @@
 import { ItemView, Notice, Setting, WorkspaceLeaf } from "obsidian";
 import type YoofloePlugin from "./main";
-import { YOOFLOE_DOMAINS, YOOFLOE_OUTPUT_TARGETS, YOOFLOE_RANGES } from "./types";
+import { YOOFLOE_DOMAINS, YOOFLOE_RANGES } from "./types";
 import type {
   YoofloeAiDocumentType,
   YoofloeDomain,
@@ -19,6 +19,12 @@ type WriterPreset = {
   range: YoofloeRange;
   tone: string;
   sensitive?: boolean;
+};
+
+type WriterDestinationMode = "new-note" | "current-note";
+type WriterOutputStatus = {
+  kind: "success" | "warning";
+  message: string;
 };
 
 const DEFAULT_WRITER_DOMAINS: YoofloeDomain[] = ["schedule", "life", "wellness", "journal", "garden"];
@@ -76,18 +82,8 @@ const PRESETS: WriterPreset[] = [
   }
 ];
 
-function outputTargetLabel(target: YoofloeOutputTarget) {
-  switch (target) {
-    case "append-current":
-      return "Append to current note";
-    case "insert-cursor":
-      return "Insert at cursor";
-    case "replace-selection":
-      return "Replace selection";
-    case "new-note":
-    default:
-      return "New Yoofloe note";
-  }
+function destinationFromOutputTarget(target: YoofloeOutputTarget): WriterDestinationMode {
+  return target === "new-note" ? "new-note" : "current-note";
 }
 
 function domainLabel(domain: YoofloeDomain) {
@@ -145,7 +141,10 @@ export class YoofloeWriterView extends ItemView {
   private documentType: YoofloeAiDocumentType = "daily-review";
   private selectedDomains = new Set<YoofloeDomain>(DEFAULT_WRITER_DOMAINS);
   private range: YoofloeRange = "1W";
-  private outputTarget: YoofloeOutputTarget = "new-note";
+  private destinationMode: WriterDestinationMode = "new-note";
+  private newNoteTitle = "Daily review";
+  private newNoteTitleEdited = false;
+  private lastOutputStatus: WriterOutputStatus | null = null;
   private tone = "clear and practical";
   private prompt = "";
   private includeRaw = false;
@@ -175,11 +174,22 @@ export class YoofloeWriterView extends ItemView {
       ? this.plugin.settings.defaultDomains
       : DEFAULT_WRITER_DOMAINS);
     this.range = this.plugin.settings.defaultRange;
-    this.outputTarget = this.plugin.settings.defaultOutputTarget;
+    this.destinationMode = destinationFromOutputTarget(this.plugin.settings.defaultOutputTarget);
     this.tone = this.plugin.settings.defaultTone || "clear and practical";
     this.includeRaw = this.plugin.settings.includeRawData;
+    this.newNoteTitle = this.suggestedNewNoteTitle();
+    this.newNoteTitleEdited = false;
+    this.lastOutputStatus = null;
     this.render();
     return Promise.resolve();
+  }
+
+  private currentPreset() {
+    return PRESETS.find((preset) => preset.id === this.documentType) || PRESETS[0];
+  }
+
+  private suggestedNewNoteTitle() {
+    return this.currentPreset().label;
   }
 
   private applyPreset(preset: WriterPreset) {
@@ -187,10 +197,16 @@ export class YoofloeWriterView extends ItemView {
     this.selectedDomains = new Set(preset.domains);
     this.range = preset.range;
     this.tone = preset.tone;
+    if (!this.newNoteTitleEdited || !this.newNoteTitle.trim()) {
+      this.newNoteTitle = preset.label;
+      this.newNoteTitleEdited = false;
+    }
+    this.lastOutputStatus = null;
     this.render();
   }
 
   private buildRequest(): YoofloeHostedWriterRequest {
+    const outputMode: YoofloeOutputTarget = this.destinationMode === "new-note" ? "new-note" : "insert-cursor";
     return {
       documentType: this.documentType,
       domains: [...this.selectedDomains],
@@ -198,12 +214,100 @@ export class YoofloeWriterView extends ItemView {
       scope: "personal",
       prompt: this.prompt.trim(),
       tone: this.tone.trim() || undefined,
-      outputMode: this.outputTarget,
+      outputMode,
       includeRaw: this.includeRaw,
       currentNoteContext: {
         enabled: this.includeCurrentNoteContext
       }
     };
+  }
+
+  private getGenerationBlocker() {
+    if (this.selectedDomains.size === 0) {
+      return "Choose at least one Yoofloe source.";
+    }
+
+    if (this.destinationMode === "current-note" && !this.plugin.getCurrentWriterMarkdownTarget()) {
+      return "Open a Markdown note before choosing Current note.";
+    }
+
+    return null;
+  }
+
+  private renderDestination(container: HTMLElement) {
+    const target = this.plugin.getCurrentWriterMarkdownTarget();
+    const section = container.createDiv({ cls: "yoofloe-writer-destination" });
+    section.createEl("div", { cls: "yoofloe-info-card-title", text: "Destination" });
+    section.createEl("p", {
+      cls: "yoofloe-destination-description",
+      text: "Choose exactly where the generated Markdown should go."
+    });
+
+    const chooser = section.createDiv({ cls: "yoofloe-destination-choice", attr: { role: "group", "aria-label": "AI writer destination" } });
+    const destinations: Array<{ mode: WriterDestinationMode; label: string; description: string }> = [
+      { mode: "new-note", label: "New note", description: "Create and open a new Yoofloe note." },
+      { mode: "current-note", label: "Current note", description: "Insert at the cursor in an open note." }
+    ];
+
+    for (const destination of destinations) {
+      const button = chooser.createEl("button", {
+        cls: `yoofloe-destination-button${this.destinationMode === destination.mode ? " is-active" : ""}`,
+        attr: {
+          type: "button",
+          "aria-pressed": this.destinationMode === destination.mode ? "true" : "false"
+        }
+      });
+      button.createEl("span", { cls: "yoofloe-destination-button-title", text: destination.label });
+      button.createEl("span", { cls: "yoofloe-destination-button-description", text: destination.description });
+      button.addEventListener("click", () => {
+        this.destinationMode = destination.mode;
+        this.lastOutputStatus = null;
+        this.render();
+      });
+    }
+
+    if (this.destinationMode === "new-note") {
+      const titleField = section.createDiv({ cls: "yoofloe-destination-detail" });
+      const label = titleField.createEl("label", {
+        cls: "yoofloe-pane-field-label",
+        text: "Note title",
+        attr: { for: "yoofloe-writer-new-note-title" }
+      });
+      label.createEl("span", {
+        cls: "yoofloe-pane-field-description",
+        text: "Used for the file name and heading. Leave blank to use the AI title."
+      });
+      const input = titleField.createEl("input", {
+        cls: "yoofloe-destination-title-input",
+        attr: {
+          id: "yoofloe-writer-new-note-title",
+          type: "text",
+          placeholder: this.suggestedNewNoteTitle()
+        }
+      });
+      input.value = this.newNoteTitle;
+      input.addEventListener("input", () => {
+        this.newNoteTitle = input.value;
+        this.newNoteTitleEdited = true;
+        this.lastOutputStatus = null;
+      });
+      return;
+    }
+
+    const targetDetail = section.createDiv({ cls: "yoofloe-destination-detail" });
+    targetDetail.createEl("div", { cls: "yoofloe-destination-current-label", text: "Current note target" });
+    if (target) {
+      targetDetail.createEl("div", {
+        cls: "yoofloe-destination-target-badge",
+        text: `${target.title} - Insert at cursor`
+      });
+      targetDetail.createEl("div", { cls: "yoofloe-destination-path", text: target.path });
+    } else {
+      targetDetail.createEl("div", {
+        cls: "yoofloe-destination-warning",
+        text: "Open a Markdown note first. Yoofloe will not silently create a new note for this choice."
+      });
+    }
   }
 
   private render() {
@@ -294,18 +398,6 @@ export class YoofloeWriterView extends ItemView {
       });
 
     new Setting(customize)
-      .setName("Output target")
-      .setDesc("Where the generated Markdown should go.")
-      .addDropdown((dropdown) => {
-        for (const target of YOOFLOE_OUTPUT_TARGETS) {
-          dropdown.addOption(target, outputTargetLabel(target));
-        }
-        dropdown.setValue(this.outputTarget).onChange((value) => {
-          this.outputTarget = value as YoofloeOutputTarget;
-        });
-      });
-
-    new Setting(customize)
       .setName("Tone")
       .setDesc("Optional style guidance for the writer.")
       .addText((text) => {
@@ -338,6 +430,19 @@ export class YoofloeWriterView extends ItemView {
       text: `${[...this.selectedDomains].map(domainLabel).join(", ") || "No Yoofloe domains selected"} over ${this.range}. Finance and Business stay off unless selected.`
     });
 
+    this.renderDestination(container);
+
+    if (this.lastOutputStatus) {
+      container.createDiv({
+        cls: `yoofloe-writer-output-status is-${this.lastOutputStatus.kind}`,
+        text: this.lastOutputStatus.message,
+        attr: {
+          role: "status",
+          "aria-live": "polite"
+        }
+      });
+    }
+
     const actionRow = container.createDiv({ cls: "yoofloe-writer-actions" });
     const generateButton = actionRow.createEl("button", {
       cls: "mod-cta yoofloe-writer-generate",
@@ -346,18 +451,38 @@ export class YoofloeWriterView extends ItemView {
     });
     generateButton.addEventListener("click", () => {
       void (async () => {
-        if (this.selectedDomains.size === 0) {
-          new Notice("Choose at least one Yoofloe source.");
+        const blocker = this.getGenerationBlocker();
+        if (blocker) {
+          this.lastOutputStatus = { kind: "warning", message: blocker };
+          new Notice(blocker);
+          this.render();
           return;
         }
 
         try {
           generateButton.disabled = true;
           generateButton.setText("Generating...");
-          await this.plugin.runHostedWriterFromOptions(this.buildRequest());
+          const currentTarget = this.destinationMode === "current-note"
+            ? this.plugin.getCurrentWriterMarkdownTarget()
+            : null;
+          const result = await this.plugin.runHostedWriterFromOptions(this.buildRequest(), {
+            titleOverride: this.destinationMode === "new-note" ? this.newNoteTitle.trim() : undefined,
+            fallbackTitle: this.currentPreset().label,
+            currentNotePath: currentTarget?.path
+          });
+          if (result.output.mode === "blocked") {
+            this.lastOutputStatus = { kind: "warning", message: result.output.message };
+          } else if (result.output.mode === "current-note") {
+            this.lastOutputStatus = { kind: "success", message: `Inserted into ${result.output.path}.` };
+          } else {
+            this.lastOutputStatus = { kind: "success", message: `Created and opened ${result.output.path}.` };
+          }
+          this.render();
         } finally {
-          generateButton.disabled = false;
-          generateButton.setText("Generate note");
+          if (generateButton.isConnected) {
+            generateButton.disabled = false;
+            generateButton.setText("Generate note");
+          }
         }
       })();
     });

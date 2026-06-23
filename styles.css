@@ -407,6 +407,138 @@
   color: var(--text-muted);
 }
 
+.yoofloe-writer-destination {
+  margin: 1rem 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-primary);
+}
+
+.yoofloe-destination-description {
+  margin: 0.25rem 0 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.yoofloe-destination-choice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.55rem;
+}
+
+.yoofloe-destination-button {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font: inherit;
+  line-height: 1.3;
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.yoofloe-destination-button:hover,
+.yoofloe-destination-button:focus-visible,
+.yoofloe-destination-button.is-active {
+  border-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
+}
+
+.yoofloe-destination-button-title {
+  display: block;
+  max-width: 100%;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.yoofloe-destination-button-description,
+.yoofloe-destination-path,
+.yoofloe-destination-warning {
+  display: block;
+  max-width: 100%;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.yoofloe-destination-detail {
+  margin-top: 0.75rem;
+}
+
+.yoofloe-destination-title-input {
+  width: 100%;
+  margin-top: 0.45rem;
+}
+
+.yoofloe-destination-current-label {
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.yoofloe-destination-target-badge {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 1.7rem;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 40%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-secondary));
+  font-size: 0.82rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.yoofloe-destination-path {
+  margin-top: 0.35rem;
+}
+
+.yoofloe-destination-warning {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--color-orange) 38%, var(--background-modifier-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-orange) 10%, var(--background-secondary));
+}
+
+.yoofloe-writer-output-status {
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.yoofloe-writer-output-status.is-success {
+  border-color: color-mix(in srgb, var(--color-green) 42%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--color-green) 10%, var(--background-secondary));
+}
+
+.yoofloe-writer-output-status.is-warning {
+  border-color: color-mix(in srgb, var(--color-orange) 42%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--color-orange) 10%, var(--background-secondary));
+}
+
 .yoofloe-writer-actions {
   display: flex;
   flex-wrap: wrap;
@@ -622,6 +754,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .yoofloe-destination-choice {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .yoofloe-capture-source-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -647,7 +783,8 @@
 
   .yoofloe-preset-grid,
   .yoofloe-capture-domain-grid,
-  .yoofloe-capture-target-grid {
+  .yoofloe-capture-target-grid,
+  .yoofloe-destination-choice {
     gap: 0.5rem;
     margin: 0.75rem 0;
   }
@@ -660,6 +797,14 @@
 
   .yoofloe-preset-description {
     font-size: 0.8rem;
+  }
+
+  .yoofloe-writer-destination {
+    padding: 0.7rem;
+  }
+
+  .yoofloe-destination-button {
+    padding: 0.55rem 0.6rem;
   }
 }
 

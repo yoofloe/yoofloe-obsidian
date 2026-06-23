@@ -1,4 +1,4 @@
-import { MarkdownView, Notice, Platform, Plugin, WorkspaceLeaf, WorkspaceMobileDrawer, normalizePath } from "obsidian";
+import { MarkdownView, Notice, Platform, Plugin, TFile, WorkspaceLeaf, WorkspaceMobileDrawer, normalizePath } from "obsidian";
 import { runAiDocumentAnalysis } from "./ai/byok-client";
 import { getAiDocumentDefinition } from "./ai/prompts";
 import { buildAgentSetupNoteMarkdown } from "./agent-guidance";
@@ -117,6 +117,17 @@ type AiDocumentCommandDefinition = {
   documentType: YoofloeAiDocumentType;
 };
 
+type HostedWriterOutputOptions = {
+  titleOverride?: string;
+  fallbackTitle?: string;
+  currentNotePath?: string;
+};
+
+type HostedWriterOutputResult =
+  | { mode: "new-note"; path: string }
+  | { mode: "current-note"; path: string }
+  | { mode: "blocked"; message: string };
+
 function formatDate(date: Date, format: YoofloePluginSettings["dateFormat"]) {
   const yyyy = String(date.getFullYear());
   const mm = String(date.getMonth() + 1).padStart(2, "0");
@@ -155,6 +166,33 @@ async function uniqueFilePath(plugin: YoofloePlugin, surface: string) {
   for (let attempt = 1; attempt < 1000; attempt += 1) {
     const suffix = attempt === 1 ? "" : `__${attempt}`;
     const candidate = normalizePath(`${folder}/${stamp}__${surface}${suffix}.md`);
+    if (!(await plugin.app.vault.adapter.exists(candidate))) {
+      return candidate;
+    }
+  }
+
+  throw new Error("Unable to allocate a unique Yoofloe note path after 999 attempts.");
+}
+
+function sanitizeNoteFileName(title: string) {
+  return title
+    .trim()
+    .replace(/[\\/:*?"<>|#^]+/g, " ")
+    .replace(/\[/g, " ")
+    .replace(/\]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 120)
+    .trim() || "Yoofloe AI note";
+}
+
+async function uniqueTitledFilePath(plugin: YoofloePlugin, title: string) {
+  const folder = normalizePath(plugin.settings.savePath);
+  const baseName = sanitizeNoteFileName(title);
+
+  for (let attempt = 1; attempt < 1000; attempt += 1) {
+    const suffix = attempt === 1 ? "" : `__${attempt}`;
+    const candidate = normalizePath(`${folder}/${baseName}${suffix}.md`);
     if (!(await plugin.app.vault.adapter.exists(candidate))) {
       return candidate;
     }
@@ -567,6 +605,11 @@ export default class YoofloePlugin extends Plugin {
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (activeView) return activeView;
 
+    const rootLeaf = this.app.workspace.getMostRecentLeaf(this.app.workspace.rootSplit);
+    if (rootLeaf?.view instanceof MarkdownView) {
+      return rootLeaf.view;
+    }
+
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       if (leaf.view instanceof MarkdownView) {
         return leaf.view;
@@ -574,6 +617,26 @@ export default class YoofloePlugin extends Plugin {
     }
 
     return null;
+  }
+
+  private getMarkdownViewByPath(path: string) {
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      if (leaf.view instanceof MarkdownView && leaf.view.file?.path === path) {
+        return leaf.view;
+      }
+    }
+
+    return null;
+  }
+
+  getCurrentWriterMarkdownTarget() {
+    const markdownView = this.getMarkdownViewForWriter();
+    if (!markdownView?.file) return null;
+
+    return {
+      path: markdownView.file.path,
+      title: markdownView.file.basename
+    };
   }
 
   private withCurrentNoteContext(request: YoofloeHostedWriterRequest): YoofloeHostedWriterRequest {
@@ -606,12 +669,18 @@ export default class YoofloePlugin extends Plugin {
     };
   }
 
-  private async writeHostedWriterOutput(response: YoofloeHostedWriterResponse, request: YoofloeHostedWriterRequest) {
+  private async writeHostedWriterOutput(
+    response: YoofloeHostedWriterResponse,
+    request: YoofloeHostedWriterRequest,
+    options: HostedWriterOutputOptions = {}
+  ): Promise<HostedWriterOutputResult> {
     const target = request.outputMode || this.settings.defaultOutputTarget;
     const inlineMarkdown = renderHostedWriterInlineMarkdown(response);
 
     if (target !== "new-note") {
-      const markdownView = this.getMarkdownViewForWriter();
+      const markdownView = options.currentNotePath
+        ? this.getMarkdownViewByPath(options.currentNotePath)
+        : this.getMarkdownViewForWriter();
       if (markdownView) {
         const editor = markdownView.editor;
         if (target === "append-current") {
@@ -628,24 +697,37 @@ export default class YoofloePlugin extends Plugin {
           editor.replaceRange(inlineMarkdown, editor.getCursor());
         }
 
-        return markdownView.file?.path || "current note";
+        return { mode: "current-note", path: markdownView.file?.path || options.currentNotePath || "current note" };
       }
 
-      new Notice("No active Markdown note found. Yoofloe created a new note instead.");
+      return {
+        mode: "blocked",
+        message: options.currentNotePath
+          ? "The selected Markdown note is no longer open."
+          : "Open a Markdown note before choosing Current note."
+      };
     }
 
-    return this.writeContentFile(
+    const title = options.titleOverride?.trim()
+      || response.title?.trim()
+      || options.fallbackTitle?.trim()
+      || "Yoofloe AI note";
+    const file = await this.createContentFile(
       hostedWriterSurface(request.documentType),
       renderHostedWriterNoteMarkdown({
         response,
         request,
         settings: this.settings,
-        pluginVersion: this.manifest.version
-      })
+        pluginVersion: this.manifest.version,
+        titleOverride: title
+      }),
+      title
     );
+    await this.openContentFile(file);
+    return { mode: "new-note", path: file.path };
   }
 
-  async runHostedWriterFromOptions(options: YoofloeHostedWriterRequest) {
+  async runHostedWriterFromOptions(options: YoofloeHostedWriterRequest, outputOptions: HostedWriterOutputOptions = {}) {
     try {
       const token = this.requirePat();
       const domains = sanitizeDefaultDomains(options.domains);
@@ -657,6 +739,30 @@ export default class YoofloePlugin extends Plugin {
         tone: options.tone?.trim() || this.settings.defaultTone,
         includeRaw: !!options.includeRaw
       });
+      const outputTarget = request.outputMode || this.settings.defaultOutputTarget;
+      let effectiveOutputOptions = outputOptions;
+
+      if (outputTarget !== "new-note") {
+        const markdownView = outputOptions.currentNotePath
+          ? this.getMarkdownViewByPath(outputOptions.currentNotePath)
+          : this.getMarkdownViewForWriter();
+
+        if (!markdownView?.file) {
+          const output: HostedWriterOutputResult = {
+            mode: "blocked",
+            message: outputOptions.currentNotePath
+              ? "The selected Markdown note is no longer open."
+              : "Open a Markdown note before choosing Current note."
+          };
+          new Notice(output.message);
+          return { response: null, output };
+        }
+
+        effectiveOutputOptions = {
+          ...outputOptions,
+          currentNotePath: outputOptions.currentNotePath || markdownView.file.path
+        };
+      }
 
       this.clearStatusResetTimer();
       this.setStatus(`Yoofloe writing ${request.documentType}...`);
@@ -664,12 +770,18 @@ export default class YoofloePlugin extends Plugin {
       const client = new YoofloeClient(this.settings, token);
       const response = await client.runHostedWriter(request);
       this.ensureEntitlement(response.entitlement);
-      const target = await this.writeHostedWriterOutput(response, request);
+      const output = await this.writeHostedWriterOutput(response, request, effectiveOutputOptions);
 
       this.tokenStatus = "verified";
       this.setStatus("Yoofloe idle");
-      new Notice(`Yoofloe AI note ready: ${target}`);
-      return response;
+      if (output.mode === "blocked") {
+        new Notice(output.message);
+      } else if (output.mode === "current-note") {
+        new Notice(`Yoofloe AI note inserted into: ${output.path}`);
+      } else {
+        new Notice(`Yoofloe AI note created: ${output.path}`);
+      }
+      return { response, output };
     } catch (error) {
       this.setStatus("Yoofloe error");
       if (error instanceof Error && /token|401|unauthorized|invalid jwt/i.test(error.message)) {
@@ -795,11 +907,23 @@ export default class YoofloePlugin extends Plugin {
     return filePath;
   }
 
-  private async writeContentFile(surface: string, content: string) {
+  private async createContentFile(surface: string, content: string, title?: string) {
     await ensureFolderPath(this, this.settings.savePath);
-    const filePath = await uniqueFilePath(this, surface);
-    await this.app.vault.create(filePath, content);
-    return filePath;
+    const filePath = title?.trim()
+      ? await uniqueTitledFilePath(this, title)
+      : await uniqueFilePath(this, surface);
+    return this.app.vault.create(filePath, content);
+  }
+
+  private async openContentFile(file: TFile) {
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.openFile(file);
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  private async writeContentFile(surface: string, content: string) {
+    const file = await this.createContentFile(surface, content);
+    return file.path;
   }
 
   private async fetchGardenerBriefMarkdown(client: YoofloeClient) {
