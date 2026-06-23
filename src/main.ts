@@ -446,6 +446,30 @@ export default class YoofloePlugin extends Plugin {
     return this.normalizeUserFacingError(error, fallbackMessage);
   }
 
+  getUserFacingErrorDetails(error: unknown, fallbackMessage: string) {
+    const message = this.normalizeUserFacingError(error, fallbackMessage);
+    if (!(error instanceof YoofloeApiError)) {
+      return message;
+    }
+
+    const details: string[] = [];
+    if (error.code) {
+      details.push(`Code: ${error.code}`);
+    }
+    if (error.requestId) {
+      details.push(`Request ID: ${error.requestId}`);
+    }
+    if (error.status === 401) {
+      details.push("Reconnect Yoofloe in Settings.");
+    } else if (error.status === 403) {
+      details.push("Open Yoofloe and check AI terms or access.");
+    } else if (error.status >= 500 || error.status === 429) {
+      details.push("Try again shortly. If it repeats, share the request ID.");
+    }
+
+    return details.length ? `${message} ${details.join(" ")}` : message;
+  }
+
   setLatestEntitlement(entitlement: YoofloeEntitlement | null | undefined) {
     this.updateEntitlement(entitlement);
   }

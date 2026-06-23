@@ -38,12 +38,20 @@ type YoofloeClientSettings = Pick<YoofloePluginSettings, "functionsBaseUrl">;
 export class YoofloeApiError extends Error {
   status: number;
   body?: unknown;
+  code?: string;
+  requestId?: string;
 
   constructor(message: string, status: number, body?: unknown) {
     super(message);
     this.name = "YoofloeApiError";
     this.status = status;
     this.body = body;
+
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const payload = body as Record<string, unknown>;
+      this.code = typeof payload.code === "string" ? payload.code : undefined;
+      this.requestId = typeof payload.requestId === "string" ? payload.requestId : undefined;
+    }
   }
 }
 

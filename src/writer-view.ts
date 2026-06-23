@@ -23,7 +23,7 @@ type WriterPreset = {
 
 type WriterDestinationMode = "new-note" | "current-note";
 type WriterOutputStatus = {
-  kind: "success" | "warning";
+  kind: "success" | "warning" | "error";
   message: string;
 };
 
@@ -477,6 +477,12 @@ export class YoofloeWriterView extends ItemView {
           } else {
             this.lastOutputStatus = { kind: "success", message: `Created and opened ${result.output.path}.` };
           }
+          this.render();
+        } catch (error) {
+          this.lastOutputStatus = {
+            kind: "error",
+            message: this.plugin.getUserFacingErrorDetails(error, "Yoofloe AI Writer failed.")
+          };
           this.render();
         } finally {
           if (generateButton.isConnected) {

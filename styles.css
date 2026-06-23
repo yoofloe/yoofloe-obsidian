@@ -539,6 +539,11 @@
   background: color-mix(in srgb, var(--color-orange) 10%, var(--background-secondary));
 }
 
+.yoofloe-writer-output-status.is-error {
+  border-color: color-mix(in srgb, var(--color-red) 42%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--color-red) 10%, var(--background-secondary));
+}
+
 .yoofloe-writer-actions {
   display: flex;
   flex-wrap: wrap;
