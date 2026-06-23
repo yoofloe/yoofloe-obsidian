@@ -82,7 +82,11 @@ function entitlementFromApiError(error: YoofloeApiError) {
 }
 
 function isPaywallMessage(message: string) {
-  return /pro|plan|subscription|upgrade|not entitled|entitlement|does not currently include obsidian access|obsidian access requires/i.test(message);
+  return /\bpro\b|\bplan\b|subscription|upgrade|not entitled|entitlement|does not currently include obsidian access|obsidian access requires/i.test(message);
+}
+
+function isProviderErrorCode(code: string | undefined) {
+  return typeof code === "string" && code.startsWith("AI_PROVIDER_");
 }
 
 function sanitizeDefaultDomains(value: unknown): YoofloeDomain[] {
@@ -448,8 +452,16 @@ export default class YoofloePlugin extends Plugin {
     if (error.requestId) {
       details.push(`Request ID: ${error.requestId}`);
     }
+    if (error.providerStatus) {
+      details.push(`Provider status: ${error.providerStatus}`);
+    }
+    if (error.providerRequestId) {
+      details.push(`Provider request ID: ${error.providerRequestId}`);
+    }
     details.push(`Function reached: ${String(error.reachedFunction)}`);
-    if (error.status === 401) {
+    if (isProviderErrorCode(error.code)) {
+      details.push("This is a Yoofloe hosted AI provider configuration issue. Share diagnostics if it repeats.");
+    } else if (error.status === 401) {
       details.push("Reconnect Yoofloe in Settings.");
     } else if (error.status === 403) {
       details.push("Open Yoofloe and check AI terms or access.");
@@ -474,6 +486,8 @@ export default class YoofloePlugin extends Plugin {
       `status=${error.status || "unknown"}`,
       `code=${error.code || "unknown"}`,
       `requestId=${error.requestId || "none"}`,
+      `providerStatus=${error.providerStatus || "none"}`,
+      `providerRequestId=${error.providerRequestId || "none"}`,
       `reachedFunction=${String(error.reachedFunction)}`,
       `outputMode=${context.outputMode || "unknown"}`,
       `currentNoteTarget=${context.hasCurrentNoteTarget ? "present" : "absent"}`
@@ -503,6 +517,9 @@ export default class YoofloePlugin extends Plugin {
     if (error instanceof YoofloeApiError) {
       const entitlement = entitlementFromApiError(error);
       this.updateEntitlement(entitlement);
+      if (isProviderErrorCode(error.code)) {
+        return error.message;
+      }
       if (isBlockedEntitlement(entitlement) || isPaywallMessage(error.message)) {
         if (!entitlement) {
           this.latestEntitlement = {

@@ -42,6 +42,8 @@ export interface YoofloeApiDiagnostics {
   status: number;
   code?: string;
   requestId?: string;
+  providerStatus?: number;
+  providerRequestId?: string;
   functionSlug: string;
   host: string;
   reachedFunction: YoofloeReachedFunction;
@@ -52,6 +54,8 @@ export class YoofloeApiError extends Error {
   status: number;
   code?: string;
   requestId?: string;
+  providerStatus?: number;
+  providerRequestId?: string;
   functionSlug: string;
   host: string;
   reachedFunction: YoofloeReachedFunction;
@@ -63,6 +67,8 @@ export class YoofloeApiError extends Error {
     this.status = diagnostics.status;
     this.code = diagnostics.code;
     this.requestId = diagnostics.requestId;
+    this.providerStatus = diagnostics.providerStatus;
+    this.providerRequestId = diagnostics.providerRequestId;
     this.functionSlug = diagnostics.functionSlug;
     this.host = diagnostics.host;
     this.reachedFunction = diagnostics.reachedFunction;
@@ -74,6 +80,8 @@ export class YoofloeApiError extends Error {
       status: this.status,
       code: this.code,
       requestId: this.requestId,
+      providerStatus: this.providerStatus,
+      providerRequestId: this.providerRequestId,
       functionSlug: this.functionSlug,
       host: this.host,
       reachedFunction: this.reachedFunction
@@ -179,12 +187,16 @@ function buildResponseError(
   const { host, functionSlug } = getEndpointParts(settings, path);
   const code = typeof payload.code === "string" ? payload.code : undefined;
   const requestId = typeof payload.requestId === "string" ? payload.requestId : undefined;
+  const providerStatus = typeof payload.providerStatus === "number" ? payload.providerStatus : undefined;
+  const providerRequestId = typeof payload.providerRequestId === "string" ? payload.providerRequestId : undefined;
   const message = safeErrorMessage(status, code);
 
   return new YoofloeApiError(message, {
     status,
     code,
     requestId,
+    providerStatus,
+    providerRequestId,
     functionSlug,
     host,
     reachedFunction: inferReachedFunction(status, payload),
