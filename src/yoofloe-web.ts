@@ -34,6 +34,25 @@ export type YoofloePairingClaim = {
 };
 
 export type YoofloePairingAccess = "read" | "read-write";
+export type YoofloePairingPollEvent = {
+  status: number;
+  code?: string;
+  state: "pending" | "claiming";
+};
+
+export class YoofloePairingError extends Error {
+  status: number;
+  code?: string;
+  path: string;
+
+  constructor(message: string, { status = 0, code, path }: { status?: number; code?: string; path: string }) {
+    super(message);
+    this.name = "YoofloePairingError";
+    this.status = status;
+    this.code = code;
+    this.path = path;
+  }
+}
 
 const YOOFLOE_READ_WRITE_CAPABILITIES = [
   "obsidian:read",
@@ -92,15 +111,22 @@ async function postPairingJson<T>(functionsBaseUrl: string, path: string, body: 
     url: joinUrl(functionsBaseUrl, path),
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    throw: false
   });
-  const payload = response.json as Record<string, unknown> | null;
+  const payload = response.json && typeof response.json === "object" && !Array.isArray(response.json)
+    ? response.json as Record<string, unknown>
+    : {};
 
   if (response.status >= 400) {
     const message = typeof payload?.error === "string"
       ? payload.error
       : `Yoofloe pairing request failed with status ${response.status}.`;
-    throw new Error(message);
+    throw new YoofloePairingError(message, {
+      status: response.status,
+      code: typeof payload?.code === "string" ? payload.code : undefined,
+      path
+    });
   }
 
   return (payload || {}) as T;
@@ -224,20 +250,33 @@ export async function waitForYoofloeWebPairing(
   session: YoofloePairingSession,
   {
     intervalMs = 2500,
-    timeoutMs = 180000
-  }: { intervalMs?: number; timeoutMs?: number } = {}
+    timeoutMs = 180000,
+    onPoll
+  }: { intervalMs?: number; timeoutMs?: number; onPoll?: (event: YoofloePairingPollEvent) => void | Promise<void>; } = {}
 ): Promise<YoofloePairingClaim> {
   const expiresAt = new Date(session.expiresAt).getTime();
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline && (!Number.isFinite(expiresAt) || Date.now() < expiresAt)) {
+    await onPoll?.({ state: "claiming", status: 0 });
     const claim = await claimYoofloeWebPairing(functionsBaseUrl, session);
     if (claim) return claim;
+    await onPoll?.({ state: "pending", status: 202 });
 
     await new Promise((resolve) => {
       activeWindow.setTimeout(resolve, intervalMs);
     });
   }
 
-  throw new Error("Yoofloe web pairing timed out. Start pairing again from Obsidian settings.");
+  const expired = Number.isFinite(expiresAt) && Date.now() >= expiresAt;
+  throw new YoofloePairingError(
+    expired
+      ? "Yoofloe web pairing expired. Start pairing again from Obsidian settings."
+      : "Yoofloe web pairing timed out. Start pairing again from Obsidian settings.",
+    {
+      status: expired ? 410 : 0,
+      code: expired ? "PAIRING_EXPIRED" : "PAIRING_TIMED_OUT",
+      path: "claim-obsidian-pairing"
+    }
+  );
 }

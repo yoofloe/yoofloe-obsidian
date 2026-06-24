@@ -650,6 +650,13 @@ export class YoofloeCaptureView extends ItemView {
       text: this.plugin.settings.yoofloeAccessMode === "read-write" ? "Read & write" : "Read access"
     });
     status.createEl("span", { cls: "yoofloe-status-badge yoofloe-status-muted", text: "Preview before apply" });
+    const pairing = this.plugin.settings.yoofloePairing;
+    if (pairing.phase !== "idle" && pairing.phase !== "connected") {
+      header.createEl("div", {
+        cls: "yoofloe-capture-message",
+        text: pairing.message
+      });
+    }
 
     const sourceRow = container.createDiv({
       cls: "yoofloe-capture-source-row",
@@ -775,7 +782,17 @@ export class YoofloeCaptureView extends ItemView {
       attr: { type: "button" }
     });
     connectButton.addEventListener("click", () => {
-      void this.plugin.connectYoofloeWeb("read-write");
+      connectButton.toggleAttribute("disabled", true);
+      void (async () => {
+        try {
+          await this.plugin.connectYoofloeWeb("read-write");
+          this.message = "Yoofloe read & write access is connected.";
+        } catch (error) {
+          this.message = this.plugin.getUserFacingErrorMessage(error, "Failed to connect Yoofloe write access.");
+        } finally {
+          this.render();
+        }
+      })();
     });
 
     if (this.message) {
@@ -815,7 +832,17 @@ export class YoofloeCaptureView extends ItemView {
       });
       applyButton.addEventListener("click", () => {
         if (this.preview?.previewId === "local-preview") {
-          void this.plugin.connectYoofloeWeb("read-write");
+          applyButton.toggleAttribute("disabled", true);
+          void (async () => {
+            try {
+              await this.plugin.connectYoofloeWeb("read-write");
+              this.message = "Yoofloe read & write access is connected. Preview again before applying.";
+            } catch (error) {
+              this.message = this.plugin.getUserFacingErrorMessage(error, "Failed to connect Yoofloe write access.");
+            } finally {
+              this.render();
+            }
+          })();
           return;
         }
         void this.applySelected();

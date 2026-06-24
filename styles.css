@@ -139,6 +139,64 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
 }
 
+.yoofloe-pairing-card {
+  min-width: 0;
+  margin: 0 0 0.9rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.yoofloe-pairing-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.yoofloe-pairing-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+}
+
+.yoofloe-pairing-meta-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 0.45fr) minmax(0, 1fr);
+  gap: 0.6rem;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.yoofloe-pairing-meta-label {
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+.yoofloe-pairing-meta-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}
+
+.yoofloe-pairing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.yoofloe-pairing-actions button {
+  height: auto;
+  min-height: 2rem;
+  white-space: normal;
+}
+
 .yoofloe-info-card {
   min-width: 0;
   margin: 0 0 0.9rem;

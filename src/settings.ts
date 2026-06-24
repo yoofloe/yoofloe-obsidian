@@ -1,16 +1,12 @@
 import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type YoofloePlugin from "./main";
-import { YoofloeClient } from "./api/yoofloe-client";
 import { buildClaudeCodePrompt, buildCodexPrompt, buildMcpConfigSnippet } from "./agent-guidance";
 import { describeStoredSecret, SECRET_STORAGE_REQUIRED_MESSAGE } from "./secrets";
 import { YOOFLOE_DOMAINS, YOOFLOE_OUTPUT_TARGETS, YOOFLOE_RANGES } from "./types";
-import type { YoofloeDomain, YoofloeOutputTarget } from "./types";
+import type { YoofloeDomain, YoofloeOutputTarget, YoofloePairingPhase, YoofloePairingStatus } from "./types";
 import {
   YOOFLOE_PAIRING_PENDING_CONTRACT,
-  YOOFLOE_WEB_PAIRING_URL,
-  openYoofloeWebPairing,
-  startYoofloeWebPairingSession,
-  waitForYoofloeWebPairing
+  YOOFLOE_WEB_PAIRING_URL
 } from "./yoofloe-web";
 
 type BadgeTone = "muted" | "accent" | "success" | "warning" | "danger";
@@ -325,6 +321,122 @@ function tokenBadgeState(plugin: YoofloePlugin) {
   }
 }
 
+const ACTIVE_PAIRING_PHASES: YoofloePairingPhase[] = [
+  "starting",
+  "browser-opened",
+  "waiting-approval",
+  "claiming",
+  "token-saved",
+  "verifying"
+];
+
+const PAIRING_UI_STALE_MS = 3 * 60 * 1000;
+
+function isPastTimestamp(value: string) {
+  if (!value) return false;
+  const time = new Date(value).getTime();
+  return !Number.isNaN(time) && time <= Date.now();
+}
+
+function isStaleActivePairing(status: YoofloePairingStatus, pairingInFlight = false) {
+  if (!ACTIVE_PAIRING_PHASES.includes(status.phase)) return false;
+  if (!pairingInFlight) return true;
+  if (isPastTimestamp(status.expiresAt)) return true;
+  const updatedAt = new Date(status.updatedAt || status.startedAt).getTime();
+  return !Number.isNaN(updatedAt) && Date.now() - updatedAt > PAIRING_UI_STALE_MS;
+}
+
+function effectivePairingPhase(status: YoofloePairingStatus, pairingInFlight = false): YoofloePairingPhase {
+  return isStaleActivePairing(status, pairingInFlight) ? "timed-out" : status.phase;
+}
+
+function pairingPhaseBadge(status: YoofloePairingStatus, pairingInFlight = false): { text: string; tone: BadgeTone } {
+  const phase = effectivePairingPhase(status, pairingInFlight);
+  switch (phase) {
+    case "connected":
+      return { text: "Connected", tone: "success" };
+    case "verification-warning":
+      return { text: "Saved, verify", tone: "warning" };
+    case "expired":
+    case "timed-out":
+    case "failed":
+      return { text: "Needs retry", tone: "danger" };
+    case "starting":
+    case "browser-opened":
+    case "waiting-approval":
+    case "claiming":
+    case "token-saved":
+    case "verifying":
+      return { text: "Connecting", tone: "accent" };
+    case "idle":
+    default:
+      return { text: "Ready", tone: "muted" };
+  }
+}
+
+function isActivePairingStatus(status: YoofloePairingStatus, pairingInFlight = false) {
+  return ACTIVE_PAIRING_PHASES.includes(status.phase) && !isStaleActivePairing(status, pairingInFlight);
+}
+
+function formatPairingTimestamp(value: string) {
+  if (!value) return "none";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function createPairingStatusCard(containerEl: HTMLElement, plugin: YoofloePlugin) {
+  const status = plugin.settings.yoofloePairing;
+  const pairingInFlight = plugin.isYoofloePairingInProgress();
+  const card = containerEl.createDiv({ cls: "yoofloe-pairing-card" });
+  const header = card.createDiv({ cls: "yoofloe-pairing-card-header" });
+  header.createEl("div", { cls: "yoofloe-info-card-title", text: "Yoofloe web connection" });
+  const badge = pairingPhaseBadge(status, pairingInFlight);
+  createBadge(header, badge.text, badge.tone);
+
+  card.createEl("p", {
+    cls: "yoofloe-info-card-body",
+    text: isStaleActivePairing(status, pairingInFlight)
+      ? "Yoofloe web approval was not received in time. Start again to connect."
+      : status.message || "Connect through Yoofloe web when you are ready."
+  });
+
+  const meta = card.createDiv({ cls: "yoofloe-pairing-meta" });
+  const rows = [
+    ["Access", status.access === "read-write" ? "Read & write" : "Read access"],
+    ["Started", formatPairingTimestamp(status.startedAt)],
+    ["Expires", formatPairingTimestamp(status.expiresAt)],
+    ["Pairing id", status.pairingIdHint || "none"],
+    ["Open mode", status.openMode],
+    ["Last endpoint", status.lastEndpointStatus ? `${status.lastEndpointStatus}${status.lastEndpointCode ? ` ${status.lastEndpointCode}` : ""}` : "none"],
+    ["Token", status.maskedToken || plugin.tokenStatus],
+    ["Token expiry", formatPairingTimestamp(status.tokenExpiresAt)]
+  ];
+
+  for (const [label, value] of rows) {
+    const row = meta.createDiv({ cls: "yoofloe-pairing-meta-row" });
+    row.createEl("span", { cls: "yoofloe-pairing-meta-label", text: label });
+    row.createEl("span", { cls: "yoofloe-pairing-meta-value", text: value });
+  }
+
+  const actions = card.createDiv({ cls: "yoofloe-pairing-actions" });
+  if (plugin.getStoredPat()) {
+    const verifyButton = actions.createEl("button", { text: "Verify again" });
+    verifyButton.type = "button";
+    verifyButton.addEventListener("click", () => {
+      verifyButton.disabled = true;
+      void plugin.verifyStoredYoofloeToken({ throwOnFailure: false });
+    });
+  }
+
+  const diagnosticsButton = actions.createEl("button", { text: "Copy diagnostics" });
+  diagnosticsButton.type = "button";
+  diagnosticsButton.addEventListener("click", () => {
+    void plugin.copyPairingDiagnostics();
+  });
+
+  return card;
+}
+
 function providerChoiceStatus(provider: YoofloePlugin["settings"]["provider"]["type"]) {
   if (provider === "yoofloe-hosted") {
     return { text: "Default", tone: "success" as const };
@@ -584,6 +696,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     createInfoCard(privacyDetails, "Personal-only scope", "Yoofloe for Obsidian and Yoofloe Obsidian MCP are included with free and pro accounts. Obsidian access is personal-only and does not include couple/shared exports.");
     createInfoCard(privacyDetails, "Hosted writer disclosure", "Yoofloe-hosted AI writer uses the Yoofloe AI service for Markdown generation. Advanced BYOK keeps Google/Gemini calls in your own provider setup.");
     createInfoCard(tokenSection, "Automatic pairing status", YOOFLOE_PAIRING_PENDING_CONTRACT);
+    createPairingStatusCard(tokenSection, this.plugin);
     createHelpDetails(tokenSection, "Need help finding your token?", [
       `Click Connect with Yoofloe web or open ${YOOFLOE_WEB_PAIRING_URL}.`,
       "Approve the pairing request after signing in with Yoofloe web.",
@@ -595,9 +708,13 @@ export class YoofloeSettingTab extends PluginSettingTab {
       .setName("Browser pairing")
       .setDesc("Use your Yoofloe web session to create an Obsidian token. Obsidian will not collect your email or password.")
       .addButton((button) => {
+        const pairingActive = isActivePairingStatus(
+          this.plugin.settings.yoofloePairing,
+          this.plugin.isYoofloePairingInProgress()
+        );
         button
-          .setButtonText("Connect with Yoofloe web")
-          .setDisabled(!hasSecureStorage)
+          .setButtonText(pairingActive ? "Connecting..." : pat ? "Reconnect with Yoofloe web" : "Connect with Yoofloe web")
+          .setDisabled(!hasSecureStorage || pairingActive)
           .onClick(async () => {
             try {
               if (!hasSecureStorage) {
@@ -606,34 +723,16 @@ export class YoofloeSettingTab extends PluginSettingTab {
               }
 
               button.setDisabled(true);
-              const session = await startYoofloeWebPairingSession(this.plugin.settings.functionsBaseUrl);
-              const openResult = await openYoofloeWebPairing(session.verificationUrl);
-              new Notice(openResult.message);
-              const claim = await waitForYoofloeWebPairing(this.plugin.settings.functionsBaseUrl, session);
-              this.plugin.secretStore.setPat(claim.token);
-              this.plugin.settings.yoofloeAccessMode = "read";
-              this.plugin.tokenStatus = "saved";
-              await this.plugin.saveSettings();
-              new Notice("Yoofloe token saved in secure storage.");
-
-              try {
-                const client = new YoofloeClient(this.plugin.settings, claim.token);
-                const response = await client.testToken();
-                this.plugin.setLatestEntitlement(response.entitlement);
-                this.plugin.tokenStatus = "verified";
-                new Notice(response.entitlement.allowed
-                  ? "Yoofloe token is valid."
-                  : this.plugin.getEntitlementNoticeMessage());
-              } catch (verifyError) {
-                this.plugin.tokenStatus = "saved";
-                new Notice(this.plugin.getUserFacingErrorMessage(verifyError, "Yoofloe token saved. Verification failed."));
-              }
-
+              await this.plugin.connectYoofloeWeb("read");
               this.display();
             } catch (error) {
-              new Notice(error instanceof Error ? error.message : "Failed to connect with Yoofloe web.");
+              new Notice(this.plugin.getUserFacingErrorMessage(error, "Failed to connect with Yoofloe web."));
+              this.display();
             } finally {
-              button.setDisabled(!hasSecureStorage);
+              button.setDisabled(!hasSecureStorage || isActivePairingStatus(
+                this.plugin.settings.yoofloePairing,
+                this.plugin.isYoofloePairingInProgress()
+              ));
             }
           });
       });
@@ -679,6 +778,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
               this.plugin.tokenStatus = "saved";
               pendingPat = "";
               await this.plugin.saveSettings();
+              await this.plugin.verifyStoredYoofloeToken({ throwOnFailure: false });
               new Notice("Yoofloe token saved in secure storage.");
               this.display();
             } catch (error) {
@@ -702,10 +802,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
               }
 
               button.setDisabled(true);
-              const client = new YoofloeClient(this.plugin.settings, token);
-              const response = await client.testToken();
-              this.plugin.setLatestEntitlement(response.entitlement);
-              this.plugin.tokenStatus = "verified";
+              const response = await this.plugin.verifyStoredYoofloeToken({ throwOnFailure: true });
+              if (!response) {
+                throw new Error("Yoofloe token verification did not return a result.");
+              }
               new Notice(response.entitlement.allowed
                 ? "Yoofloe token is valid."
                 : this.plugin.getEntitlementNoticeMessage());
@@ -733,7 +833,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
             this.plugin.settings.yoofloeAccessMode = "read";
             this.plugin.tokenStatus = "missing";
             this.plugin.latestEntitlement = null;
-            await this.plugin.saveSettings();
+            await this.plugin.resetYoofloePairingStatus("Connect through Yoofloe web when you are ready.");
             new Notice("Yoofloe token cleared from secure storage.");
             this.display();
           });

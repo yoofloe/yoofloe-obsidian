@@ -16,15 +16,19 @@ import {
   openYoofloeWebPairing,
   startYoofloeWebPairingSession,
   waitForYoofloeWebPairing,
+  YoofloePairingError,
   type YoofloePairingAccess
 } from "./yoofloe-web";
 import type {
   YoofloeAiDocumentType,
+  YoofloeAccessMode,
   YoofloeBundle,
   YoofloeDomain,
   YoofloeEntitlement,
   YoofloeHostedWriterRequest,
   YoofloeHostedWriterResponse,
+  YoofloePairingPhase,
+  YoofloePairingStatus,
   YoofloePluginSettings,
   YoofloeWriteExecuteRequest,
   YoofloeWriteExecuteResponse,
@@ -33,6 +37,20 @@ import type {
 } from "./types";
 
 const DEFAULT_HOSTED_WRITER_DOMAINS: YoofloeDomain[] = ["schedule", "life", "wellness", "journal", "garden"];
+const DEFAULT_PAIRING_STATUS: YoofloePairingStatus = {
+  phase: "idle",
+  message: "Connect through Yoofloe web when you are ready.",
+  access: "read",
+  startedAt: "",
+  updatedAt: "",
+  expiresAt: "",
+  pairingIdHint: "",
+  openMode: "none",
+  lastEndpointStatus: null,
+  lastEndpointCode: "",
+  maskedToken: "",
+  tokenExpiresAt: ""
+};
 
 const DEFAULT_SETTINGS: YoofloePluginSettings = {
   apiToken: "",
@@ -50,6 +68,7 @@ const DEFAULT_SETTINGS: YoofloePluginSettings = {
   showAdvancedProvider: false,
   showMcpSetup: false,
   yoofloeAccessMode: "read",
+  yoofloePairing: DEFAULT_PAIRING_STATUS,
   provider: {
     type: "yoofloe-hosted",
     clientId: "",
@@ -106,6 +125,66 @@ function sanitizeOutputTarget(value: unknown): YoofloePluginSettings["defaultOut
   return YOOFLOE_OUTPUT_TARGETS.includes(value as YoofloePluginSettings["defaultOutputTarget"])
     ? value as YoofloePluginSettings["defaultOutputTarget"]
     : DEFAULT_SETTINGS.defaultOutputTarget;
+}
+
+function sanitizePairingPhase(value: unknown): YoofloePairingPhase {
+  const phases: YoofloePairingPhase[] = [
+    "idle",
+    "starting",
+    "browser-opened",
+    "waiting-approval",
+    "claiming",
+    "token-saved",
+    "verifying",
+    "connected",
+    "verification-warning",
+    "expired",
+    "timed-out",
+    "failed"
+  ];
+  return phases.includes(value as YoofloePairingPhase) ? value as YoofloePairingPhase : "idle";
+}
+
+function sanitizePairingStatus(value: unknown): YoofloePairingStatus {
+  const candidate = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Partial<YoofloePairingStatus>
+    : {};
+  return {
+    ...DEFAULT_PAIRING_STATUS,
+    phase: sanitizePairingPhase(candidate.phase),
+    message: typeof candidate.message === "string" && candidate.message.trim()
+      ? candidate.message.trim()
+      : DEFAULT_PAIRING_STATUS.message,
+    access: candidate.access === "read-write" ? "read-write" : "read",
+    startedAt: typeof candidate.startedAt === "string" ? candidate.startedAt : "",
+    updatedAt: typeof candidate.updatedAt === "string" ? candidate.updatedAt : "",
+    expiresAt: typeof candidate.expiresAt === "string" ? candidate.expiresAt : "",
+    pairingIdHint: typeof candidate.pairingIdHint === "string" ? candidate.pairingIdHint.slice(0, 12) : "",
+    openMode: candidate.openMode === "browser" || candidate.openMode === "clipboard" || candidate.openMode === "manual"
+      ? candidate.openMode
+      : "none",
+    lastEndpointStatus: typeof candidate.lastEndpointStatus === "number" ? candidate.lastEndpointStatus : null,
+    lastEndpointCode: typeof candidate.lastEndpointCode === "string" ? candidate.lastEndpointCode : "",
+    maskedToken: typeof candidate.maskedToken === "string" ? candidate.maskedToken : "",
+    tokenExpiresAt: typeof candidate.tokenExpiresAt === "string" ? candidate.tokenExpiresAt : ""
+  };
+}
+
+function pairingIdHint(pairingId: string) {
+  return pairingId ? pairingId.slice(0, 8) : "";
+}
+
+function maskPairingToken(token: string) {
+  if (!token) return "";
+  return token.length > 16 ? `${token.slice(0, 8)}...${token.slice(-4)}` : "saved";
+}
+
+function hostFromFunctionsBaseUrl(functionsBaseUrl: string) {
+  try {
+    return new URL(functionsBaseUrl).host;
+  } catch {
+    return "unknown";
+  }
 }
 
 type AiDocumentCommandDefinition = {
@@ -208,6 +287,7 @@ export default class YoofloePlugin extends Plugin {
   private statusEl: HTMLElement | null = null;
   private statusResetTimer: number | null = null;
   private lastCaptureSelection: CaptureSelectionPayload | null = null;
+  private yoofloePairingInFlight = false;
 
   async onload() {
     await this.loadSettings();
@@ -265,6 +345,7 @@ export default class YoofloePlugin extends Plugin {
       showAdvancedProvider: !!saved?.showAdvancedProvider,
       showMcpSetup: !!saved?.showMcpSetup,
       yoofloeAccessMode: saved?.yoofloeAccessMode === "read-write" ? "read-write" : "read",
+      yoofloePairing: sanitizePairingStatus(saved?.yoofloePairing),
       provider: {
         type: rawProviderType as YoofloePluginSettings["provider"]["type"],
         clientId: typeof savedProvider.clientId === "string" ? savedProvider.clientId : DEFAULT_SETTINGS.provider.clientId,
@@ -324,9 +405,11 @@ export default class YoofloePlugin extends Plugin {
     this.settings.defaultOutputTarget = sanitizeOutputTarget(this.settings.defaultOutputTarget);
     this.settings.defaultTone = this.settings.defaultTone.trim() || DEFAULT_SETTINGS.defaultTone;
     this.settings.yoofloeAccessMode = this.settings.yoofloeAccessMode === "read-write" ? "read-write" : "read";
+    this.settings.yoofloePairing = sanitizePairingStatus(this.settings.yoofloePairing);
     await this.saveData({
       ...this.settings,
       apiToken: "",
+      yoofloePairing: this.settings.yoofloePairing,
       provider: {
         type: this.settings.provider.type,
         clientId: this.settings.provider.clientId,
@@ -600,6 +683,117 @@ export default class YoofloePlugin extends Plugin {
     return this.secretStore?.isAvailable ? this.secretStore.getPat() : null;
   }
 
+  isYoofloePairingInProgress() {
+    return this.yoofloePairingInFlight;
+  }
+
+  private async updatePairingStatus(update: Partial<YoofloePairingStatus>) {
+    this.settings.yoofloePairing = sanitizePairingStatus({
+      ...this.settings.yoofloePairing,
+      ...update,
+      updatedAt: new Date().toISOString()
+    });
+    await this.saveSettings();
+  }
+
+  private async setPairingPhase(
+    phase: YoofloePairingPhase,
+    message: string,
+    update: Partial<YoofloePairingStatus> = {}
+  ) {
+    await this.updatePairingStatus({ ...update, phase, message });
+  }
+
+  async verifyStoredYoofloeToken(options: { throwOnFailure?: boolean } = {}) {
+    if (!this.secretStore.isAvailable) {
+      throw new Error(SECRET_STORAGE_REQUIRED_MESSAGE);
+    }
+
+    const token = this.secretStore.getPat();
+    if (!token) {
+      this.tokenStatus = "missing";
+      await this.setPairingPhase("failed", "No Yoofloe token is saved yet. Connect again to finish setup.");
+      throw new Error("Yoofloe API token is missing.");
+    }
+
+    await this.setPairingPhase("verifying", "Token saved. Verifying Yoofloe access...");
+    try {
+      const client = new YoofloeClient(this.settings, token);
+      const response = await client.testToken();
+      this.setLatestEntitlement(response.entitlement);
+      this.tokenStatus = "verified";
+      if (response.entitlement.allowed) {
+        await this.setPairingPhase("connected", "Connected. Yoofloe access is verified.", {
+          access: this.settings.yoofloeAccessMode,
+          maskedToken: maskPairingToken(token)
+        });
+      } else {
+        await this.setPairingPhase("verification-warning", this.getEntitlementNoticeMessage(), {
+          access: this.settings.yoofloeAccessMode,
+          maskedToken: maskPairingToken(token)
+        });
+      }
+      return response;
+    } catch (error) {
+      this.tokenStatus = "saved";
+      const message = this.getUserFacingErrorMessage(error, "Yoofloe token saved. Verification failed.");
+      await this.setPairingPhase("verification-warning", message, {
+        access: this.settings.yoofloeAccessMode,
+        maskedToken: maskPairingToken(token)
+      });
+      if (options.throwOnFailure) throw error;
+      return null;
+    }
+  }
+
+  getPairingDiagnostics() {
+    const pairing = sanitizePairingStatus(this.settings.yoofloePairing);
+    const appWithVersion = this.app as typeof this.app & { getVersion?: () => string };
+    const platform = Platform.isPhone ? "phone" : Platform.isMobileApp ? "mobile" : Platform.isDesktopApp ? "desktop" : "unknown";
+    const lines = [
+      "Yoofloe Obsidian pairing diagnostics",
+      `pluginVersion=${this.manifest.version}`,
+      `obsidianVersion=${appWithVersion.getVersion?.() || "unknown"}`,
+      `platform=${platform}`,
+      `host=${hostFromFunctionsBaseUrl(this.settings.functionsBaseUrl)}`,
+      `state=${pairing.phase}`,
+      `access=${pairing.access}`,
+      `startedAt=${pairing.startedAt || "none"}`,
+      `updatedAt=${pairing.updatedAt || "none"}`,
+      `expiresAt=${pairing.expiresAt || "none"}`,
+      `pairingId=${pairing.pairingIdHint || "none"}`,
+      `openMode=${pairing.openMode}`,
+      `lastEndpointStatus=${pairing.lastEndpointStatus ?? "none"}`,
+      `lastEndpointCode=${pairing.lastEndpointCode || "none"}`,
+      `tokenStatus=${this.tokenStatus || "unknown"}`,
+      `tokenExpiresAt=${pairing.tokenExpiresAt || "none"}`
+    ];
+    return lines.join("\n");
+  }
+
+  async copyPairingDiagnostics() {
+    try {
+      await navigator.clipboard.writeText(this.getPairingDiagnostics());
+      new Notice("Yoofloe pairing diagnostics copied.");
+    } catch {
+      new Notice("Could not copy Yoofloe pairing diagnostics.");
+    }
+  }
+
+  async resetYoofloePairingStatus(message = DEFAULT_PAIRING_STATUS.message) {
+    await this.setPairingPhase("idle", message, {
+      access: "read",
+      startedAt: "",
+      expiresAt: "",
+      pairingIdHint: "",
+      openMode: "none",
+      lastEndpointStatus: null,
+      lastEndpointCode: "",
+      maskedToken: "",
+      tokenExpiresAt: ""
+    });
+  }
+
   private isMobileDrawerLeaf(leaf: WorkspaceLeaf) {
     return leaf.parent instanceof WorkspaceMobileDrawer;
   }
@@ -634,20 +828,97 @@ export default class YoofloePlugin extends Plugin {
       throw new Error(SECRET_STORAGE_REQUIRED_MESSAGE);
     }
 
-    const session = await startYoofloeWebPairingSession(this.settings.functionsBaseUrl, access);
-    const openResult = await openYoofloeWebPairing(session.verificationUrl);
-    new Notice(access === "read-write"
-      ? openResult.message.replace("Approve the pairing request", "Approve Obsidian Capture write access")
-      : openResult.message);
-    const claim = await waitForYoofloeWebPairing(this.settings.functionsBaseUrl, session);
-    this.secretStore.setPat(claim.token);
-    this.settings.yoofloeAccessMode = access === "read-write" ? "read-write" : "read";
-    this.tokenStatus = "saved";
-    await this.saveSettings();
-    new Notice(access === "read-write"
-      ? "Yoofloe read & write token saved in secure storage."
-      : "Yoofloe token saved in secure storage.");
-    return claim;
+    const normalizedAccess: YoofloeAccessMode = access === "read-write" ? "read-write" : "read";
+    const startedAt = new Date().toISOString();
+
+    if (this.yoofloePairingInFlight) {
+      throw new Error("Yoofloe web pairing is already in progress.");
+    }
+
+    this.yoofloePairingInFlight = true;
+    try {
+      await this.setPairingPhase("starting", "Starting Yoofloe web pairing...", {
+        access: normalizedAccess,
+        startedAt,
+        expiresAt: "",
+        pairingIdHint: "",
+        openMode: "none",
+        lastEndpointStatus: null,
+        lastEndpointCode: "",
+        maskedToken: "",
+        tokenExpiresAt: ""
+      });
+
+      const session = await startYoofloeWebPairingSession(this.settings.functionsBaseUrl, normalizedAccess);
+      await this.setPairingPhase("browser-opened", "Opening Yoofloe web in your browser...", {
+        access: normalizedAccess,
+        startedAt,
+        expiresAt: session.expiresAt,
+        pairingIdHint: pairingIdHint(session.pairingId)
+      });
+
+      const openResult = await openYoofloeWebPairing(session.verificationUrl);
+      const openMode = openResult.opened ? "browser" : openResult.copied ? "clipboard" : "manual";
+      await this.setPairingPhase("waiting-approval", openResult.opened
+        ? "Browser opened. Sign in to Yoofloe, approve the Obsidian request, then return here."
+        : openResult.copied
+          ? "Pairing link copied. Open it in your browser, approve the request, then return here."
+          : "Open the copied Yoofloe pairing link in your browser, approve the request, then return here.", {
+        access: normalizedAccess,
+        openMode
+      });
+
+      new Notice(normalizedAccess === "read-write"
+        ? openResult.message.replace("Approve the pairing request", "Approve Obsidian Capture write access")
+        : openResult.message);
+
+      const claim = await waitForYoofloeWebPairing(this.settings.functionsBaseUrl, session, {
+        onPoll: async (event) => {
+          await this.updatePairingStatus({
+            phase: event.state === "claiming" ? "claiming" : "waiting-approval",
+            message: event.state === "claiming"
+              ? "Checking whether Yoofloe web approved the connection..."
+              : "Waiting for approval from Yoofloe web...",
+            lastEndpointStatus: event.status || null,
+            lastEndpointCode: event.code || ""
+          });
+        }
+      });
+
+      this.secretStore.setPat(claim.token);
+      this.settings.yoofloeAccessMode = normalizedAccess;
+      this.tokenStatus = "saved";
+      await this.setPairingPhase("token-saved", "Token saved. Verifying Yoofloe access...", {
+        access: normalizedAccess,
+        maskedToken: maskPairingToken(claim.token),
+        tokenExpiresAt: claim.expiresAt || ""
+      });
+      new Notice(normalizedAccess === "read-write"
+        ? "Yoofloe read & write token saved. Verifying access..."
+        : "Yoofloe token saved. Verifying access...");
+
+      await this.verifyStoredYoofloeToken({ throwOnFailure: false });
+      return claim;
+    } catch (error) {
+      const message = this.getUserFacingErrorMessage(error, "Yoofloe web pairing failed.");
+      if (error instanceof YoofloePairingError) {
+        const phase = error.code === "PAIRING_EXPIRED"
+          ? "expired"
+          : error.code === "PAIRING_TIMED_OUT"
+            ? "timed-out"
+            : "failed";
+        await this.setPairingPhase(phase, message, {
+          access: normalizedAccess,
+          lastEndpointStatus: error.status || null,
+          lastEndpointCode: error.code || ""
+        });
+      } else {
+        await this.setPairingPhase("failed", message, { access: normalizedAccess });
+      }
+      throw error;
+    } finally {
+      this.yoofloePairingInFlight = false;
+    }
   }
 
   private emptyCaptureSelection(): CaptureSelectionPayload {

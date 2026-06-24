@@ -56,6 +56,34 @@ export type YoofloeCaptureTarget = (typeof YOOFLOE_CAPTURE_TARGETS)[number];
 export type YoofloeAccessMode = "read" | "read-write";
 export type YoofloeCaptureAction = string;
 export type YoofloeCaptureResultStatus = "applied" | "blocked" | "needs_confirmation" | "conflict" | "failed" | "skipped";
+export type YoofloePairingPhase =
+  | "idle"
+  | "starting"
+  | "browser-opened"
+  | "waiting-approval"
+  | "claiming"
+  | "token-saved"
+  | "verifying"
+  | "connected"
+  | "verification-warning"
+  | "expired"
+  | "timed-out"
+  | "failed";
+
+export interface YoofloePairingStatus {
+  phase: YoofloePairingPhase;
+  message: string;
+  access: YoofloeAccessMode;
+  startedAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  pairingIdHint: string;
+  openMode: "none" | "browser" | "clipboard" | "manual";
+  lastEndpointStatus: number | null;
+  lastEndpointCode: string;
+  maskedToken: string;
+  tokenExpiresAt: string;
+}
 
 export interface MarkdownRenderOptions {
   autoFrontmatter: boolean;
@@ -120,6 +148,7 @@ export interface YoofloePluginSettings {
   showAdvancedProvider: boolean;
   showMcpSetup: boolean;
   yoofloeAccessMode: YoofloeAccessMode;
+  yoofloePairing: YoofloePairingStatus;
   provider: YoofloeByokSettings;
 }
 
