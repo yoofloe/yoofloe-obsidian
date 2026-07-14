@@ -104,8 +104,8 @@ function titleForDomain(domain: YoofloeDomain) {
       return "Schedule";
     case "life":
       return "Life";
-    case "wellness":
-      return "Wellness";
+    case "library":
+      return "Library";
     case "finance":
       return "Finance";
     case "business":

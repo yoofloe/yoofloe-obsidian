@@ -62,8 +62,6 @@ const YOOFLOE_READ_WRITE_CAPABILITIES = [
   "obsidian:write:goals",
   "obsidian:write:study",
   "obsidian:write:activity",
-  "obsidian:write:wellness",
-  "obsidian:write:exercise",
   "obsidian:write:business",
   "obsidian:write:finance",
   "obsidian:write:delete"

@@ -31,7 +31,7 @@ const DOCUMENT_DEFINITIONS: Record<YoofloeAiDocumentType, YoofloeAiDocumentDefin
     systemPrompt: "You are a weekly planning assistant for Yoofloe data. Use only the provided facts, keep recommendations realistic, and return Markdown only.",
     userGoal: [
       "Create a weekly plan grounded in the Yoofloe data.",
-      "Include: Week Focus, Scheduled Commitments, Wellness Considerations, Priority Actions, and Watchouts.",
+      "Include: Week Focus, Scheduled Commitments, Personal Considerations, Priority Actions, and Watchouts.",
       "Keep the plan practical and evidence-based.",
       "Do not include YAML frontmatter.",
       "Do not wrap the result in code fences.",
@@ -75,20 +75,6 @@ const DOCUMENT_DEFINITIONS: Record<YoofloeAiDocumentType, YoofloeAiDocumentDefin
       "Create an action plan grounded in the Yoofloe data.",
       "Include: Current State, Priority Actions, Recommended Sequence, Dependencies or Blockers, Watchouts, and Evidence Notes.",
       "Recommendations must stay realistic and directly tied to the data.",
-      "Do not include YAML frontmatter.",
-      "Do not wrap the result in code fences.",
-      "Do not add a top-level title."
-    ].join("\n")
-  },
-  "wellness-check": {
-    title: "Wellness check",
-    type: "ai-wellness-check",
-    surface: "ai-wellness-check",
-    systemPrompt: "You are a grounded wellness reflection writer for Yoofloe data. Use only the provided facts, avoid medical claims, and return Markdown only.",
-    userGoal: [
-      "Create a wellness check grounded in the Yoofloe data.",
-      "Include: Current Signals, Energy and Recovery, Helpful Patterns, Gentle Adjustments, and Questions to Notice.",
-      "Avoid diagnosis, treatment advice, or unsupported health claims.",
       "Do not include YAML frontmatter.",
       "Do not wrap the result in code fences.",
       "Do not add a top-level title."

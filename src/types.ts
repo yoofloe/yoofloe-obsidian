@@ -1,7 +1,7 @@
 export const YOOFLOE_DOMAINS = [
   "schedule",
   "life",
-  "wellness",
+  "library",
   "finance",
   "business",
   "journal",
@@ -15,7 +15,6 @@ export const YOOFLOE_AI_DOCUMENT_TYPES = [
   "insight-brief",
   "decision-memo",
   "action-plan",
-  "wellness-check",
   "finance-snapshot",
   "free-prompt",
   "deep-dive"
@@ -34,10 +33,6 @@ export const YOOFLOE_CAPTURE_TARGETS = [
   "study-lecture",
   "study-plan",
   "activity",
-  "condition",
-  "meal",
-  "ritual",
-  "exercise",
   "business-item",
   "finance-transaction"
 ] as const;
@@ -47,7 +42,8 @@ export type YoofloeRange = (typeof YOOFLOE_RANGES)[number];
 export type YoofloeScope = "personal";
 export type YoofloeDateFormat = "YYYY-MM-DD" | "YYYYMMDD" | "YYYY.MM.DD";
 export type YoofloeGardenerSurface = "brief" | "plan" | "prompt" | "export";
-export type YoofloeAiProviderType = "yoofloe-hosted" | "none" | "gemini-google" | "gemini-vertex";
+/** Direct Writer calls the user's Vertex AI project; MCP uses the connected agent's model path. */
+export type YoofloeAiProviderType = "none" | "gemini-vertex";
 export type YoofloeAiDocumentType = (typeof YOOFLOE_AI_DOCUMENT_TYPES)[number];
 export type YoofloeOutputTarget = (typeof YOOFLOE_OUTPUT_TARGETS)[number];
 export type YoofloeContextMode = (typeof YOOFLOE_CONTEXT_MODES)[number];
@@ -98,7 +94,6 @@ export interface YoofloeByokSettings {
   googleLastConnectMessage: string;
   project: string;
   location: string;
-  googleModel: string;
   vertexModel: string;
 }
 
@@ -215,7 +210,7 @@ export interface YoofloeCurrentNoteContext {
   selectionOnly?: boolean;
 }
 
-export interface YoofloeHostedWriterRequest {
+export interface YoofloeWriterRequest {
   documentType: YoofloeAiDocumentType;
   domains: YoofloeDomain[];
   range: YoofloeRange;
@@ -249,7 +244,7 @@ export interface YoofloeWriterContextPlan {
   estimatedInputTokens?: number;
 }
 
-export interface YoofloeHostedWriterResponse {
+export interface YoofloeWriterResponse {
   success: boolean;
   requestId?: string;
   title: string;
@@ -264,9 +259,14 @@ export interface YoofloeHostedWriterResponse {
     type?: string;
     label?: string;
     model?: string;
-    hosted?: boolean;
+    hosted?: false;
   };
 }
+
+/** @deprecated Internal compatibility aliases; direct writer requests are user-owned Vertex AI only. */
+export type YoofloeHostedWriterRequest = YoofloeWriterRequest;
+/** @deprecated Internal compatibility aliases; direct writer responses are user-owned Vertex AI only. */
+export type YoofloeHostedWriterResponse = YoofloeWriterResponse;
 
 export interface YoofloeCaptureCandidate {
   candidateId: string;

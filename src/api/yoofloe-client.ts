@@ -4,8 +4,6 @@ import type {
   YoofloeDomain,
   YoofloeEntitlement,
   YoofloeGardenerApiResponse,
-  YoofloeHostedWriterRequest,
-  YoofloeHostedWriterResponse,
   YoofloePluginSettings,
   YoofloeRange,
   YoofloeScope,
@@ -293,10 +291,6 @@ export class YoofloeClient {
       scope: request.scope,
       format: request.format
     });
-  }
-
-  async runHostedWriter(request: YoofloeHostedWriterRequest): Promise<YoofloeHostedWriterResponse> {
-    return postJson<YoofloeHostedWriterResponse>(this.settings, this.token, "obsidian-ai-writer-api", request);
   }
 
   async previewWriteActions(request: YoofloeWritePreviewRequest): Promise<YoofloeWritePreviewResponse> {

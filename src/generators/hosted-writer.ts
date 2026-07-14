@@ -1,7 +1,7 @@
 import type {
   MarkdownRenderOptions,
-  YoofloeHostedWriterRequest,
-  YoofloeHostedWriterResponse
+  YoofloeWriterRequest,
+  YoofloeWriterResponse
 } from "../types";
 
 function yamlString(value: string) {
@@ -16,26 +16,26 @@ function normalizeBody(markdownBody: string) {
   return markdownBody.trim().replace(/^```(?:markdown)?\s*/i, "").replace(/```$/i, "").trim();
 }
 
-export function hostedWriterSurface(documentType: string) {
+export function writerSurface(documentType: string) {
   return `ai-${documentType}`;
 }
 
-export function renderHostedWriterNoteMarkdown({
+export function renderWriterNoteMarkdown({
   response,
   request,
   settings,
   pluginVersion,
   titleOverride
 }: {
-  response: YoofloeHostedWriterResponse;
-  request: YoofloeHostedWriterRequest;
+  response: YoofloeWriterResponse;
+  request: YoofloeWriterRequest;
   settings: MarkdownRenderOptions;
   pluginVersion: string;
   titleOverride?: string;
 }) {
   const title = titleOverride?.trim() || response.title?.trim() || "Yoofloe AI note";
   const body = normalizeBody(response.markdownBody || "");
-  const providerType = response.provider?.type || "yoofloe-hosted";
+  const providerType = response.provider?.type || "user-owned-vertex-ai";
   const model = response.provider?.model || "";
   const tags = ["yoofloe", "yoofloe/obsidian", "yoofloe/writer", ...request.domains.map((domain) => `yoofloe/${domain}`)];
   const generatedAt = new Date().toISOString();
@@ -46,7 +46,7 @@ export function renderHostedWriterNoteMarkdown({
       `source: ${yamlString("yoofloe")}`,
       `plugin_id: ${yamlString("yoofloe")}`,
       `plugin_version: ${yamlString(pluginVersion)}`,
-      `type: ${yamlString(hostedWriterSurface(request.documentType))}`,
+      `type: ${yamlString(writerSurface(request.documentType))}`,
       "domains:",
       yamlList(request.domains),
       `range: ${yamlString(request.range)}`,
@@ -64,8 +64,13 @@ export function renderHostedWriterNoteMarkdown({
   return `${frontmatter}# ${title}\n\n${body}\n`;
 }
 
-export function renderHostedWriterInlineMarkdown(response: YoofloeHostedWriterResponse) {
+export function renderWriterInlineMarkdown(response: YoofloeWriterResponse) {
   const title = response.title?.trim() || "Yoofloe AI note";
   const body = normalizeBody(response.markdownBody || "");
   return `## ${title}\n\n${body}\n`;
 }
+
+// Preserve internal call sites while the public Writer contract is renamed.
+export const hostedWriterSurface = writerSurface;
+export const renderHostedWriterNoteMarkdown = renderWriterNoteMarkdown;
+export const renderHostedWriterInlineMarkdown = renderWriterInlineMarkdown;

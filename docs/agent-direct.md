@@ -23,7 +23,7 @@ Yoofloe does not provide the model for Agent Direct. The connected agent or API 
 
 ## Important boundaries
 
-- Agent Direct does not reuse the plugin's Gemini OAuth setup or secrets.
+- Agent Direct does not reuse the plugin's Vertex AI OAuth setup or secrets.
 - Keep PAT values local and out of committed config.
 - The wrapper is personal-only by design.
 - Existing files are never overwritten.

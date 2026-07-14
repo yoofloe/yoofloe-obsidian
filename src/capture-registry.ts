@@ -1,3 +1,5 @@
+import type { YoofloeCaptureTarget } from "./types";
+
 export type YoofloeCaptureDomain =
   | "auto"
   | "journal"
@@ -5,8 +7,6 @@ export type YoofloeCaptureDomain =
   | "schedule"
   | "study"
   | "activity"
-  | "wellness"
-  | "exercise"
   | "business"
   | "finance"
   | "garden"
@@ -21,7 +21,7 @@ export type YoofloeCaptureDomainOption = {
   status: YoofloeCaptureStatus;
   riskTier: "low" | "medium" | "high" | "read_only";
   sensitive?: boolean;
-  defaultTarget?: "auto" | "memo" | "journal" | "task" | "event" | "goal" | "study-item" | "study-lecture" | "study-plan" | "activity" | "condition" | "meal" | "ritual" | "exercise" | "business-item" | "finance-transaction";
+  defaultTarget?: YoofloeCaptureTarget;
 };
 
 export const YOOFLOE_CAPTURE_DOMAIN_OPTIONS: YoofloeCaptureDomainOption[] = [
@@ -31,8 +31,6 @@ export const YOOFLOE_CAPTURE_DOMAIN_OPTIONS: YoofloeCaptureDomainOption[] = [
   { domain: "goals", label: "Goals", description: "Create personal goals from selected or written notes.", status: "ready", riskTier: "medium", defaultTarget: "goal" },
   { domain: "study", label: "Study", description: "Create study items, lectures, or study plans.", status: "ready", riskTier: "medium", defaultTarget: "study-item" },
   { domain: "activity", label: "Activity Log", description: "Create personal life activity records.", status: "ready", riskTier: "medium", defaultTarget: "activity" },
-  { domain: "wellness", label: "Wellness", description: "Create condition, meal, or ritual records after review.", status: "ready", riskTier: "medium", defaultTarget: "condition" },
-  { domain: "exercise", label: "Exercise", description: "Create workout and exercise records.", status: "ready", riskTier: "medium", defaultTarget: "exercise" },
   { domain: "business", label: "Business", description: "Create personal business items with explicit confirmation.", status: "ready", riskTier: "high", sensitive: true, defaultTarget: "business-item" },
   { domain: "finance", label: "Finance", description: "Create personal finance transactions with amount review.", status: "ready", riskTier: "high", sensitive: true, defaultTarget: "finance-transaction" },
   { domain: "garden", label: "Garden", description: "Garden is an insight source, not a writeback target.", status: "blocked", riskTier: "read_only" },

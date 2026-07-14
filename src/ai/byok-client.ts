@@ -63,49 +63,11 @@ function normalizeMarkdownBody(markdown: string) {
 
 function providerLabel(provider: YoofloeByokSettings["type"]) {
   switch (provider) {
-    case "gemini-google":
-      return "Gemini (Google AI)";
     case "gemini-vertex":
-      return "Gemini (Vertex AI)";
+      return "Your Vertex AI project";
     default:
-      return "AI provider";
+      return "your AI provider";
   }
-}
-
-async function runGeminiGoogle({
-  accessToken,
-  projectId,
-  model,
-  prompt
-}: {
-  accessToken: string;
-  projectId: string;
-  model: string;
-  prompt: string;
-}) {
-  const response = await requestUrl({
-    url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      "x-goog-user-project": projectId
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }]
-        }
-      ]
-    })
-  });
-
-  if (response.status >= 400) {
-    throw new Error(extractProviderError("gemini-google", response.status, response.json));
-  }
-
-  return normalizeMarkdownBody(extractTextFromGemini((response.json || {}) as Record<string, unknown>));
 }
 
 async function runGeminiVertex({
@@ -163,29 +125,15 @@ export async function runAiDocumentAnalysis({
   const document = getAiDocumentDefinition(documentType);
   const prompt = buildAiDocumentPrompt({ bundle, documentType, gardenerBrief, focusInstruction });
 
-  if (provider === "gemini-google" || provider === "gemini-vertex") {
+  if (provider === "gemini-vertex") {
     const normalizedAccessToken = googleAccessToken?.trim() ?? "";
     if (!normalizedAccessToken) {
-      throw new Error("Connect Google in Settings > Yoofloe before running Gemini commands.");
+      throw new Error("Connect Google in Settings > Yoofloe before running Vertex AI commands.");
     }
 
     const projectId = settings.project.trim();
     if (!projectId) {
       throw new Error(`Add your Google Cloud Project ID in Settings > Yoofloe before running ${providerName} commands.`);
-    }
-
-    if (provider === "gemini-google") {
-      const model = settings.googleModel.trim();
-      if (!model) {
-        throw new Error("Add a Gemini model ID in Settings > Yoofloe before running Gemini commands.");
-      }
-
-      return await runGeminiGoogle({
-        accessToken: normalizedAccessToken,
-        projectId,
-        model,
-        prompt: `${document.systemPrompt}\n\n${prompt}`
-      });
     }
 
     const model = settings.vertexModel.trim();

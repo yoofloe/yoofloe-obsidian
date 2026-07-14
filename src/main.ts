@@ -25,8 +25,8 @@ import type {
   YoofloeBundle,
   YoofloeDomain,
   YoofloeEntitlement,
-  YoofloeHostedWriterRequest,
-  YoofloeHostedWriterResponse,
+  YoofloeWriterRequest,
+  YoofloeWriterResponse,
   YoofloePairingPhase,
   YoofloePairingStatus,
   YoofloePluginSettings,
@@ -36,7 +36,7 @@ import type {
   YoofloeWritePreviewResponse
 } from "./types";
 
-const DEFAULT_HOSTED_WRITER_DOMAINS: YoofloeDomain[] = ["schedule", "life", "wellness", "journal", "garden"];
+const DEFAULT_HOSTED_WRITER_DOMAINS: YoofloeDomain[] = ["schedule", "life", "library", "journal", "garden"];
 const DEFAULT_PAIRING_STATUS: YoofloePairingStatus = {
   phase: "idle",
   message: "Connect through Yoofloe web when you are ready.",
@@ -70,22 +70,19 @@ const DEFAULT_SETTINGS: YoofloePluginSettings = {
   yoofloeAccessMode: "read",
   yoofloePairing: DEFAULT_PAIRING_STATUS,
   provider: {
-    type: "yoofloe-hosted",
+    type: "none",
     clientId: "",
     googleConnected: false,
     googleLastConnectState: "idle",
     googleLastConnectMessage: "",
     project: "",
     location: "us-central1",
-    googleModel: "gemini-3.5-flash",
     vertexModel: "gemini-3.5-flash"
   }
 };
 
 const SUPPORTED_PLUGIN_PROVIDERS = new Set<YoofloePluginSettings["provider"]["type"]>([
-  "yoofloe-hosted",
   "none",
-  "gemini-google",
   "gemini-vertex"
 ]);
 
@@ -356,28 +353,18 @@ export default class YoofloePlugin extends Plugin {
           : DEFAULT_SETTINGS.provider.googleLastConnectMessage,
         project: typeof savedProvider.project === "string" ? savedProvider.project : DEFAULT_SETTINGS.provider.project,
         location: typeof savedProvider.location === "string" ? savedProvider.location : DEFAULT_SETTINGS.provider.location,
-        googleModel: typeof savedProvider.googleModel === "string" ? savedProvider.googleModel : DEFAULT_SETTINGS.provider.googleModel,
         vertexModel: typeof savedProvider.vertexModel === "string" ? savedProvider.vertexModel : DEFAULT_SETTINGS.provider.vertexModel
       }
     };
 
-    if (!SUPPORTED_PLUGIN_PROVIDERS.has(this.settings.provider.type) && rawProviderType !== "openai" && rawProviderType !== "anthropic") {
+    if (!SUPPORTED_PLUGIN_PROVIDERS.has(this.settings.provider.type)) {
       this.settings.provider.type = "none";
     }
 
-    const savedGoogleModel = typeof savedProvider.googleModel === "string" ? savedProvider.googleModel.trim() : "";
     const savedVertexModel = typeof savedProvider.vertexModel === "string" ? savedProvider.vertexModel.trim() : "";
-
-    if (!savedGoogleModel && legacyModel && (rawProviderType === "gemini" || rawProviderType === "gemini-google")) {
-      this.settings.provider.googleModel = legacyModel;
-    }
 
     if (!savedVertexModel && legacyModel && rawProviderType === "gemini-vertex") {
       this.settings.provider.vertexModel = legacyModel;
-    }
-
-    if (!this.settings.provider.googleModel.trim()) {
-      this.settings.provider.googleModel = DEFAULT_SETTINGS.provider.googleModel;
     }
 
     if (!this.settings.provider.vertexModel.trim()) {
@@ -399,7 +386,6 @@ export default class YoofloePlugin extends Plugin {
     this.settings.provider.googleLastConnectMessage = this.settings.provider.googleLastConnectMessage?.trim() || "";
     this.settings.provider.project = this.settings.provider.project.trim();
     this.settings.provider.location = this.settings.provider.location.trim() || DEFAULT_SETTINGS.provider.location;
-    this.settings.provider.googleModel = this.settings.provider.googleModel.trim() || DEFAULT_SETTINGS.provider.googleModel;
     this.settings.provider.vertexModel = this.settings.provider.vertexModel.trim() || DEFAULT_SETTINGS.provider.vertexModel;
     this.settings.defaultDomains = sanitizeDefaultDomains(this.settings.defaultDomains);
     this.settings.defaultOutputTarget = sanitizeOutputTarget(this.settings.defaultOutputTarget);
@@ -418,7 +404,6 @@ export default class YoofloePlugin extends Plugin {
         googleLastConnectMessage: this.settings.provider.googleLastConnectMessage,
         project: this.settings.provider.project,
         location: this.settings.provider.location,
-        googleModel: this.settings.provider.googleModel,
         vertexModel: this.settings.provider.vertexModel
       }
     });
@@ -461,17 +446,10 @@ export default class YoofloePlugin extends Plugin {
     const messages: string[] = [];
     const legacyModel = ((this.settings.provider as unknown as { model?: string }).model || "").trim();
 
-    if ((this.settings.provider.type as string) === "openai" || (this.settings.provider.type as string) === "anthropic") {
+    const priorProvider = this.settings.provider.type as string;
+    if (priorProvider !== "none" && priorProvider !== "gemini-vertex") {
       this.settings.provider.type = "none";
-      messages.push("OpenAI and Anthropic support were removed. Choose Gemini in Settings > Yoofloe if you want AI commands.");
-    }
-
-    if ((this.settings.provider.type as string) === "gemini") {
-      this.settings.provider.type = "gemini-google";
-      if (!this.settings.provider.googleModel.trim() && legacyModel) {
-        this.settings.provider.googleModel = legacyModel;
-      }
-      messages.push("Gemini now uses Google OAuth in v0.3.0. Connect Google in Settings > Yoofloe before running Gemini commands.");
+      messages.push("A previous Writer provider was retired. Configure your own Vertex AI project in Settings, or use the Yoofloe MCP wrapper with your preferred agent.");
     }
 
     if (this.settings.provider.type === "gemini-vertex" && !this.settings.provider.vertexModel.trim() && legacyModel) {
@@ -482,7 +460,24 @@ export default class YoofloePlugin extends Plugin {
   }
 
   isGoogleProvider(provider = this.settings.provider.type) {
-    return provider === "gemini-google" || provider === "gemini-vertex";
+    return provider === "gemini-vertex";
+  }
+
+  getUserOwnedWriterBlocker() {
+    if (this.settings.provider.type !== "gemini-vertex") {
+      return "Configure your own Vertex AI project in Settings > Yoofloe, or use the Yoofloe Obsidian MCP wrapper with your preferred agent.";
+    }
+    if (!this.secretStore.isAvailable) return SECRET_STORAGE_REQUIRED_MESSAGE;
+    if (!this.settings.provider.clientId.trim() || !this.secretStore.getGoogleClientSecret()) {
+      return "Add your Google desktop OAuth client in Settings > Yoofloe before generating.";
+    }
+    if (!this.settings.provider.project.trim() || !this.settings.provider.vertexModel.trim()) {
+      return "Add your Vertex AI project ID and model in Settings > Yoofloe before generating.";
+    }
+    if (!this.googleAuth.hasRefreshToken()) {
+      return "Connect Google in Settings > Yoofloe before generating with your Vertex AI project.";
+    }
+    return null;
   }
 
   async connectGoogle() {
@@ -1044,7 +1039,7 @@ export default class YoofloePlugin extends Plugin {
     };
   }
 
-  private withCurrentNoteContext(request: YoofloeHostedWriterRequest): YoofloeHostedWriterRequest {
+  private withCurrentNoteContext(request: YoofloeWriterRequest): YoofloeWriterRequest {
     if (!request.currentNoteContext?.enabled) {
       return {
         ...request,
@@ -1075,8 +1070,8 @@ export default class YoofloePlugin extends Plugin {
   }
 
   private async writeHostedWriterOutput(
-    response: YoofloeHostedWriterResponse,
-    request: YoofloeHostedWriterRequest,
+    response: YoofloeWriterResponse,
+    request: YoofloeWriterRequest,
     options: HostedWriterOutputOptions = {}
   ): Promise<HostedWriterOutputResult> {
     const target = request.outputMode || this.settings.defaultOutputTarget;
@@ -1132,8 +1127,10 @@ export default class YoofloePlugin extends Plugin {
     return { mode: "new-note", path: file.path };
   }
 
-  async runHostedWriterFromOptions(options: YoofloeHostedWriterRequest, outputOptions: HostedWriterOutputOptions = {}) {
+  async runHostedWriterFromOptions(options: YoofloeWriterRequest, outputOptions: HostedWriterOutputOptions = {}) {
     try {
+      const writerBlocker = this.getUserOwnedWriterBlocker();
+      if (writerBlocker) throw new Error(writerBlocker);
       const token = this.requirePat();
       const domains = sanitizeDefaultDomains(options.domains);
       const request = this.withCurrentNoteContext({
@@ -1170,11 +1167,58 @@ export default class YoofloePlugin extends Plugin {
       }
 
       this.clearStatusResetTimer();
-      this.setStatus(`Yoofloe writing ${request.documentType}...`);
+      this.setStatus(`Preparing ${request.documentType} for your Vertex AI project...`);
 
       const client = new YoofloeClient(this.settings, token);
-      const response = await client.runHostedWriter(request);
-      this.ensureEntitlement(response.entitlement);
+      const bundleResponse = await client.fetchBundle({
+        domains,
+        range: request.range,
+        scope: "personal",
+        includeRaw: !!request.includeRaw,
+        includeFrontmatterHints: true
+      });
+      this.ensureEntitlement(bundleResponse.entitlement);
+      const currentNote = request.currentNoteContext?.enabled && request.currentNoteContext.content
+        ? `Current Obsidian note context (${request.currentNoteContext.selectionOnly ? "selected text" : "full note"}):\n${request.currentNoteContext.content.slice(0, 24000)}`
+        : "";
+      const writerInstruction = [
+        request.prompt?.trim() || "",
+        request.tone?.trim() ? `Tone: ${request.tone.trim()}` : "",
+        currentNote
+      ].filter(Boolean).join("\n\n");
+      const markdownBody = await runAiDocumentAnalysis({
+        settings: this.settings.provider,
+        googleAccessToken: await this.googleAuth.getAccessToken(
+          this.settings.provider.clientId,
+          this.secretStore.getGoogleClientSecret()
+        ),
+        bundle: bundleResponse.bundle,
+        documentType: request.documentType,
+        focusInstruction: writerInstruction || null
+      });
+      const response: YoofloeWriterResponse = {
+        success: true,
+        title: getAiDocumentDefinition(request.documentType).title,
+        markdownBody,
+        sources: [],
+        unavailable: [],
+        entitlement: bundleResponse.entitlement,
+        rateLimit: bundleResponse.rateLimit,
+        security: bundleResponse.bundle.meta.security,
+        contextPlan: {
+          mode: request.contextMode || "manual",
+          intent: "user_owned_vertex_ai",
+          domains,
+          domainsRead: domains,
+          omittedDomains: YOOFLOE_DOMAINS.filter((domain) => !domains.includes(domain))
+        },
+        provider: {
+          type: "user-owned-vertex-ai",
+          label: "Your Vertex AI project",
+          model: this.settings.provider.vertexModel,
+          hosted: false
+        }
+      };
       const output = await this.writeHostedWriterOutput(response, request, effectiveOutputOptions);
 
       this.tokenStatus = "verified";
@@ -1184,7 +1228,7 @@ export default class YoofloePlugin extends Plugin {
       } else if (output.mode === "current-note") {
         new Notice(`Yoofloe AI note inserted into: ${output.path}`);
       } else {
-        new Notice(`Yoofloe AI note created: ${output.path}`);
+        new Notice(`AI note created with your Vertex AI project: ${output.path}`);
       }
       return { response, output };
     } catch (error) {
@@ -1193,7 +1237,7 @@ export default class YoofloePlugin extends Plugin {
         this.tokenStatus = "invalid";
         this.latestEntitlement = null;
       }
-      new Notice(this.normalizeUserFacingError(error, "Yoofloe AI Writer failed."));
+      new Notice(this.normalizeUserFacingError(error, "Your Vertex AI Writer request failed."));
       this.queueIdleStatusReset();
       throw error;
     }
@@ -1366,7 +1410,8 @@ export default class YoofloePlugin extends Plugin {
         return;
       }
 
-      if (this.settings.provider.type === "yoofloe-hosted") {
+      // The only plugin-side generation path is the user's Vertex AI project.
+      if (this.settings.provider.type === "gemini-vertex" || this.settings.provider.type === "none") {
         await this.runHostedWriterFromOptions({
           documentType: definition.documentType,
           domains: [...this.settings.defaultDomains],

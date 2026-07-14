@@ -8,7 +8,7 @@ const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/generative-language.retriever"
 ];
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
-const DESKTOP_ONLY_GOOGLE_MESSAGE = "Advanced Google BYOK setup is desktop-only in this version. Use Yoofloe hosted on mobile and tablet.";
+const DESKTOP_ONLY_GOOGLE_MESSAGE = "Direct Vertex AI setup is desktop-only in this version. Use an MCP-capable desktop agent if you prefer another model path.";
 type RuntimeRequire = (specifier: string) => unknown;
 type DesktopWindow = Window & { require?: RuntimeRequire; };
 
@@ -356,7 +356,7 @@ export class YoofloeGoogleAuthManager {
 
     const refreshToken = this.secretStore.getGoogleRefreshToken();
     if (!refreshToken) {
-      throw new Error("Connect your Google account in Settings > Yoofloe before running Google AI commands.");
+      throw new Error("Connect your Google account in Settings > Yoofloe before running Vertex AI commands.");
     }
 
     try {

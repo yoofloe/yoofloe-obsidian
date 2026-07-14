@@ -71,8 +71,8 @@ function domainLabel(domain: YoofloeDomain) {
       return "Schedule";
     case "life":
       return "Life";
-    case "wellness":
-      return "Wellness";
+    case "library":
+      return "Library";
     case "finance":
       return "Finance";
     case "business":
@@ -438,10 +438,6 @@ function createPairingStatusCard(containerEl: HTMLElement, plugin: YoofloePlugin
 }
 
 function providerChoiceStatus(provider: YoofloePlugin["settings"]["provider"]["type"]) {
-  if (provider === "yoofloe-hosted") {
-    return { text: "Default", tone: "success" as const };
-  }
-
   if (provider === "none") {
     return { text: "Not configured", tone: "warning" as const };
   }
@@ -461,22 +457,8 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
     return nextSteps;
   }
 
-  if (provider === "yoofloe-hosted") {
-    return nextSteps;
-  }
-
   if (provider === "none") {
-    nextSteps.push("Choose Yoofloe hosted or a Gemini BYOK setup to generate AI notes.");
-    return nextSteps;
-  }
-
-  if (provider === "gemini-google") {
-    if (!plugin.settings.provider.clientId.trim()) nextSteps.push("Save your Google sign-in client ID.");
-    if (!plugin.secretStore.getGoogleClientSecret()) nextSteps.push("Save your Google sign-in client secret.");
-    if (!plugin.settings.provider.project.trim()) nextSteps.push("Save your Google cloud project ID.");
-    if (!plugin.settings.provider.googleModel.trim()) nextSteps.push("Save your Gemini model.");
-    if (googleStatus === "not-connected") nextSteps.push("Click Connect Google.");
-    if (googleStatus === "reconnect") nextSteps.push("Reconnect Google to refresh your session.");
+    nextSteps.push("Configure your own Vertex AI project, or use the Yoofloe MCP wrapper with your preferred agent.");
     return nextSteps;
   }
 
@@ -495,15 +477,11 @@ function providerNextSteps(plugin: YoofloePlugin, hasSecureStorage: boolean) {
 
 function providerHelpText(provider: YoofloePlugin["settings"]["provider"]["type"]) {
   switch (provider) {
-    case "yoofloe-hosted":
-      return "Default. Yoofloe handles the model path so you can create grounded Markdown without Google Cloud setup.";
-    case "gemini-google":
-      return "Advanced BYOK. Sign in with Google in your browser, then use Gemini with your own Google cloud project.";
     case "gemini-vertex":
-      return "Advanced cloud setup. Use this if you specifically want the cloud setup and know your project and model.";
+      return "Your Vertex AI project is called directly from Obsidian. Your Google Cloud project handles provider billing.";
     case "none":
     default:
-      return "Choose Yoofloe hosted or configure an advanced BYOK provider to start generating AI notes.";
+      return "Configure your own Vertex AI project, or use the Yoofloe MCP wrapper with your preferred agent.";
   }
 }
 
@@ -512,24 +490,11 @@ function providerReadiness(plugin: YoofloePlugin, hasSecureStorage: boolean) {
   const hasGoogleClient = !!plugin.settings.provider.clientId.trim();
   const hasGoogleClientSecret = !!plugin.secretStore.getGoogleClientSecret();
   const hasProject = !!plugin.settings.provider.project.trim();
-  const hasGoogleModel = !!plugin.settings.provider.googleModel.trim();
   const hasVertexModel = !!plugin.settings.provider.vertexModel.trim();
   const googleConnected = plugin.settings.provider.googleConnected || plugin.googleAuth.hasRefreshToken() || plugin.googleConnectionStatus === "connected";
 
-  if (provider === "yoofloe-hosted") {
-    return hasSecureStorage && plugin.tokenStatus !== "missing" && plugin.tokenStatus !== "invalid"
-      ? { text: "Ready", tone: "success" as const }
-      : { text: "Connect Yoofloe", tone: "warning" as const };
-  }
-
   if (provider === "none") {
     return { text: "Setup incomplete", tone: "warning" as const };
-  }
-
-  if (provider === "gemini-google") {
-    return hasSecureStorage && hasGoogleClient && hasGoogleClientSecret && hasProject && hasGoogleModel && googleConnected
-      ? { text: "Ready", tone: "success" as const }
-      : { text: "Setup incomplete", tone: "warning" as const };
   }
 
   if (provider === "gemini-vertex") {
@@ -557,7 +522,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     const pat = hasSecureStorage ? this.plugin.secretStore.getPat() : null;
     const googleClientSecret = hasSecureStorage ? this.plugin.secretStore.getGoogleClientSecret() : null;
     const provider = this.plugin.settings.provider.type;
-    const usesGoogleOauth = provider === "gemini-google" || provider === "gemini-vertex";
+    const usesGoogleOauth = provider === "gemini-vertex";
     const isDesktopApp = Platform.isDesktopApp;
     const mobileByokBlocked = usesGoogleOauth && !isDesktopApp;
     const isVertexProvider = provider === "gemini-vertex";
@@ -647,7 +612,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     const statusRow = quickStart.createDiv({ cls: "yoofloe-settings-status-row" });
     createBadge(statusRow, this.plugin.tokenStatus === "verified" || this.plugin.tokenStatus === "saved" ? "Connected" : this.plugin.tokenStatus === "invalid" ? "Reconnect Yoofloe" : "Connect Yoofloe", this.plugin.tokenStatus === "invalid" ? "danger" : this.plugin.tokenStatus === "missing" ? "warning" : "success");
     createBadge(statusRow, "Personal only", "muted");
-    createBadge(statusRow, provider === "yoofloe-hosted" ? "Yoofloe AI ready" : provider === "none" ? "AI paused" : "BYOK provider", provider === "yoofloe-hosted" ? "success" : "accent");
+    createBadge(statusRow, provider === "none" ? "AI paused" : "Your Vertex AI project", provider === "gemini-vertex" ? "success" : "accent");
     createBadge(statusRow, this.plugin.settings.showAdvancedProvider ? "Advanced provider on" : "Advanced provider off", "muted");
     const quickStartList = quickStart.createEl("ol", { cls: "yoofloe-step-list" });
     [
@@ -906,28 +871,24 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Step 2",
       "Choose AI provider",
       providerChoice,
-      "Keep Yoofloe hosted for the simplest path, or switch to Gemini BYOK if you want your own provider setup."
+      "Direct Writer uses your own Vertex AI project. MCP workflows use the connected agent's model path."
     );
 
-    createInfoCard(providerSection, "Recommended choice", "Most people should stay with Yoofloe hosted. Choose Gemini only if you specifically want your own Google project and model path.");
+    createInfoCard(providerSection, "Your provider, your billing", "Direct Writer calls your Vertex AI project from Obsidian. The MCP wrapper uses the connected agent's model path. Yoofloe does not provide model spend for either route.");
 
     new Setting(providerSection)
       .setName("Model provider")
           .setDesc("Choose the setup Yoofloe should use for insight brief, decision memo, action plan, and deep dive.")
       .addDropdown((dropdown) => {
         dropdown
-          .addOption("yoofloe-hosted", "Yoofloe hosted")
-          .addOption("none", "None");
-        if (isDesktopApp || provider === "gemini-google") {
-          dropdown.addOption("gemini-google", isDesktopApp ? "Gemini BYOK" : "Gemini BYOK (desktop only)");
-        }
+          .addOption("none", "Not configured");
         if (isDesktopApp || provider === "gemini-vertex") {
           dropdown.addOption("gemini-vertex", isDesktopApp ? "Vertex BYOK" : "Vertex BYOK (desktop only)");
         }
 
         dropdown.setValue(provider).onChange((value) => {
-          if (!isDesktopApp && (value === "gemini-google" || value === "gemini-vertex")) {
-            new Notice("Advanced Google BYOK setup is desktop-only in this version. Use Yoofloe hosted on mobile and tablet.");
+          if (!isDesktopApp && value === "gemini-vertex") {
+            new Notice("Direct Vertex AI setup is desktop-only in this version. Use the Yoofloe MCP wrapper with a desktop agent for another model path.");
             this.display();
             return;
           }
@@ -945,28 +906,18 @@ export class YoofloeSettingTab extends PluginSettingTab {
       "Step 3",
       "Finish setup",
       effectiveProviderStatus,
-      provider === "yoofloe-hosted"
-        ? "No Google setup is required for the default Yoofloe AI Writer."
-        : provider === "none"
-          ? "Choose Yoofloe hosted or configure Gemini BYOK to start generating AI notes."
+      provider === "none"
+          ? "Configure your own Vertex AI project to generate AI notes directly from Obsidian."
           : mobileByokBlocked
-            ? "Advanced Google BYOK setup uses desktop OAuth. Switch to Yoofloe hosted on mobile and tablet."
+            ? "Direct Vertex AI setup uses desktop OAuth. Use an MCP-capable desktop agent if you prefer another model path."
           : "Save each required field below. When this step is ready, you can run AI commands."
     );
 
     if (mobileByokBlocked) {
-      createInfoCard(setupSection, "Desktop-only provider", "Google BYOK uses a local desktop OAuth callback. Yoofloe-hosted AI Writer and Capture remain available on mobile and tablet.");
+      createInfoCard(setupSection, "Desktop-only provider", "Direct Vertex AI uses a local desktop OAuth callback. Use an MCP-capable desktop agent for another model path.");
       new Setting(setupSection)
         .setName("Mobile AI setup")
-        .setDesc("Switch to Yoofloe hosted to generate grounded notes on this device.")
-        .addButton((button) => {
-          button
-            .setButtonText("Use Yoofloe hosted")
-            .setCta()
-            .onClick(() => {
-              void saveProviderType("yoofloe-hosted");
-            });
-        });
+        .setDesc("Configure direct Vertex AI on a desktop device, or use the MCP wrapper with your preferred desktop agent.");
     }
 
     if (provider !== "none" && !mobileByokBlocked && nextSteps.length > 0) {
@@ -1174,31 +1125,10 @@ export class YoofloeSettingTab extends PluginSettingTab {
             });
         });
 
-      if (provider === "gemini-google") {
-        createByokModelSetting(setupSection, {
-          name: "Gemini BYOK model",
-          desc: "Only used when Model provider is Gemini BYOK. Yoofloe hosted uses Yoofloe's server-selected model.",
-          currentModel: this.plugin.settings.provider.googleModel,
-          emptyNotice: "Choose a Gemini model or enter a custom model ID before saving.",
-          onSave: async (model) => {
-            this.plugin.settings.provider.googleModel = model;
-            await this.plugin.saveSettings();
-            new Notice("Gemini BYOK model saved.");
-            this.display();
-          },
-          onUseRecommended: async () => {
-            this.plugin.settings.provider.googleModel = RECOMMENDED_BYOK_MODEL;
-            await this.plugin.saveSettings();
-            new Notice("Gemini BYOK model updated to the recommended model.");
-            this.display();
-          }
-        });
-      }
-
       if (isVertexProvider) {
         createByokModelSetting(setupSection, {
-          name: "Vertex BYOK model",
-          desc: "Only used when Model provider is Vertex BYOK. Yoofloe hosted uses Yoofloe's server-selected model. Availability can depend on your Google project and Vertex location.",
+          name: "Vertex AI model",
+          desc: "Used only by your direct Writer. Availability and provider billing depend on your Google Cloud project and Vertex location.",
           currentModel: this.plugin.settings.provider.vertexModel,
           emptyNotice: "Choose a Vertex model or enter a custom model ID before saving.",
           onSave: async (model) => {
@@ -1242,12 +1172,8 @@ export class YoofloeSettingTab extends PluginSettingTab {
       }
     }
 
-    if (provider === "yoofloe-hosted") {
-      createInfoCard(setupSection, "Hosted model is managed by Yoofloe", "Yoofloe-hosted AI Writer uses your connected Yoofloe PAT and Yoofloe's server-selected model. The BYOK model dropdown only affects advanced Gemini or Vertex BYOK generation.");
-    }
-
     if (provider === "none") {
-      createInfoCard(setupSection, "AI generation paused", "Choose Yoofloe hosted or an advanced BYOK setup to generate AI notes.");
+      createInfoCard(setupSection, "AI generation paused", "Configure Direct Vertex AI, or use the Yoofloe MCP wrapper with your preferred agent.");
     }
 
     const advancedSection = containerEl.createEl("details", { cls: "yoofloe-help-details" });
@@ -1278,7 +1204,7 @@ export class YoofloeSettingTab extends PluginSettingTab {
     defaultDomainsSection.createEl("div", { cls: "yoofloe-info-card-title", text: "Default sources" });
     defaultDomainsSection.createEl("p", {
       cls: "yoofloe-setting-note",
-      text: "Used by the AI writer and hosted command defaults. Finance and business stay off unless you select them."
+      text: "Used by the direct writer and command defaults. Finance and business stay off unless you select them."
     });
     const defaultDomainGrid = defaultDomainsSection.createDiv({ cls: "yoofloe-domain-grid" });
     for (const domain of YOOFLOE_DOMAINS) {

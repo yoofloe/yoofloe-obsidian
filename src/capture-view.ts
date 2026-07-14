@@ -39,14 +39,6 @@ function targetLabel(target: YoofloeCaptureTarget) {
       return "Study plan";
     case "activity":
       return "Activity log";
-    case "condition":
-      return "Condition";
-    case "meal":
-      return "Meal";
-    case "ritual":
-      return "Ritual";
-    case "exercise":
-      return "Exercise";
     case "business-item":
       return "Business item";
     case "finance-transaction":
@@ -77,14 +69,6 @@ function targetDescription(target: YoofloeCaptureTarget) {
       return "Create a study plan.";
     case "activity":
       return "Create a life activity record.";
-    case "condition":
-      return "Create a wellness condition log.";
-    case "meal":
-      return "Create a meal log.";
-    case "ritual":
-      return "Create a wellness ritual.";
-    case "exercise":
-      return "Create an exercise record.";
     case "business-item":
       return "Create a personal business item. Sensitive confirmation required.";
     case "finance-transaction":
@@ -138,14 +122,6 @@ function actionLabel(action: string) {
       return "Create study plan";
     case "activity.item.create":
       return "Create activity";
-    case "wellness.condition.create":
-      return "Create condition log";
-    case "wellness.meal.create":
-      return "Create meal log";
-    case "wellness.ritual.create":
-      return "Create ritual";
-    case "exercise.item.create":
-      return "Create exercise";
     case "business.item.create":
       return "Create business item";
     case "finance.transaction.create":

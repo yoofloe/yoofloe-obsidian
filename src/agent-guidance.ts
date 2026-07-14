@@ -15,11 +15,10 @@ const VAULT_PATH_EXAMPLE = "C:/Users/you/Documents/Obsidian Vault";
 
 const DOCUMENT_TYPE_SUMMARIES: Record<YoofloeAiDocumentType, string> = {
   "daily-review": "Daily snapshot, signals, friction, next actions, and reflection prompts.",
-  "weekly-plan": "Weekly focus, commitments, wellness considerations, priorities, and watchouts.",
+  "weekly-plan": "Weekly focus, commitments, personal considerations, priorities, and watchouts.",
   "insight-brief": "Strongest signals, tensions, opportunities, risks, and suggested questions.",
   "decision-memo": "Situation framing, tradeoffs, recommended direction, evidence, and open questions.",
   "action-plan": "Priorities, recommended sequence, dependencies, blockers, watchouts, and evidence notes.",
-  "wellness-check": "Wellness signals, recovery, helpful patterns, gentle adjustments, and questions.",
   "finance-snapshot": "Cashflow signals, spending or income changes, risks, next steps, and open questions.",
   "free-prompt": "A custom grounded Markdown note from Yoofloe data and the user's prompt.",
   "deep-dive": "Focused analysis on one theme or concern. Requires a non-empty focusInstruction."
@@ -34,7 +33,7 @@ export function buildCodexPrompt(options: AgentGuidanceOptions) {
   const saveFolder = normalizeSaveFolder(options.saveFolder);
   return [
     "Use the yoofloe MCP server.",
-    "Call yoofloe_ai_document_context for documentType insight-brief with domains schedule, life, wellness, finance, business, journal, and garden over 1M.",
+    "Call yoofloe_ai_document_context for documentType insight-brief with domains schedule, life, library, finance, business, journal, and garden over 1M.",
     "Use the returned prompt scaffold to draft a grounded AI insight brief.",
     "Keep evidence, interpretation, recommendations, and open questions clearly separated.",
     "Then call yoofloe_write_ai_document to save the result into the configured vault folder.",
@@ -47,7 +46,7 @@ export function buildClaudeCodePrompt(options: AgentGuidanceOptions) {
   const saveFolder = normalizeSaveFolder(options.saveFolder);
   return [
     "Use the yoofloe MCP tools.",
-    "Start with yoofloe_ai_document_context for documentType action-plan with domains finance, business, wellness, and schedule over 1M.",
+    "Start with yoofloe_ai_document_context for documentType action-plan with domains finance, business, library, and schedule over 1M.",
     "Use the returned prompt scaffold to draft a grounded AI action plan.",
     "Keep evidence notes separate from recommendations and sequence the actions realistically.",
     "Save the final result with yoofloe_write_ai_document.",
@@ -162,10 +161,9 @@ export function buildAgentSetupNoteMarkdown(options: AgentGuidanceOptions) {
     "",
     "## Choose The Right Path",
     "",
-    "- Use the Yoofloe AI Writer for one-click hosted generation inside Obsidian.",
-    "- Use Advanced BYOK if you want the plugin to call Gemini from your own Google setup.",
+    "- Use the Yoofloe AI Writer when you want the plugin to call your own Vertex AI project directly.",
     "- Use Agent Direct when Codex, Claude Code, or another external agent should bring its own model and workflow.",
-    "- Agent Direct does not reuse the plugin's Gemini OAuth setup or secrets.",
+    "- Agent Direct does not reuse the plugin's Vertex OAuth setup or secrets.",
     "",
     "## Recommended MCP Workflow",
     "",

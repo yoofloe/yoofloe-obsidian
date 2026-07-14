@@ -60,14 +60,6 @@ function actionForTarget(target: Exclude<YoofloeCaptureTarget, "auto">) {
       return "study.plan.create";
     case "activity":
       return "activity.item.create";
-    case "condition":
-      return "wellness.condition.create";
-    case "meal":
-      return "wellness.meal.create";
-    case "ritual":
-      return "wellness.ritual.create";
-    case "exercise":
-      return "exercise.item.create";
     case "business-item":
       return "business.item.create";
     case "finance-transaction":
@@ -83,8 +75,6 @@ function menuForTarget(target: Exclude<YoofloeCaptureTarget, "auto">) {
   if (target === "goal") return "Goals";
   if (target.startsWith("study")) return "Study";
   if (target === "activity") return "Activity Log";
-  if (target === "condition" || target === "meal" || target === "ritual") return "Wellness";
-  if (target === "exercise") return "Exercise";
   if (target === "business-item") return "Business";
   if (target === "finance-transaction") return "Finance";
   return "Journal/Memo";
@@ -109,14 +99,6 @@ function fieldsForTarget(target: Exclude<YoofloeCaptureTarget, "auto">, text: st
       return { title, fields: { scope: "personal", title, name: title, description: body || null, status: "active", targetDate: null, priority: null } };
     case "activity":
       return { title, fields: { scope: "personal", title, name: title, description: body || null, type: "activity", date, duration: null } };
-    case "condition":
-      return { title, fields: { scope: "personal", title, name: title, notes: body || text, value: null, unit: null, date, time: null, type: "condition" } };
-    case "meal":
-      return { title, fields: { scope: "personal", title, name: title, notes: body || text, date, time: null, type: "meal" } };
-    case "ritual":
-      return { title, fields: { scope: "personal", title, name: title, description: body || null, frequency: "daily", duration: null, vibe: null, is_active: true, type: "ritual" } };
-    case "exercise":
-      return { title, fields: { scope: "personal", title, name: title, notes: body || null, date, duration: null, distance: null, sets: null, reps: null, weight: null, category: null, type: "exercise" } };
     case "business-item":
       return { title, fields: { scope: "personal", title, name: title, description: body || null, status: "active", priority: null, type: "project", tabCategory: "project", due_date: null, client: null, currency: null } };
     case "finance-transaction":

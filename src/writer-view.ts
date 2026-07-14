@@ -5,7 +5,7 @@ import type {
   YoofloeAiDocumentType,
   YoofloeContextMode,
   YoofloeDomain,
-  YoofloeHostedWriterRequest,
+  YoofloeWriterRequest,
   YoofloeOutputTarget,
   YoofloeRange,
   YoofloeSourceDisplay,
@@ -31,7 +31,7 @@ type WriterOutputStatus = {
   diagnostics?: string;
 };
 
-const DEFAULT_WRITER_DOMAINS: YoofloeDomain[] = ["schedule", "life", "wellness", "journal", "garden"];
+const DEFAULT_WRITER_DOMAINS: YoofloeDomain[] = ["schedule", "life", "library", "journal", "garden"];
 const SENSITIVE_DOMAINS = new Set<YoofloeDomain>(["finance", "business"]);
 
 const PRESETS: WriterPreset[] = [
@@ -46,7 +46,7 @@ const PRESETS: WriterPreset[] = [
   {
     id: "weekly-plan",
     label: "Weekly plan",
-    description: "A realistic plan from schedule, life, wellness, journal, and garden context.",
+    description: "A realistic plan from schedule, life, library, journal, and garden context.",
     domains: DEFAULT_WRITER_DOMAINS,
     range: "1W",
     tone: "focused and calm"
@@ -58,14 +58,6 @@ const PRESETS: WriterPreset[] = [
     domains: DEFAULT_WRITER_DOMAINS,
     range: "1M",
     tone: "analytical"
-  },
-  {
-    id: "wellness-check",
-    label: "Wellness check",
-    description: "Patterns and gentle adjustments without medical claims.",
-    domains: ["life", "wellness", "journal"],
-    range: "1M",
-    tone: "warm and grounded"
   },
   {
     id: "finance-snapshot",
@@ -96,8 +88,8 @@ function domainLabel(domain: YoofloeDomain) {
       return "Schedule";
     case "life":
       return "Life";
-    case "wellness":
-      return "Wellness";
+    case "library":
+      return "Library";
     case "finance":
       return "Finance";
     case "business":
@@ -247,7 +239,7 @@ export class YoofloeWriterView extends ItemView {
     this.render();
   }
 
-  private buildRequest(): YoofloeHostedWriterRequest {
+  private buildRequest(): YoofloeWriterRequest {
     const outputMode: YoofloeOutputTarget = this.destinationMode === "new-note" ? "new-note" : "insert-cursor";
     return {
       documentType: this.documentType,
@@ -290,9 +282,8 @@ export class YoofloeWriterView extends ItemView {
 
     if (isWorkoutPrompt(this.prompt)) {
       const labels = [
-        selected.has("wellness") ? "Exercise" : null,
         selected.has("schedule") ? "Schedule" : null,
-        selected.has("wellness") ? "Wellness" : null,
+        selected.has("library") ? "Library" : null,
         selected.has("life") ? "Life" : null
       ].filter((label): label is string => Boolean(label));
       return `Smart context: ${labels.join(", ") || "selected Yoofloe sources"} over ${this.range}.`;
