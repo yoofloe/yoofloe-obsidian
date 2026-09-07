@@ -2,6 +2,7 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, re
 import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { describeAccessError, normalizeFunctionsBaseUrl } from "../external-access";
 import { buildAgentDirectGuidePayload, buildAgentSetupNoteMarkdown } from "../agent-guidance";
 import { buildAiDocumentPrompt, getAiDocumentDefinition } from "../ai/prompts";
 import { renderAiNoteMarkdown } from "../generators/ai-note";
@@ -546,10 +547,13 @@ export function readMcpConfig(env: Record<string, string | undefined>): YoofloeM
   catch { configurationIssues.push({ code: "SAVE_FOLDER_INVALID", message: "Choose a relative save folder inside the vault." }); }
   try { if (trimEnv(env.YOOFLOE_DATE_FORMAT)) dateFormat = assertDateFormat(trimEnv(env.YOOFLOE_DATE_FORMAT)); }
   catch { configurationIssues.push({ code: "DATE_FORMAT_INVALID", message: "Choose a supported YOOFLOE_DATE_FORMAT." }); }
+  let functionsBaseUrl = "";
+  try { functionsBaseUrl = normalizeFunctionsBaseUrl(trimEnv(env.YOOFLOE_FUNCTIONS_BASE_URL) || defaultFunctionsBaseUrl()); }
+  catch { configurationIssues.push({ code: "ENDPOINT_INVALID", message: describeAccessError(0, "ENDPOINT_INVALID") }); }
 
   return {
     pat,
-    functionsBaseUrl: trimEnv(env.YOOFLOE_FUNCTIONS_BASE_URL) || defaultFunctionsBaseUrl(),
+    functionsBaseUrl,
     vaultPath,
     saveFolder,
     dateFormat,
@@ -573,6 +577,9 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
     description: "Return the current Agent Direct and MCP workflow contract for external AI agents without fetching data or writing files.",
     inputSchema: {}
   }, () => {
+      if (config.configurationIssues?.some((entry) => entry.code === "ENDPOINT_INVALID")) {
+        return toolTextResponse(describeAccessError(0, "ENDPOINT_INVALID"), { code: "ENDPOINT_INVALID", ready: false });
+      }
       const guide = buildAgentDirectGuidePayload({
         pluginVersion: config.pluginVersion,
         saveFolder: config.saveFolder,

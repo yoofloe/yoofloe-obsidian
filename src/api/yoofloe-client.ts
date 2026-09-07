@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import { describeAccessError, parseAccessStatus, parseSecurityContract, YoofloeConnectionChangedError } from "../external-access";
+import { describeAccessError, normalizeFunctionsBaseUrl, parseAccessStatus, parseSecurityContract, YoofloeConnectionChangedError } from "../external-access";
 import type {
   YoofloeDataApiResponse,
   YoofloeDomain,
@@ -239,6 +239,7 @@ function buildThrownRequestError(settings: YoofloeClientSettings, path: string, 
 }
 
 async function postJson<T>(settings: YoofloeClientSettings, token: string, path: string, body?: object): Promise<T> {
+  settings = { functionsBaseUrl: normalizeFunctionsBaseUrl(settings.functionsBaseUrl) };
   const trimmedToken = token.trim();
   if (!trimmedToken) {
     throw new Error("Yoofloe API token is missing.");

@@ -910,6 +910,7 @@ export default class YoofloePlugin extends Plugin {
       return claim;
     } catch (error) {
       const message = this.getUserFacingErrorMessage(error, "Yoofloe web pairing failed.");
+      if (error instanceof YoofloeConnectionChangedError) throw error;
       if (error instanceof YoofloePairingError) {
         const phase = error.code === "PAIRING_EXPIRED"
           ? "expired"
@@ -1256,6 +1257,9 @@ export default class YoofloePlugin extends Plugin {
       return { response, output };
     } catch (error) {
       if (error instanceof YoofloeConnectionChangedError) throw error;
+      if (this.secretStore.getPat() !== connectionToken || this.settings.functionsBaseUrl !== connectionBaseUrl) {
+        throw new YoofloeConnectionChangedError();
+      }
       this.setStatus("Yoofloe error");
       if (error instanceof Error && /token|401|unauthorized|invalid jwt/i.test(error.message)) {
         this.tokenStatus = "invalid";
@@ -1484,6 +1488,7 @@ export default class YoofloePlugin extends Plugin {
       this.setStatus("Yoofloe idle");
       new Notice(`Yoofloe note created: ${filePath}`);
     } catch (error) {
+      if (error instanceof YoofloeConnectionChangedError) return;
       this.setStatus("Yoofloe error");
       if (error instanceof Error) {
         if (/token|401|unauthorized|invalid jwt/i.test(error.message)) {

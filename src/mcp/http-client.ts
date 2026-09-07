@@ -1,6 +1,6 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { describeAccessError, parseAccessStatus, parseSecurityContract } from "../external-access";
+import { describeAccessError, normalizeFunctionsBaseUrl, parseAccessStatus, parseSecurityContract } from "../external-access";
 import type {
   YoofloeDataApiResponse,
   YoofloeAccessStatusResponse,
@@ -50,7 +50,7 @@ export class YoofloeMcpHttpError extends Error {
 }
 
 function normalizeBaseUrl(value: string) {
-  return (value || DEFAULT_FUNCTIONS_BASE_URL).replace(/\/+$/, "");
+  return normalizeFunctionsBaseUrl(value || DEFAULT_FUNCTIONS_BASE_URL);
 }
 
 function parseResponseBody(text: string) {
@@ -114,6 +114,9 @@ async function postJson<TResponse>(
   path: string,
   body?: Record<string, unknown>
 ): Promise<TResponse> {
+  if (config.configurationIssues?.some((entry) => entry.code === "ENDPOINT_INVALID")) {
+    throw new YoofloeMcpHttpError(describeAccessError(0, "ENDPOINT_INVALID"), 0, "ENDPOINT_INVALID");
+  }
   const response = await postJsonRequest(`${normalizeBaseUrl(config.functionsBaseUrl)}/${path}`, config.pat, body);
 
   if (response.status >= 400) {

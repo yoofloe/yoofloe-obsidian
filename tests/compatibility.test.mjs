@@ -121,3 +121,52 @@ test('coverage preserves empty, encrypted and unavailable totals without inventi
   assert.match(markdown, /not zero/);
   assert.match(markdown, /Completeness is unknown/);
 });
+
+test('diagnostic guides never echo embedded credentials, queries or fragments from invalid endpoints', () => {
+  for (const endpoint of [
+    'https://sentinel-user:sentinel-password@example.test/functions/v1',
+    'https://example.test/functions/v1?api_key=sentinel-password',
+    'https://example.test/functions/v1#sentinel-password',
+    'ftp://example.test/sentinel-password'
+  ]) {
+    const config = subject.readMcpConfig({ YOOFLOE_FUNCTIONS_BASE_URL: endpoint });
+    const tools = new Map();
+    subject.registerYoofloeTools({ registerTool: (name, options, callback) => tools.set(name, callback) }, config);
+    const guide = tools.get('yoofloe_agent_direct_guide')();
+    assert.ok(!JSON.stringify(guide).includes('sentinel-'));
+    assert.ok(config.configurationIssues.some((entry) => entry.code === 'ENDPOINT_INVALID'));
+  }
+});
+
+test('a late Google rejection cannot invalidate the newly selected Yoofloe account', async () => {
+  let token = 'pat_yfl_old';
+  let rejectGoogle;
+  let notifyGoogle;
+  const googleStarted = new Promise((resolve) => { notifyGoogle = resolve; });
+  const plugin = Object.create(subject.YoofloePlugin.prototype);
+  plugin.settings = { functionsBaseUrl: 'https://example.test/functions/v1', defaultOutputTarget: 'new-note',
+    provider: { type: 'gemini-vertex', clientId: 'fixture-client', project: 'fixture-project', location: 'global', vertexModel: 'fixture-model' } };
+  plugin.secretStore = { isAvailable: true, getPat: () => token, getGoogleClientSecret: () => 'fixture-secret' };
+  plugin.googleAuth = { getAccessToken: () => new Promise((_resolve, reject) => { rejectGoogle = reject; notifyGoogle(); }) };
+  plugin.getUserOwnedWriterBlocker = () => null;
+  plugin.clearStatusResetTimer = () => {};
+  plugin.queueIdleStatusReset = () => {};
+  const statuses = [];
+  plugin.setStatus = (status) => statuses.push(status);
+  globalThis.obsidianRequest = async () => ({ status: 200, json: {
+    success: true, entitlement: accessStatus().entitlement,
+    bundle: { meta: { security: fixture.security, domains: ['journal'] }, domains: {} }
+  } });
+  const result = plugin.runHostedWriterFromOptions({ documentType: 'daily-review', domains: ['journal'], range: '1W', scope: 'personal', outputMode: 'new-note' });
+  await googleStarted;
+  token = 'pat_yfl_new';
+  plugin.tokenStatus = 'verified';
+  const currentEntitlement = { allowed: true, tier: 'pro' };
+  plugin.latestEntitlement = currentEntitlement;
+  statuses.length = 0;
+  rejectGoogle(new Error('old token invalid'));
+  await assert.rejects(result, { code: 'CONNECTION_CHANGED' });
+  assert.equal(plugin.tokenStatus, 'verified');
+  assert.equal(plugin.latestEntitlement, currentEntitlement);
+  assert.deepEqual(statuses, []);
+});

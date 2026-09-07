@@ -44,6 +44,7 @@ export function describeAccessError(status: number, code?: string): string {
     case "EXTERNAL_ACCESS_DISABLED": return "External Yoofloe access is temporarily disabled. Try again later.";
     case "CLIENT_UPDATE_REQUIRED": return "Connection diagnostics require an updated Yoofloe server. No personal data was requested.";
     case "CONNECTION_CHANGED": return "The Yoofloe connection changed. Discard this result and try again.";
+    case "ENDPOINT_INVALID": return "Use a Yoofloe HTTPS endpoint without embedded credentials, a query or a fragment.";
     case "RATE_LIMITED": return "Yoofloe access is rate limited. Try again shortly.";
     default: break;
   }
@@ -71,4 +72,15 @@ export function parseAccessStatus(value: unknown): YoofloeAccessStatusResponse {
 export class YoofloeConnectionChangedError extends Error {
   readonly code = "CONNECTION_CHANGED";
   constructor() { super(describeAccessError(0, "CONNECTION_CHANGED")); }
+}
+
+/** Accepts service base URLs only, before they are used in requests or diagnostic output. */
+export function normalizeFunctionsBaseUrl(value: string): string {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error(describeAccessError(0, "ENDPOINT_INVALID")); }
+  const localHttp = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if ((!localHttp && url.protocol !== "https:") || url.username || url.password || url.search || url.hash) {
+    throw new Error(describeAccessError(0, "ENDPOINT_INVALID"));
+  }
+  return url.toString().replace(/\/+$/, "");
 }
