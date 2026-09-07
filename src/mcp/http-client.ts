@@ -1,7 +1,9 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { describeAccessError, parseAccessStatus, parseSecurityContract } from "../external-access";
 import type {
   YoofloeDataApiResponse,
+  YoofloeAccessStatusResponse,
   YoofloeDateFormat,
   YoofloeDomain,
   YoofloeGardenerApiResponse,
@@ -17,6 +19,7 @@ export interface YoofloeMcpConfig {
   saveFolder: string;
   dateFormat: YoofloeDateFormat;
   pluginVersion: string;
+  configurationIssues?: Array<{ code: string; message: string }>;
 }
 
 export interface YoofloeBundleRequest {
@@ -50,18 +53,6 @@ function normalizeBaseUrl(value: string) {
   return (value || DEFAULT_FUNCTIONS_BASE_URL).replace(/\/+$/, "");
 }
 
-function errorMessageFromBody(body: unknown, status: number) {
-  if (body && typeof body === "object") {
-    const payload = body as Record<string, unknown>;
-    const message = payload.error || payload.message;
-    if (typeof message === "string" && message.trim()) {
-      return message;
-    }
-  }
-
-  return `Yoofloe API request failed with status ${status}.`;
-}
-
 function parseResponseBody(text: string) {
   if (!text) return null;
 
@@ -72,25 +63,35 @@ function parseResponseBody(text: string) {
   }
 }
 
-async function postJsonRequest(url: string, pat: string, body: Record<string, unknown>) {
+async function postJsonRequest(url: string, pat: string, body?: Record<string, unknown>) {
+  if (!pat) throw new YoofloeMcpHttpError("Configure YOOFLOE_PAT before requesting Yoofloe access.", 0, "PAT_MISSING");
   const targetUrl = new URL(url);
-  const requestBody = JSON.stringify(body);
+  if ((targetUrl.protocol !== "https:" && !(targetUrl.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(targetUrl.hostname)))
+    || targetUrl.username || targetUrl.password) throw new Error("Use an HTTPS Yoofloe endpoint or a local test server.");
+  const requestBody = body === undefined ? undefined : JSON.stringify(body);
   const requestFn = targetUrl.protocol === "https:" ? httpsRequest : httpRequest;
 
   return await new Promise<{ status: number; body: unknown; }>((resolve, reject) => {
     const request = requestFn(targetUrl, {
-      method: "POST",
+      method: body === undefined ? "GET" : "POST",
       headers: {
         Authorization: `Bearer ${pat}`,
         "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(requestBody)
+        ...(requestBody === undefined ? {} : { "Content-Length": Buffer.byteLength(requestBody) })
       }
     }, (response) => {
       const chunks: Buffer[] = [];
+      let responseBytes = 0;
 
       response.on("data", (chunk: Buffer | string) => {
+        responseBytes += Buffer.byteLength(chunk);
+        if (responseBytes > 8 * 1024 * 1024) {
+          request.destroy(new Error("Yoofloe response exceeded the safe size limit."));
+          return;
+        }
         chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
       });
+      response.on("error", reject);
 
       response.on("end", () => {
         const text = Buffer.concat(chunks).toString("utf8");
@@ -102,7 +103,8 @@ async function postJsonRequest(url: string, pat: string, body: Record<string, un
     });
 
     request.on("error", reject);
-    request.write(requestBody);
+    request.setTimeout(15000, () => request.destroy(new Error("Yoofloe request timed out.")));
+    if (requestBody !== undefined) request.write(requestBody);
     request.end();
   });
 }
@@ -110,17 +112,18 @@ async function postJsonRequest(url: string, pat: string, body: Record<string, un
 async function postJson<TResponse>(
   config: YoofloeMcpConfig,
   path: string,
-  body: Record<string, unknown>
+  body?: Record<string, unknown>
 ): Promise<TResponse> {
   const response = await postJsonRequest(`${normalizeBaseUrl(config.functionsBaseUrl)}/${path}`, config.pat, body);
 
   if (response.status >= 400) {
-    const code = response.body && typeof response.body === "object"
+    const code = body === undefined && (response.status === 404 || response.status === 405)
+      ? "CLIENT_UPDATE_REQUIRED" : response.body && typeof response.body === "object"
       ? (response.body as Record<string, unknown>).code
       : undefined;
 
     throw new YoofloeMcpHttpError(
-      errorMessageFromBody(response.body, response.status),
+      describeAccessError(response.status, typeof code === "string" ? code : undefined),
       response.status,
       typeof code === "string" ? code : undefined,
       response.body
@@ -131,16 +134,19 @@ async function postJson<TResponse>(
 }
 
 export class YoofloeMcpHttpClient {
+  accessStatus: YoofloeAccessStatusResponse | null = null;
   constructor(private readonly config: YoofloeMcpConfig) {}
 
   async fetchBundle(request: YoofloeBundleRequest): Promise<YoofloeDataApiResponse> {
-    return await postJson<YoofloeDataApiResponse>(this.config, "obsidian-data-api", {
+    const response = await postJson<YoofloeDataApiResponse>(this.config, "obsidian-data-api", {
       domains: request.domains,
       range: request.range,
       scope: "personal",
       includeRaw: request.includeRaw,
       includeFrontmatterHints: request.includeFrontmatterHints
     });
+    parseSecurityContract(response?.bundle?.meta?.security);
+    return response;
   }
 
   async fetchGardenerBrief(request: YoofloeGardenerBriefRequest): Promise<YoofloeGardenerApiResponse> {
@@ -154,20 +160,10 @@ export class YoofloeMcpHttpClient {
   }
 
   async testToken() {
-    const response = await this.fetchBundle({
-      domains: ["schedule"],
-      range: "1W",
-      includeRaw: false,
-      includeFrontmatterHints: false
-    });
-
-    return {
-      ok: true,
-      generatedAt: response.generatedAt,
-      entitlement: response.entitlement,
-      rateLimit: response.rateLimit,
-      bundleMeta: response.bundle.meta
-    };
+    this.accessStatus = null;
+    const response = parseAccessStatus(await postJson(this.config, "obsidian-data-api"));
+    this.accessStatus = response;
+    return { ok: response.entitlement.allowed, ...response };
   }
 }
 

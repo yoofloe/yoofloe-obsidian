@@ -3,6 +3,8 @@ import { runAiDocumentAnalysis } from "./ai/byok-client";
 import { getAiDocumentDefinition } from "./ai/prompts";
 import { buildAgentSetupNoteMarkdown } from "./agent-guidance";
 import { YoofloeApiError, YoofloeClient } from "./api/yoofloe-client";
+import { YoofloeConnectionChangedError } from "./external-access";
+import { getContextNotices } from "./context-coverage";
 import { YOOFLOE_CAPTURE_VIEW_TYPE, YoofloeCaptureView } from "./capture-view";
 import { requestDeepDiveFocusInstruction } from "./focus-modal";
 import { renderAiNoteMarkdown } from "./generators/ai-note";
@@ -285,6 +287,14 @@ export default class YoofloePlugin extends Plugin {
   private statusResetTimer: number | null = null;
   private lastCaptureSelection: CaptureSelectionPayload | null = null;
   private yoofloePairingInFlight = false;
+  private tokenVerificationSequence = 0;
+  private verifiedSecuritySchema: number | null = null;
+
+  private createYoofloeClient(token: string, isLatest: () => boolean = () => true) {
+    const functionsBaseUrl = this.settings.functionsBaseUrl;
+    return new YoofloeClient({ functionsBaseUrl }, token, () =>
+      isLatest() && this.secretStore.getPat() === token && this.settings.functionsBaseUrl === functionsBaseUrl);
+  }
 
   async onload() {
     await this.loadSettings();
@@ -700,6 +710,7 @@ export default class YoofloePlugin extends Plugin {
   }
 
   async verifyStoredYoofloeToken(options: { throwOnFailure?: boolean } = {}) {
+    const verificationSequence = ++this.tokenVerificationSequence;
     if (!this.secretStore.isAvailable) {
       throw new Error(SECRET_STORAGE_REQUIRED_MESSAGE);
     }
@@ -713,8 +724,9 @@ export default class YoofloePlugin extends Plugin {
 
     await this.setPairingPhase("verifying", "Token saved. Verifying Yoofloe access...");
     try {
-      const client = new YoofloeClient(this.settings, token);
+      const client = this.createYoofloeClient(token, () => verificationSequence === this.tokenVerificationSequence);
       const response = await client.testToken();
+      this.verifiedSecuritySchema = response.security.schemaVersion;
       this.setLatestEntitlement(response.entitlement);
       this.tokenStatus = "verified";
       if (response.entitlement.allowed) {
@@ -730,6 +742,7 @@ export default class YoofloePlugin extends Plugin {
       }
       return response;
     } catch (error) {
+      if (error instanceof YoofloeConnectionChangedError) throw error;
       this.tokenStatus = "saved";
       const message = this.getUserFacingErrorMessage(error, "Yoofloe token saved. Verification failed.");
       await this.setPairingPhase("verification-warning", message, {
@@ -761,6 +774,7 @@ export default class YoofloePlugin extends Plugin {
       `lastEndpointStatus=${pairing.lastEndpointStatus ?? "none"}`,
       `lastEndpointCode=${pairing.lastEndpointCode || "none"}`,
       `tokenStatus=${this.tokenStatus || "unknown"}`,
+      `securitySchemaVersion=${this.tokenStatus === "verified" ? this.verifiedSecuritySchema ?? "not_verified" : "not_verified"}`,
       `tokenExpiresAt=${pairing.tokenExpiresAt || "none"}`
     ];
     return lines.join("\n");
@@ -1128,6 +1142,9 @@ export default class YoofloePlugin extends Plugin {
   }
 
   async runHostedWriterFromOptions(options: YoofloeWriterRequest, outputOptions: HostedWriterOutputOptions = {}) {
+    const connectionToken = this.secretStore.getPat();
+    const connectionBaseUrl = this.settings.functionsBaseUrl;
+    const providerSettings = { ...this.settings.provider };
     try {
       const writerBlocker = this.getUserOwnedWriterBlocker();
       if (writerBlocker) throw new Error(writerBlocker);
@@ -1169,7 +1186,7 @@ export default class YoofloePlugin extends Plugin {
       this.clearStatusResetTimer();
       this.setStatus(`Preparing ${request.documentType} for your Vertex AI project...`);
 
-      const client = new YoofloeClient(this.settings, token);
+      const client = this.createYoofloeClient(token);
       const bundleResponse = await client.fetchBundle({
         domains,
         range: request.range,
@@ -1186,27 +1203,33 @@ export default class YoofloePlugin extends Plugin {
         request.tone?.trim() ? `Tone: ${request.tone.trim()}` : "",
         currentNote
       ].filter(Boolean).join("\n\n");
+      const googleAccessToken = await this.googleAuth.getAccessToken(
+        providerSettings.clientId, this.secretStore.getGoogleClientSecret()
+      );
+      if (this.secretStore.getPat() !== connectionToken || this.settings.functionsBaseUrl !== connectionBaseUrl) {
+        throw new YoofloeConnectionChangedError();
+      }
       const markdownBody = await runAiDocumentAnalysis({
-        settings: this.settings.provider,
-        googleAccessToken: await this.googleAuth.getAccessToken(
-          this.settings.provider.clientId,
-          this.secretStore.getGoogleClientSecret()
-        ),
+        settings: providerSettings,
+        googleAccessToken,
         bundle: bundleResponse.bundle,
         documentType: request.documentType,
         focusInstruction: writerInstruction || null
       });
+      if (this.secretStore.getPat() !== connectionToken || this.settings.functionsBaseUrl !== connectionBaseUrl) {
+        throw new YoofloeConnectionChangedError();
+      }
       const response: YoofloeWriterResponse = {
         success: true,
         title: getAiDocumentDefinition(request.documentType).title,
         markdownBody,
         sources: [],
-        unavailable: [],
+        unavailable: getContextNotices(bundleResponse.bundle),
         entitlement: bundleResponse.entitlement,
         rateLimit: bundleResponse.rateLimit,
         security: bundleResponse.bundle.meta.security,
         contextPlan: {
-          mode: request.contextMode || "manual",
+          mode: "manual",
           intent: "user_owned_vertex_ai",
           domains,
           domainsRead: domains,
@@ -1215,7 +1238,7 @@ export default class YoofloePlugin extends Plugin {
         provider: {
           type: "user-owned-vertex-ai",
           label: "Your Vertex AI project",
-          model: this.settings.provider.vertexModel,
+          model: providerSettings.vertexModel,
           hosted: false
         }
       };
@@ -1232,6 +1255,7 @@ export default class YoofloePlugin extends Plugin {
       }
       return { response, output };
     } catch (error) {
+      if (error instanceof YoofloeConnectionChangedError) throw error;
       this.setStatus("Yoofloe error");
       if (error instanceof Error && /token|401|unauthorized|invalid jwt/i.test(error.message)) {
         this.tokenStatus = "invalid";
@@ -1245,13 +1269,13 @@ export default class YoofloePlugin extends Plugin {
 
   async previewCaptureWrite(request: YoofloeWritePreviewRequest): Promise<YoofloeWritePreviewResponse> {
     const token = this.requirePat();
-    const client = new YoofloeClient(this.settings, token);
+    const client = this.createYoofloeClient(token);
     return client.previewWriteActions(request);
   }
 
   async executeCaptureWrite(request: YoofloeWriteExecuteRequest): Promise<YoofloeWriteExecuteResponse> {
     const token = this.requirePat();
-    const client = new YoofloeClient(this.settings, token);
+    const client = this.createYoofloeClient(token);
     return client.executeWriteActions(request);
   }
 
@@ -1425,7 +1449,7 @@ export default class YoofloePlugin extends Plugin {
         return;
       }
 
-      const client = new YoofloeClient(this.settings, token);
+      const client = this.createYoofloeClient(token);
       const response = await client.fetchBundle({
         domains: [...YOOFLOE_DOMAINS],
         range: this.settings.defaultRange,

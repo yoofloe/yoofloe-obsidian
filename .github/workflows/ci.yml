@@ -35,6 +35,9 @@ jobs:
       - name: Run lint
         run: npm run lint
 
+      - name: Run compatibility tests
+        run: npm test
+
       - name: Build plugin
         run: npm run build
 

@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node scripts/test.mjs",
     "build": "node esbuild.config.mjs production",
     "build:mcp": "node esbuild.mcp.mjs production",
     "package:mcp": "node scripts/package-mcp-wrapper.mjs",

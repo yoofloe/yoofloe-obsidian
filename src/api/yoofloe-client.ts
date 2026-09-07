@@ -1,4 +1,5 @@
 import { requestUrl } from "obsidian";
+import { describeAccessError, parseAccessStatus, parseSecurityContract, YoofloeConnectionChangedError } from "../external-access";
 import type {
   YoofloeDataApiResponse,
   YoofloeDomain,
@@ -153,6 +154,9 @@ function parseEntitlement(payload: Record<string, unknown>) {
 }
 
 function safeErrorMessage(status: number, code?: string) {
+  if (code && /^(TOKEN_|EXTERNAL_|CLIENT_UPDATE_REQUIRED|CONNECTION_CHANGED|RATE_LIMITED)/.test(code)) {
+    return describeAccessError(status, code);
+  }
   switch (code) {
     case "INVALID_TOKEN":
       return "Yoofloe authentication failed. Reconnect Yoofloe in Settings.";
@@ -234,7 +238,7 @@ function buildThrownRequestError(settings: YoofloeClientSettings, path: string, 
   });
 }
 
-async function postJson<T>(settings: YoofloeClientSettings, token: string, path: string, body: object): Promise<T> {
+async function postJson<T>(settings: YoofloeClientSettings, token: string, path: string, body?: object): Promise<T> {
   const trimmedToken = token.trim();
   if (!trimmedToken) {
     throw new Error("Yoofloe API token is missing.");
@@ -244,12 +248,12 @@ async function postJson<T>(settings: YoofloeClientSettings, token: string, path:
   try {
     response = await requestUrl({
       url: getEndpointParts(settings, path).url,
-      method: "POST",
+      method: body === undefined ? "GET" : "POST",
       headers: {
         Authorization: `Bearer ${trimmedToken}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       throw: false
     });
   } catch (error) {
@@ -257,6 +261,9 @@ async function postJson<T>(settings: YoofloeClientSettings, token: string, path:
   }
 
   if (response.status >= 400) {
+    if (body === undefined && (response.status === 404 || response.status === 405)) {
+      throw buildResponseError(settings, path, response.status, { code: "CLIENT_UPDATE_REQUIRED" });
+    }
     throw buildResponseError(settings, path, response.status, parseResponsePayload(response));
   }
 
@@ -264,27 +271,37 @@ async function postJson<T>(settings: YoofloeClientSettings, token: string, path:
 }
 
 export class YoofloeClient {
+  private readonly settings: YoofloeClientSettings;
   constructor(
-    private readonly settings: YoofloeClientSettings,
-    private readonly token: string
-  ) {}
+    settings: YoofloeClientSettings,
+    private readonly token: string,
+    private readonly isConnectionCurrent: () => boolean = () => true
+  ) { this.settings = { functionsBaseUrl: settings.functionsBaseUrl }; }
+
+  private async request<T>(path: string, body?: object): Promise<T> {
+    if (!this.isConnectionCurrent()) throw new YoofloeConnectionChangedError();
+    try {
+      const result = await postJson<T>(this.settings, this.token, path, body);
+      if (!this.isConnectionCurrent()) throw new YoofloeConnectionChangedError();
+      return result;
+    } catch (error) {
+      if (!this.isConnectionCurrent()) throw new YoofloeConnectionChangedError();
+      throw error;
+    }
+  }
 
   async testToken() {
-    return this.fetchBundle({
-      domains: ["garden"],
-      range: "1M",
-      scope: "personal",
-      includeRaw: false,
-      includeFrontmatterHints: false
-    });
+    return parseAccessStatus(await this.request("obsidian-data-api"));
   }
 
   async fetchBundle(request: BundleRequest): Promise<YoofloeDataApiResponse> {
-    return postJson<YoofloeDataApiResponse>(this.settings, this.token, "obsidian-data-api", request);
+    const response = await this.request<YoofloeDataApiResponse>("obsidian-data-api", request);
+    parseSecurityContract(response?.bundle?.meta?.security);
+    return response;
   }
 
   async fetchGardenerBrief(request: GardenerBriefRequest): Promise<YoofloeGardenerApiResponse> {
-    return postJson<YoofloeGardenerApiResponse>(this.settings, this.token, "obsidian-gardener-api", {
+    return this.request<YoofloeGardenerApiResponse>("obsidian-gardener-api", {
       surface: "brief",
       domains: request.domains,
       range: request.range,
@@ -294,10 +311,10 @@ export class YoofloeClient {
   }
 
   async previewWriteActions(request: YoofloeWritePreviewRequest): Promise<YoofloeWritePreviewResponse> {
-    return postJson<YoofloeWritePreviewResponse>(this.settings, this.token, "obsidian-write-preview", request);
+    return this.request<YoofloeWritePreviewResponse>("obsidian-write-preview", request);
   }
 
   async executeWriteActions(request: YoofloeWriteExecuteRequest): Promise<YoofloeWriteExecuteResponse> {
-    return postJson<YoofloeWriteExecuteResponse>(this.settings, this.token, "obsidian-write-execute", request);
+    return this.request<YoofloeWriteExecuteResponse>("obsidian-write-execute", request);
   }
 }

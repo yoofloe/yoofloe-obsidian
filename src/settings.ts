@@ -2,6 +2,7 @@ import { App, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type YoofloePlugin from "./main";
 import { buildClaudeCodePrompt, buildCodexPrompt, buildMcpConfigSnippet } from "./agent-guidance";
 import { describeStoredSecret, SECRET_STORAGE_REQUIRED_MESSAGE } from "./secrets";
+import { YoofloeConnectionChangedError } from "./external-access";
 import { YOOFLOE_DOMAINS, YOOFLOE_OUTPUT_TARGETS, YOOFLOE_RANGES } from "./types";
 import type { YoofloeDomain, YoofloeOutputTarget, YoofloePairingPhase, YoofloePairingStatus } from "./types";
 import {
@@ -777,6 +778,11 @@ export class YoofloeSettingTab extends PluginSettingTab {
               this.display();
             } catch (error) {
               const userFacingMessage = this.plugin.getUserFacingErrorMessage(error, "Yoofloe token test failed.");
+              if (error instanceof YoofloeConnectionChangedError) {
+                new Notice(userFacingMessage);
+                this.display();
+                return;
+              }
               this.plugin.tokenStatus = userFacingMessage === this.plugin.getEntitlementNoticeMessage() ? "verified" : "invalid";
               if (this.plugin.tokenStatus === "invalid" && error instanceof Error && /token|401|unauthorized|invalid jwt/i.test(error.message)) {
                 this.plugin.latestEntitlement = null;

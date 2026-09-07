@@ -16,6 +16,12 @@ function normalizeBody(markdownBody: string) {
   return markdownBody.trim().replace(/^```(?:markdown)?\s*/i, "").replace(/```$/i, "").trim();
 }
 
+function renderContextNotices(response: YoofloeWriterResponse) {
+  return response.unavailable?.length
+    ? "\n\n### Context coverage\n\n" + response.unavailable.map((entry) => `- ${entry.message}`).join("\n")
+    : "";
+}
+
 export function writerSurface(documentType: string) {
   return `ai-${documentType}`;
 }
@@ -61,13 +67,13 @@ export function renderWriterNoteMarkdown({
     ].join("\n")
     : "";
 
-  return `${frontmatter}# ${title}\n\n${body}\n`;
+  return `${frontmatter}# ${title}\n\n${body}${renderContextNotices(response)}\n`;
 }
 
 export function renderWriterInlineMarkdown(response: YoofloeWriterResponse) {
   const title = response.title?.trim() || "Yoofloe AI note";
   const body = normalizeBody(response.markdownBody || "");
-  return `## ${title}\n\n${body}\n`;
+  return `## ${title}\n\n${body}${renderContextNotices(response)}\n`;
 }
 
 // Preserve internal call sites while the public Writer contract is renamed.

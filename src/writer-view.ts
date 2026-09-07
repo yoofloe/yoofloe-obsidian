@@ -156,7 +156,7 @@ export class YoofloeWriterView extends ItemView {
   private documentType: YoofloeAiDocumentType = "free-prompt";
   private selectedDomains = new Set<YoofloeDomain>(DEFAULT_WRITER_DOMAINS);
   private range: YoofloeRange = "1W";
-  private contextMode: YoofloeContextMode = "smart";
+  private contextMode: YoofloeContextMode = "manual";
   private sourceDisplay: YoofloeSourceDisplay = "hidden";
   private destinationMode: WriterDestinationMode = "new-note";
   private newNoteTitle = "Yoofloe AI note";
@@ -193,11 +193,11 @@ export class YoofloeWriterView extends ItemView {
       ? this.plugin.settings.defaultDomains
       : DEFAULT_WRITER_DOMAINS);
     this.range = this.plugin.settings.defaultRange;
-    this.contextMode = "smart";
+    this.contextMode = "manual";
     this.sourceDisplay = "hidden";
     this.destinationMode = destinationFromOutputTarget(this.plugin.settings.defaultOutputTarget);
     this.tone = this.plugin.settings.defaultTone || "clear and practical";
-    this.includeRaw = this.plugin.settings.includeRawData;
+    this.includeRaw = false;
     this.newNoteTitle = this.suggestedNewNoteTitle();
     this.newNoteTitleEdited = false;
     this.lastOutputStatus = null;
@@ -481,18 +481,12 @@ export class YoofloeWriterView extends ItemView {
       });
 
     new Setting(customize)
-      .setName("Smart context")
-      .setDesc("Use only selected sources that match your prompt to reduce input tokens.")
-      .addToggle((toggle) => {
-        toggle.setValue(this.contextMode === "smart").onChange((value) => {
-          this.contextMode = value ? "smart" : "manual";
-          this.refreshAfterContextChange();
-        });
-      });
+      .setName("Source selection")
+      .setDesc("All selected sources are requested. Automatic source reduction is not enabled.");
 
     new Setting(customize)
       .setName("Include raw data")
-      .setDesc("Advanced. Used only when smart context is off.")
+      .setDesc("Advanced. Include additional records from the selected sources.")
       .addToggle((toggle) => {
         toggle.setValue(this.includeRaw).onChange((value) => {
           this.includeRaw = value;

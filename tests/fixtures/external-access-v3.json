@@ -1,0 +1,48 @@
+{
+  "source": "supabase/functions/_shared/external-access.ts",
+  "sourceCommit": "f3110e3513c2255ff0a4966859acaf34a9f89cfb",
+  "sourceSha256": "6eecf597f8c48fd9b5080875edbe198869e74c303173ae3637330dc01ee9c440",
+  "security": {
+    "schemaVersion": 3,
+    "scope": "personal",
+    "coupleScopeEnabled": false,
+    "encryptionMode": "mixed_legacy_v1_and_zke_v2",
+    "zkeAtRestMode": "zke_client_decrypt",
+    "legacyServerDerivedKeyStatus": "migration_only",
+    "requiresLocalKeyForV2": true,
+    "canReadCiphertext": true,
+    "canReadZkePlaintext": false,
+    "plaintextExportConsentRequired": true,
+    "patCanDecrypt": false,
+    "mcpConfigCanDecrypt": false,
+    "rawKeyStorageAllowed": false,
+    "serverCanDecryptV2": false,
+    "surfaces": {
+      "cli": {
+        "authMode": "oauth_session",
+        "scope": "personal",
+        "rootKeyResidence": "process_memory",
+        "canReadZkePlaintext": true
+      },
+      "cli_mcp": {
+        "authMode": "oauth_session",
+        "scope": "personal",
+        "transport": "local_stdio",
+        "rootKeyResidence": "process_memory",
+        "canReadZkePlaintext": true,
+        "writes": "capability_ttl",
+        "destructiveApproval": "one_time_local_tty_receipt"
+      },
+      "obsidian_plugin": {
+        "authMode": "pat",
+        "scope": "personal",
+        "canReadZkePlaintext": false
+      },
+      "obsidian_mcp": {
+        "authMode": "pat",
+        "scope": "personal",
+        "canReadZkePlaintext": false
+      }
+    }
+  }
+}

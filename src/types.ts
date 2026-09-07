@@ -111,7 +111,7 @@ export interface YoofloeRateLimit {
 }
 
 export interface YoofloeExternalAccessSecurityContract {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   scope: YoofloeScope;
   coupleScopeEnabled: false;
   encryptionMode: "mixed_legacy_v1_and_zke_v2";
@@ -125,6 +125,22 @@ export interface YoofloeExternalAccessSecurityContract {
   mcpConfigCanDecrypt: false;
   rawKeyStorageAllowed: false;
   serverCanDecryptV2: false;
+  surfaces?: Record<string, {
+    authMode: string;
+    scope: "personal";
+    canReadZkePlaintext: boolean;
+    [key: string]: unknown;
+  }>;
+}
+
+export interface YoofloeAccessStatusResponse {
+  success: true;
+  kind: "obsidian-access-status";
+  generatedAt: string;
+  entitlement: YoofloeEntitlement;
+  rateLimit?: YoofloeRateLimit;
+  capabilities: string[];
+  security: YoofloeExternalAccessSecurityContract;
 }
 
 export interface YoofloePluginSettings {
@@ -156,6 +172,14 @@ export interface YoofloeBundle {
     domains: YoofloeDomain[];
     fidelity: string;
     security?: YoofloeExternalAccessSecurityContract;
+    coverage?: Partial<Record<YoofloeDomain, {
+      status: "available" | "empty" | "partial";
+      recordCount: number | null;
+      encryptedFieldsOmitted: number;
+      encryptedRecordsOmitted: number;
+      completeness: "bounded_snapshot";
+      notices: Array<{ code: string; message: string }>;
+    }>>;
   };
   overview: Record<string, unknown>;
   domains: Record<string, { summary: Record<string, unknown>; evidence: Record<string, unknown>; raw?: Record<string, unknown> }>;

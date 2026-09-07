@@ -69,11 +69,19 @@ The MCP wrapper supplies PAT-authenticated, bounded Yoofloe tools and vault-safe
 
 ## Common errors
 
+- Token verification uses a GET status request and does not collect Schedule, Garden, or other personal domain records. Deploy the matching backend before installing this update. An older backend returns an update-required diagnostic; the client never falls back to a data request for verification.
+- The MCP server can start with incomplete configuration so its session-status tool can explain missing PAT or vault settings. Content and local-write tools are exposed only after configuration is valid.
+- Empty sources, omitted encrypted text and unavailable monetary totals are shown in generated Writer notes. Combined Finance amounts are unavailable when currencies differ or required amounts/currencies are unreadable.
+- Writer currently requests all selected sources; automatic prompt-based source reduction is not enabled. Raw context is an explicit advanced choice.
+
 - `Yoofloe API token is missing`: reconnect through `Settings -> Yoofloe`, or use the manual PAT field.
 - `Configure your own Vertex AI project`: finish the provider setup in the plugin, or use the MCP wrapper with a compatible agent.
 - `Reconnect Google`: the local Google OAuth session expired or was revoked; reconnect from plugin settings.
 - `Add your Google Cloud Project ID`: use the project ID, not the numeric project number.
 - `Open a Markdown note`: open a Markdown note before choosing `Current note` as the destination.
+- `Your Yoofloe token expired` or `was revoked`: reconnect Yoofloe to obtain an active token.
+- `Review the current External AI Access notice`: open Yoofloe Settings and review the active external-access notice.
+- `The Yoofloe connection changed`: retry using the account and endpoint currently selected. Delayed results from the previous connection are discarded.
 
 ## Security and privacy
 

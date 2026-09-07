@@ -37,6 +37,10 @@ The connected MCP client or agent calls its own model provider or API. Yoofloe d
 
 ## Safety rules
 
+Connection verification calls GET on `obsidian-data-api` without collecting personal domain records. This requires the matching backend update; HTTP 404/405 reports that diagnostics are unavailable and never triggers a POST fallback.
+
+`yoofloe_mcp_session_status` distinguishes local configuration from server verification. Its `security` field is null until `yoofloe_test_token` succeeds, then contains the checked server contract and verification time. Missing configuration exposes diagnostic tools only. With valid configuration, the existing local note-writing tools remain available; remote Yoofloe Capture is not exposed by this version. A server permission check still applies to every remote request.
+
 - Do not commit real PAT values to `.mcp.json`, shell profiles, prompts, logs, or screenshots.
 - `YOOFLOE_VAULT_PATH` must point to your vault root, not the output subfolder.
 - The wrapper is personal-only by design and does not include couple/shared exports.

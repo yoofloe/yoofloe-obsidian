@@ -8,6 +8,7 @@ import { renderAiNoteMarkdown } from "../generators/ai-note";
 import { renderReportMarkdown } from "../generators/markdown";
 import {
   type YoofloeAiDocumentType,
+  type YoofloeAccessStatusResponse,
   type YoofloeBundle,
   type YoofloeDateFormat,
   type YoofloeDomain,
@@ -68,39 +69,34 @@ function asJsonText(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
-function buildExternalAccessSecurityContract() {
-  return {
-    schemaVersion: 2,
-    scope: "personal" as const,
-    coupleScopeEnabled: false as const,
-    encryptionMode: "mixed_legacy_v1_and_zke_v2" as const,
-    zkeAtRestMode: "zke_client_decrypt" as const,
-    legacyServerDerivedKeyStatus: "migration_only" as const,
-    requiresLocalKeyForV2: true as const,
-    canReadCiphertext: true as const,
-    canReadZkePlaintext: false as const,
-    plaintextExportConsentRequired: true as const,
-    patCanDecrypt: false as const,
-    mcpConfigCanDecrypt: false as const,
-    rawKeyStorageAllowed: false as const,
-    serverCanDecryptV2: false as const
-  };
-}
-
-function buildMcpSessionStatus(config: YoofloeMcpConfig) {
+function buildMcpSessionStatus(config: YoofloeMcpConfig, verified: YoofloeAccessStatusResponse | null) {
   return {
     mode: "obsidian_mcp",
     auth: {
       patConfigured: Boolean(config.pat),
       patCanDecrypt: false,
-      entitlementCheck: "use yoofloe_test_token"
+      entitlementCheck: "use yoofloe_test_token",
+      verification: verified ? "verified_at" : "not_verified",
+      verifiedAt: verified?.generatedAt ?? null,
+      entitlement: verified?.entitlement ?? null
     },
     scope: {
       current: "personal",
       coupleScopeEnabled: false,
       coupleScopeReason: "personal_only_by_design"
     },
-    security: buildExternalAccessSecurityContract(),
+    security: verified?.security ?? null,
+    supportedSecuritySchemaVersions: [2, 3],
+    configuration: {
+      ready: !config.configurationIssues?.length,
+      issues: config.configurationIssues ?? []
+    },
+    permissions: {
+      remoteContext: Boolean(config.pat) && !config.configurationIssues?.length,
+      localVaultWrites: !config.configurationIssues?.length,
+      remoteCapture: false,
+      note: "Local configuration is not server authorization. Each remote request rechecks PAT access."
+    },
     vault: {
       saveFolder: config.saveFolder,
       dateFormat: config.dateFormat,
@@ -538,16 +534,18 @@ function requireFocusInstruction(documentType: YoofloeAiDocumentType, focusInstr
 }
 
 export function readMcpConfig(env: Record<string, string | undefined>): YoofloeMcpConfig {
+  const configurationIssues: Array<{ code: string; message: string }> = [];
   const pat = trimEnv(env.YOOFLOE_PAT);
-  if (!pat) {
-    throw new Error(PAT_ENV_ERROR);
-  }
-
-  const vaultPath = resolveVaultRoot(trimEnv(env.YOOFLOE_VAULT_PATH));
-  const saveFolder = normalizeSaveFolder(trimEnv(env.YOOFLOE_SAVE_FOLDER));
-  const dateFormat = trimEnv(env.YOOFLOE_DATE_FORMAT)
-    ? assertDateFormat(trimEnv(env.YOOFLOE_DATE_FORMAT))
-    : DEFAULT_DATE_FORMAT;
+  if (!pat || !/^pat_yfl_[a-zA-Z0-9_-]+$/.test(pat)) configurationIssues.push({ code: "PAT_CONFIGURATION_REQUIRED", message: PAT_ENV_ERROR });
+  let vaultPath = "";
+  let saveFolder = DEFAULT_SAVE_FOLDER;
+  let dateFormat = DEFAULT_DATE_FORMAT;
+  try { vaultPath = resolveVaultRoot(trimEnv(env.YOOFLOE_VAULT_PATH)); }
+  catch { configurationIssues.push({ code: "VAULT_CONFIGURATION_REQUIRED", message: VAULT_ENV_ERROR }); }
+  try { saveFolder = normalizeSaveFolder(trimEnv(env.YOOFLOE_SAVE_FOLDER)); }
+  catch { configurationIssues.push({ code: "SAVE_FOLDER_INVALID", message: "Choose a relative save folder inside the vault." }); }
+  try { if (trimEnv(env.YOOFLOE_DATE_FORMAT)) dateFormat = assertDateFormat(trimEnv(env.YOOFLOE_DATE_FORMAT)); }
+  catch { configurationIssues.push({ code: "DATE_FORMAT_INVALID", message: "Choose a supported YOOFLOE_DATE_FORMAT." }); }
 
   return {
     pat,
@@ -555,7 +553,8 @@ export function readMcpConfig(env: Record<string, string | undefined>): YoofloeM
     vaultPath,
     saveFolder,
     dateFormat,
-    pluginVersion: resolveConfigVersion()
+    pluginVersion: resolveConfigVersion(),
+    configurationIssues
   };
 }
 
@@ -566,7 +565,7 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
     description: "Inspect the Obsidian MCP wrapper security, scope, local vault, and ZK readiness contract without fetching Yoofloe data.",
     inputSchema: {}
   }, () => {
-      const status = buildMcpSessionStatus(config);
+      const status = buildMcpSessionStatus(config, client.accessStatus);
       return toolTextResponse(asJsonText(status), status);
     });
 
@@ -589,6 +588,16 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
         guide
       );
     });
+
+  server.registerTool("yoofloe_test_token", {
+    description: "Verify the configured Yoofloe PAT without collecting personal domain data.",
+    inputSchema: {}
+  }, async () => {
+      const result = await client.testToken();
+      return toolTextResponse(asJsonText(result), result);
+    });
+
+  if (config.configurationIssues?.length) return;
 
   server.registerTool("yoofloe_ai_document_context", {
     description: "Fetch a grounded AI-document context package for Insight Brief, Decision Memo, Action Plan, or Deep Dive workflows.",
@@ -806,11 +815,5 @@ export function registerYoofloeTools(server: McpServer, config: YoofloeMcpConfig
       return toolTextResponse(asJsonText(structured), structured);
     });
 
-  server.registerTool("yoofloe_test_token", {
-    description: "Verify the configured Yoofloe PAT by calling the data API with a minimal read-only request.",
-    inputSchema: {}
-  }, async () => {
-      const result = await client.testToken();
-      return toolTextResponse(asJsonText(result), result);
-    });
+
 }
