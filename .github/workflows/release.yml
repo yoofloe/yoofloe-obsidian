@@ -18,6 +18,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run security:audit
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
       - run: npm run build
       - run: npm run build:mcp
       - run: npm run package:mcp
