@@ -4,3 +4,11 @@
 .calendar-companion section { padding: 0.75rem; border: 1px solid var(--background-modifier-border); border-radius: 0.5rem; margin-block: 0.75rem; }
 .calendar-companion pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .calendar-companion-status { padding: 0.75rem; background: var(--background-secondary); border-radius: 0.5rem; }
+.calendar-companion .calendar-companion-hint { color: var(--text-muted); font-size: var(--font-small); margin-block: 0.5rem; overflow-wrap: anywhere; }
+.calendar-companion-model-details .setting-item { padding-block: 0.5rem; }
+.calendar-companion input, .calendar-companion textarea { scroll-margin-block-start: 24px; }
+@media (max-width: 600px) {
+  .calendar-companion .setting-item:has(select), .calendar-companion .setting-item:has(textarea) { flex-direction: column; align-items: stretch; }
+  .calendar-companion .setting-item-control:has(select), .calendar-companion .setting-item-control:has(textarea) { justify-content: stretch; width: 100%; }
+  .calendar-companion select, .calendar-companion textarea { max-width: 100%; width: 100%; }
+}

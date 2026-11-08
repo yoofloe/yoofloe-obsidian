@@ -1,6 +1,7 @@
-import { validateOpenAiKey, type OpenAiOptions } from "./openai";
+import { validateOpenAiKey, validateOpenAiOptions, type OpenAiOptions } from "./openai";
+import { DEFAULT_OPENAI_MODEL } from "./openai-models";
 
-export const DEFAULT_OPENAI_OPTIONS: OpenAiOptions = { model: "", maxOutputTokens: 512 };
+export const DEFAULT_OPENAI_OPTIONS: OpenAiOptions = { model: DEFAULT_OPENAI_MODEL };
 export interface AiPreferenceHost {
   current(): boolean; binding(): string; load(): Promise<unknown>; save(value: unknown): Promise<void>;
   secrets(): { getSecret(id: string): string | null; setSecret(id: string, secret: string): void } | null;
@@ -14,16 +15,15 @@ export class AiPreferences {
     this.guard(); const raw = await this.host.load(); this.guard();
     const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as { openai?: unknown }).openai : null;
     if (!value || typeof value !== "object" || Array.isArray(value)) return { ...DEFAULT_OPENAI_OPTIONS };
-    const saved = value as { model?: unknown; maxOutputTokens?: unknown };
-    return { model: typeof saved.model === "string" && saved.model.length <= 128 ? saved.model : "",
-      maxOutputTokens: Number.isSafeInteger(saved.maxOutputTokens) && (saved.maxOutputTokens as number) >= 128 && (saved.maxOutputTokens as number) <= 4096 ? saved.maxOutputTokens as number : 512 };
+    const saved = value as { model?: unknown };
+    return { model: typeof saved.model === "string" && saved.model.length <= 128 && saved.model.trim() ? saved.model : DEFAULT_OPENAI_MODEL };
   }
   async save(options: OpenAiOptions): Promise<void> {
     this.guard();
-    if (options.model.length > 128 || (options.model !== "" && !/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(options.model)) || !Number.isSafeInteger(options.maxOutputTokens) || options.maxOutputTokens < 128 || options.maxOutputTokens > 4096) throw Error("Enter a model ID and a token limit between 128 and 4096.");
+    validateOpenAiOptions(options);
     const raw = await this.host.load(); this.guard();
     const previous = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-    await this.host.save({ ...previous, openai: { model: options.model, maxOutputTokens: options.maxOutputTokens } }); this.guard();
+    await this.host.save({ ...previous, openai: { model: options.model } }); this.guard();
   }
   private async secretId(): Promise<string> {
     this.guard(); const binding = this.host.binding();

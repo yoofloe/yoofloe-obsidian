@@ -63,16 +63,16 @@ removed. Modified or uncertain files are preserved rather than deleted.
 
 OpenAI is off after every plugin load and is not needed for Calendar import.
 On Android, open **OpenAI settings** in the companion's plugin settings or in a
-Calendar snapshot preview. Enter a Responses API text model ID and your own
+Calendar snapshot preview. Choose a model from the drop-down and enter your own
 OpenAI API key. The plugin does not fetch a model list or verify keys remotely.
 The key is stored through Obsidian secret storage, outside this plugin's vault
 files. This is not a promise of an operating-system keystore or isolation from
-other trusted Obsidian plugins. Model ID and output limit are local settings;
+other trusted Obsidian plugins. The model choice is a local setting;
 the enable switch is never persisted.
 
 To use it later:
 
-1. Save the model and key locally, then enable OpenAI for this session.
+1. Choose a model and save the model and key locally, then enable OpenAI for this session.
 2. In a current Calendar preview, choose **Draft from selected records**.
 3. Select 1–10 snapshots (none are preselected), write a prompt, and review the
    exact prompt and record text. Vault name and source IDs are omitted.
@@ -88,9 +88,12 @@ make no API calls. Failed requests are never retried automatically. An
 already-sent request may still be charged even if the window closes or the
 connection fails; do not assume a failure means it was free.
 
-Input is bounded to 16 KiB. Maximum output defaults to 512 tokens and can be set
-to 128–4096. This includes reasoning tokens and is **not a monetary spending
-cap**. Model availability, price and account limits remain with OpenAI. The
+Input is bounded to 16 KiB. The plugin sends **no output-token cap** and ignores
+the previous 512/4096-token settings. Output length uses the selected model's
+default; OpenAI's own limits still apply. Longer output can increase API charges.
+Partial text can be reviewed and saved, without an automatic retry. Bounded
+response parsing protects device memory (8 MiB response / 4 MiB text), rather
+than imposing an API token limit. Model availability, price and account limits remain with OpenAI. The
 request uses `store: false`, which does not mean zero retention under every
 OpenAI data policy. See the official
 [Responses API](https://developers.openai.com/api/reference/typescript/resources/responses/methods/create)
@@ -99,6 +102,40 @@ and [data controls](https://developers.openai.com/api/docs/guides/your-data).
 The OpenAI path is tested only with synthetic keys, injected mock responses and
 local UI fixtures. No real model/API request or charge was made during this
 implementation; live authentication and model behavior remain unverified.
+
+### Model choices and direct entry
+
+The bundled choices were checked against the official
+[OpenAI model catalog](https://developers.openai.com/api/docs/models) and
+[pricing](https://developers.openai.com/api/docs/pricing) on **2026-11-08**:
+
+| Choice | Model ID | Intended use |
+| --- | --- | --- |
+| GPT-6 Luna (recommended) | `gpt-6-luna` | Summaries and checklists; lowest cost in this list |
+| GPT-6.1 Terra | `gpt-6.1-terra` | Everyday writing and revision |
+| GPT-6.1 Sol | `gpt-6.1-sol` | More demanding drafts |
+| GPT-6 Astra | `gpt-6-astra` | Most demanding tasks; highest cost in this list |
+
+Luna is suggested for new or previously blank settings. Existing model IDs are
+preserved; IDs outside the bundled list appear under **Custom**. This is a
+curated list shipped with the plugin, not a live inventory of your account's
+access. The checked date and official links are also shown in settings.
+
+Choose **Custom · Enter a model ID** to type an exact API ID, for example
+`gpt-6-luna`. Use an API ID rather than a ChatGPT display name. Blank values,
+spaces and likely API keys pasted into this field cannot be saved. Model
+switching preserves unsaved custom text and the masked key input; model-only
+saves do not discard a key that has not yet been saved.
+
+The short-draft request profile uses `reasoning.effort: none` for Luna/Terra and
+`low` for Sol/Astra, as supported by the official model catalog. Unrecognized
+custom models receive no forced reasoning parameter. There is no plugin output
+token limit and no automatic retry to obtain text.
+
+Mobile settings and prompt fields reserve extra scroll space while focused and
+scroll the editable field above overlaid keyboards. This also handles hosts
+whose viewport does not shrink when the keyboard opens. No field value is read
+by the keyboard-visibility helper.
 
 ## Local build and checks
 
