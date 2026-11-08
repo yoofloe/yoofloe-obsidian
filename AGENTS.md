@@ -9,6 +9,7 @@ This repository follows the shared Yoofloe environment and release policy from t
 Plugin-specific rules:
 
 - The owner requested a complete Calendar Companion pivot for 0.4.0. The public plugin keeps registry ID `yoofloe`.
+- Gemini remains dormant: retain its source/catalog and stored data, but do not register it in the public UI/session or include its endpoint in the browser bundle until the owner authorizes revival.
 - Current releases contain the Android Calendar Companion plugin only. The earlier cloud plugin and MCP wrapper remain available in historical tags/releases through 0.3.31; do not silently include or reactivate them in the new payload.
 - Public root builds must package the single `calendar-companion/src/main.ts` implementation and match the committed root manifest/styles. `src/main.ts` re-exports the same implementation for tooling.
 - Verify local import, create-only vault writes, explicit optional-provider approvals and startup without I/O. No live Gemini test is authorized in this run.

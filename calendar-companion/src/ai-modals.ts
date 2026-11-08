@@ -1,8 +1,7 @@
 import { App, Modal, Setting, type ButtonComponent } from "obsidian";
 import { AiPreferences, DEFAULT_OPENAI_OPTIONS } from "./ai-preferences";
 import { AiSession, type AiDraft, type AiModelOptions, type AiOptions, type AiProvider, type AiReview } from "./ai-session";
-import { CUSTOM_MODEL_CHOICE, findAiModel, isAiModelId, isAiProvider, modelCatalog, providerLabel } from "./ai-models";
-import { GEMINI_TERMS_URL } from "./gemini-models";
+import { CUSTOM_MODEL_CHOICE, findAiModel, isAiModelId, isAiProviderEnabled, modelCatalog, providerLabel, PUBLIC_AI_PROVIDERS } from "./ai-models";
 import { type RecordSnapshot } from "./protocol";
 import { saveAiDraft, type NoteStore } from "./notes";
 import { keepModalInputsVisible } from "./modal-inputs";
@@ -37,12 +36,12 @@ export class AiSettingsModal extends Modal {
     this.configured = await this.ai.preferences.hasKey(this.provider);
   }
   private async load(): Promise<void> {
-    try { this.provider = await this.ai.preferences.readProvider(); await this.loadModel(); }
+    try { const saved = await this.ai.preferences.readProvider(); this.provider = isAiProviderEnabled(saved) ? saved : "openai"; await this.loadModel(); }
     catch { this.message = "Local AI settings could not be read. Obsidian secret storage is required."; }
     finally { this.busy = false; if (this.current()) this.render(); }
   }
   private async chooseProvider(provider: AiProvider): Promise<void> {
-    if (!this.current() || this.busy || provider === this.provider) return;
+    if (!this.current() || this.busy || !isAiProviderEnabled(provider) || provider === this.provider) return;
     this.keyDrafts.set(this.provider, this.keyInput?.value ?? "");
     this.modelDrafts.set(this.provider, { options: { ...this.options }, modelChoice: this.modelChoice, customModel: this.customModel });
     if (this.keyInput) this.keyInput.value = "";
@@ -91,10 +90,11 @@ export class AiSettingsModal extends Modal {
     const el = this.contentEl, name = providerLabel(this.provider), catalog = modelCatalog(this.provider);
     el.empty(); el.createEl("h2", { text: "AI (optional)" });
     el.createEl("p", { text: "Calendar import is free and works with AI off. Generation sends only your selected records and prompt to your chosen provider and may incur charges on your API account." });
-    new Setting(el).setName("AI provider").setDesc("Your key is stored separately for each provider. Switching providers turns AI off.").addDropdown(dropdown => {
-      dropdown.addOption("openai", "OpenAI").addOption("gemini", "Google Gemini").setValue(this.provider).setDisabled(this.busy);
+    if (PUBLIC_AI_PROVIDERS.length > 1) new Setting(el).setName("AI provider").setDesc("Your key is stored separately for each provider. Switching providers turns AI off.").addDropdown(dropdown => {
+      for (const provider of PUBLIC_AI_PROVIDERS) dropdown.addOption(provider, providerLabel(provider));
+      dropdown.setValue(this.provider).setDisabled(this.busy);
       dropdown.selectEl.setAttribute("aria-label", "AI provider");
-      dropdown.onChange(value => { if (isAiProvider(value)) void this.chooseProvider(value); });
+      dropdown.onChange(value => { if (isAiProviderEnabled(value)) void this.chooseProvider(value); });
     });
     el.createEl("p", { text: "AI starts off after each plugin load. Settings, key storage and the enable switch make no API calls. There are no automatic requests, key checks or retries." });
     if (this.message) el.createEl("p", { text: this.message, cls: "calendar-companion-status", attr: { role: "status" } });
@@ -114,10 +114,6 @@ export class AiSettingsModal extends Modal {
     links.appendText(`Choices checked ${catalog.checked}. Access depends on your ${name} account. `);
     links.createEl("a", { text: "Models", href: catalog.url, attr: { target: "_blank", rel: "noopener noreferrer" } }); links.appendText(" · ");
     links.createEl("a", { text: "Pricing", href: catalog.pricing, attr: { target: "_blank", rel: "noopener noreferrer" } });
-    if (this.provider === "gemini") {
-      const privacy = el.createEl("p", { text: "Google may use free-tier API content to improve its products. Paid-tier data terms differ. Check your account and Google's data terms before sending private notes. ", cls: "calendar-companion-hint" });
-      privacy.createEl("a", { text: "Google data terms", href: GEMINI_TERMS_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
-    }
     el.createEl("p", { text: `Response length: model default. No plugin output-token cap is sent. ${name}'s own limits still apply; longer responses and thinking tokens can cost more.`, cls: "calendar-companion-hint" });
     new Setting(el).addButton(button => { this.saveModelButton = button; button.setButtonText("Save model settings").onClick(() => void this.change(() => this.ai.preferences.save({ ...this.options }, this.provider))); }); this.updateModelSave();
     new Setting(el).setName(this.configured ? "API key saved locally" : "No API key saved").setDesc(`${name} only. Stored through Obsidian secret storage, outside this plugin's vault files. Other trusted plugins share Obsidian's trust boundary.`)
@@ -151,7 +147,7 @@ export class AiDraftModal extends Modal {
   onOpen(): void { this.alive = true; this.contentEl.classList.add("calendar-companion"); this.stopKeyboard?.(); this.stopKeyboard = keepModalInputsVisible(this.contentEl, this.current); this.render(); void this.load(); }
   onClose(): void { this.alive = false; this.stopKeyboard?.(); this.stopKeyboard = null; this.review = null; this.closed(); }
   private async load(): Promise<void> {
-    try { const provider = await this.ai.preferences.readProvider(); const options = await this.ai.preferences.read(provider); if (this.current()) this.options = { ...options, provider }; }
+    try { const saved = await this.ai.preferences.readProvider(); const provider = isAiProviderEnabled(saved) ? saved : "openai"; const options = await this.ai.preferences.read(provider); if (this.current()) this.options = { ...options, provider }; }
     catch { this.message = "AI settings could not be read. Reopen AI settings first."; }
     if (this.current()) this.render();
   }

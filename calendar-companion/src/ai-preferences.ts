@@ -1,7 +1,6 @@
 import { validateOpenAiKey } from "./openai";
-import { validateGeminiKey } from "./gemini";
 import { DEFAULT_OPENAI_MODEL } from "./openai-models";
-import { isAiModelId, isAiProvider, modelCatalog, providerLabel } from "./ai-models";
+import { isAiModelId, isAiProviderEnabled, modelCatalog, providerLabel } from "./ai-models";
 import type { AiModelOptions, AiProvider } from "./ai-session";
 
 export const DEFAULT_OPENAI_OPTIONS: AiModelOptions = { model: DEFAULT_OPENAI_MODEL };
@@ -17,27 +16,27 @@ export class AiPreferences {
   private guard() { if (!this.host.current()) throw Error("The vault changed. Reopen AI settings in the current vault."); }
   async readProvider(): Promise<AiProvider> {
     this.guard(); const raw = settings(await this.host.load()); this.guard();
-    return raw.aiProvider === "gemini" ? "gemini" : "openai";
+    return isAiProviderEnabled(raw.aiProvider) ? raw.aiProvider : "openai";
   }
   async selectProvider(provider: AiProvider): Promise<void> {
-    this.guard(); if (!isAiProvider(provider)) throw Error("Choose OpenAI or Gemini.");
+    this.guard(); if (!isAiProviderEnabled(provider)) throw Error("This AI provider is unavailable in this version.");
     const previous = settings(await this.host.load()); this.guard();
     await this.host.save({ ...previous, aiProvider: provider }); this.guard();
   }
   async read(provider: AiProvider = "openai"): Promise<AiModelOptions> {
-    this.guard(); if (!isAiProvider(provider)) throw Error("Unsupported provider.");
+    this.guard(); if (!isAiProviderEnabled(provider)) throw Error("Unsupported provider.");
     const raw = settings(await this.host.load()); this.guard();
     const saved = settings(raw[provider]);
     return { model: typeof saved.model === "string" && saved.model.length <= 128 && saved.model.trim() ? saved.model : modelCatalog(provider).defaultModel };
   }
   async save(options: AiModelOptions, provider: AiProvider = "openai"): Promise<void> {
     this.guard();
-    if (!isAiProvider(provider) || !isAiModelId(provider, options.model)) throw Error("Choose a valid API model ID.");
+    if (!isAiProviderEnabled(provider) || !isAiModelId(provider, options.model)) throw Error("Choose a valid API model ID.");
     const previous = settings(await this.host.load()); this.guard();
     await this.host.save({ ...previous, [provider]: { model: options.model } }); this.guard();
   }
   private async secretId(provider: AiProvider): Promise<string> {
-    this.guard(); if (!isAiProvider(provider)) throw Error("Unsupported provider.");
+    this.guard(); if (!isAiProviderEnabled(provider)) throw Error("Unsupported provider.");
     const binding = this.host.binding();
     const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(binding)); this.guard();
     if (binding !== this.host.binding()) throw Error("The vault changed.");
@@ -51,8 +50,8 @@ export class AiPreferences {
   }
   async hasKey(provider: AiProvider = "openai"): Promise<boolean> { return Boolean(await this.key(provider)); }
   async saveKey(value: string, provider: AiProvider = "openai"): Promise<void> {
-    if (!isAiProvider(provider)) throw Error("Unsupported provider.");
-    const key = provider === "gemini" ? validateGeminiKey(value) : validateOpenAiKey(value), id = await this.secretId(provider); this.guard();
+    if (!isAiProviderEnabled(provider)) throw Error("Unsupported provider.");
+    const key = validateOpenAiKey(value), id = await this.secretId(provider); this.guard();
     const storage = this.host.secrets(); if (!storage) throw Error("Obsidian secret storage is unavailable.");
     storage.setSecret(id, key);
   }

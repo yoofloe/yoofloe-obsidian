@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { isAiProviderEnabled } from '../dist/ai-models.js';
+const futureGeminiTest = isAiProviderEnabled('gemini') ? test : test.skip;
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -130,7 +132,7 @@ test('selecting and saving a model preserves an unsaved masked key; closing clea
 });
 
 
-test('Gemini provider has a separate masked key, current model choices, Custom and no configuration calls', async () => {
+futureGeminiTest('Gemini provider has a separate masked key, current model choices, Custom and no configuration calls', async () => {
   const f = fixture('gpt-6-luna'), { AiSettingsModal } = modals();
   await f.ai.preferences.saveKey('sk-openai-offline-fixture-only'); f.ai.session.enableForSession(true);
   const modal = new AiSettingsModal({}, f.ai, () => {}); modal.open(); await settle();
@@ -154,7 +156,7 @@ test('Gemini provider has a separate masked key, current model choices, Custom a
   const finalInput = field(modal, 'No API key saved').inputEl; modal.close(); assert.equal(finalInput.value, '');
 });
 
-test('Gemini draft review names Google and uses the Gemini key only after explicit approval', async () => {
+futureGeminiTest('Gemini draft review names Google and uses the Gemini key only after explicit approval', async () => {
   const f = fixture(), { AiDraftModal } = modals();
   await f.ai.preferences.selectProvider('gemini'); await f.ai.preferences.saveKey('AIza-offline-gemini-fixture-not-real', 'gemini'); f.ai.session.enableForSession(true);
   const record = { kind: 'study_session', title: 'Fixture study', text: 'Recorded 40 minutes', date: '2026-11-08' };

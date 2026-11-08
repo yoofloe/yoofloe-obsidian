@@ -1,7 +1,7 @@
 {
   "name": "obsidian-yoofloe",
   "version": "0.4.0",
-  "description": "Local Yoofloe Calendar snapshots and optional provider-key AI drafts for Android Obsidian.",
+  "description": "Local Yoofloe Calendar snapshots and optional OpenAI drafts for Android Obsidian.",
   "private": true,
   "type": "module",
   "scripts": {

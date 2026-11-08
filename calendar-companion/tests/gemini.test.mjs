@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { isAiProviderEnabled } from '../dist/ai-models.js';
+const futureTest = isAiProviderEnabled('gemini') ? test : test.skip;
 import assert from 'node:assert/strict';
 import { AiSession } from '../dist/ai-session.js';
 import { OPENAI_ADAPTER, validateOpenAiKey } from '../dist/openai.js';
@@ -15,7 +17,7 @@ const response = (text = 'A fixture draft', reason = 'STOP') => ({ status: 200, 
   ] } }], usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 15, thoughtsTokenCount: 4 },
 }) });
 
-test('Gemini stays off and requires an original one-use approved review before reading its key', async () => {
+futureTest('Gemini stays off and requires an original one-use approved review before reading its key', async () => {
   let keyReads = 0; const calls = [];
   const session = new GeminiSession({ current: () => true, key: async () => { keyReads++; return googleKey; }, transport: async request => { calls.push(request); return response(); } });
   assert.equal(session.enabled, false); assert.throws(() => session.prepare([record], 'Review', { model: 'gemini-3.5-flash-lite' }), /disabled/);
@@ -31,7 +33,7 @@ test('Gemini stays off and requires an original one-use approved review before r
   assert(!('tools' in body)); assert(!('cachedContent' in body)); assert.equal(request.throw, false);
 });
 
-test('shared session routes the selected key to a fixed provider endpoint and prevents cross-provider concurrency', async () => {
+futureTest('shared session routes the selected key to a fixed provider endpoint and prevents cross-provider concurrency', async () => {
   const keyReads = [], calls = []; let finish;
   const wait = new Promise(resolve => { finish = resolve; });
   const session = new AiSession({ adapters: [OPENAI_ADAPTER, GEMINI_ADAPTER], current: () => true,
@@ -46,7 +48,7 @@ test('shared session routes the selected key to a fixed provider endpoint and pr
   session.enableForSession(false); await assert.rejects(session.generate(openai, true));
 });
 
-test('key formats reject the other provider and URL/header secrets before any transport', async () => {
+futureTest('key formats reject the other provider and URL/header secrets before any transport', async () => {
   assert.throws(() => validateGeminiKey(openAiKey)); assert.throws(() => validateOpenAiKey(googleKey));
   for (const value of ['Bearer '+googleKey, 'https://example.test/?key='+googleKey, googleKey+'\r\nextra']) assert.throws(() => validateGeminiKey(value));
   let calls = 0;
@@ -56,7 +58,7 @@ test('key formats reject the other provider and URL/header secrets before any tr
   const review = session.prepare([record], 'Review', { model: 'gemini-custom-fixture' }); await assert.rejects(session.generate(review, true)); assert.equal(calls, 0);
 });
 
-test('Gemini parser exposes text only, preserves partial output and rejects blocked or malformed responses', () => {
+futureTest('Gemini parser exposes text only, preserves partial output and rejects blocked or malformed responses', () => {
   const draft = parseGeminiDraft(200, response('Partial fixture', 'MAX_TOKENS').text);
   assert.equal(draft.incomplete, true); assert.equal(draft.text, 'Partial fixture'); assert(!draft.text.includes('Hidden reasoning'));
   for (const raw of ['{}','<html>', response('Blocked', 'SAFETY').text, response('').text]) assert.throws(() => parseGeminiDraft(200, raw));
@@ -65,7 +67,7 @@ test('Gemini parser exposes text only, preserves partial output and rejects bloc
   assert.throws(() => parseGeminiDraft(200, response('x'.repeat(4*1024*1024+1)).text), /too large/);
 });
 
-test('provider errors and uncertain network failures stay redacted with no automatic retry', async () => {
+futureTest('provider errors and uncertain network failures stay redacted with no automatic retry', async () => {
   for (const status of [400,401,403,429,500]) {
     let calls = 0;
     const session = new GeminiSession({ current: () => true, key: async () => googleKey,
@@ -80,7 +82,7 @@ test('provider errors and uncertain network failures stay redacted with no autom
   await assert.rejects(session.generate(session.prepare([record], 'Review', { model: 'gemini-3.5-flash-lite' }), true), /not retried.*billed/); assert.equal(calls, 1);
 });
 
-test('local preferences keep provider model drafts and secret IDs separate without changing existing OpenAI credentials', async () => {
+futureTest('local preferences keep provider model drafts and secret IDs separate without changing existing OpenAI credentials', async () => {
   let value = { keep: 42, openai: { model: 'my-existing-openai-model', maxOutputTokens: 512 } };
   const secrets = new Map(), host = { current: () => true, binding: () => 'local-fixture://vault', load: async () => value, save: async next => { value = next; },
     secrets: () => ({ getSecret: id => secrets.get(id) ?? null, setSecret: (id, key) => secrets.set(id, key) }) };

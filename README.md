@@ -2,7 +2,7 @@
 
 Bring selected Yoofloe Calendar records into your Obsidian vault as Markdown.
 Keep plans, study notes, project context and focus history together, then
-optionally turn a selection into an AI draft with your own OpenAI or Gemini key.
+optionally turn a selection into an AI draft with your own OpenAI key.
 
 **Direct connection works on Android phones and tablets only.** Install
 **Yoofloe Calendar 1.8.4 or later** and **Obsidian 1.11.5 or later** on the same
@@ -38,7 +38,7 @@ metadata and references, rather than making a full media backup.
 Calendar import requires no model provider or paid service. AI starts off after
 every plugin load.
 
-1. Open **AI settings**, select **OpenAI** or **Google Gemini**, and choose a model.
+1. Open **AI settings** and choose an OpenAI model.
    **Custom** accepts an exact API model ID; examples appear beside the field.
 2. Save your own provider key locally, then enable AI for this session.
 3. In a Calendar preview, choose **Draft from selected records**. Select records,
@@ -47,10 +47,9 @@ every plugin load.
    Review the result before saving it as a new note in
    `Yoofloe Calendar/AI drafts/`.
 
-Keys are stored through Obsidian secret storage with separate vault-bound IDs
-for OpenAI and Gemini, outside this plugin's vault files. The model choice is a
-local setting; the enable switch is not persisted. Switching providers turns AI
-off and never reuses the other provider's key. Other trusted Obsidian plugins
+Your key is stored through Obsidian secret storage with a vault-bound ID,
+outside this plugin's vault files. The model choice is a
+local setting; the enable switch is not persisted. Other trusted Obsidian plugins
 share Obsidian's trust boundary.
 
 Only the explicit generation action contacts a provider. Settings, model
@@ -66,15 +65,6 @@ prices and data handling depend on your provider account:
 - [OpenAI models](https://developers.openai.com/api/docs/models),
   [pricing](https://developers.openai.com/api/docs/pricing) and
   [data controls](https://developers.openai.com/api/docs/guides/your-data).
-- [Gemini models](https://ai.google.dev/gemini-api/docs/models),
-  [pricing](https://ai.google.dev/gemini-api/docs/pricing) and
-  [data terms](https://ai.google.dev/gemini-api/terms).
-
-Google's free and paid API tiers have different data-use terms. Google may use
-free-tier content to improve products; the same notice is shown in settings.
-Gemini 4 Argon has no free tier. Choose the Economy option when you want an
-economical starting point; choosing it does not guarantee a free API request.
-
 ## Privacy and network use
 
 Ordinary Calendar import needs no Yoofloe account, server database, cloud relay
@@ -93,9 +83,7 @@ Optional generation sends only the reviewed prompt and selected snapshot
 content directly to the chosen provider, without the vault name or a Yoofloe
 relay. Related-record IDs inside selected snapshots are included in the review.
 OpenAI uses `https://api.openai.com/v1/responses` with `store: false`; that setting
-does not promise zero retention under every OpenAI policy. Gemini uses
-`https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent`.
-Keys are sent in request headers, never URLs. The plugin does not execute model
+does not promise zero retention under every OpenAI policy. Keys are sent in request headers, never URLs. The plugin does not execute model
 tool calls or modify source records from an AI response.
 
 ## Development

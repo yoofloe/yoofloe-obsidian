@@ -89,27 +89,26 @@ Cancellation removes only an unchanged request marker owned by the current
 session. After a verified import, unchanged authenticated reply files are also
 removed. Modified or uncertain files are preserved rather than deleted.
 
-## Optional AI: OpenAI or Google Gemini
+## Optional OpenAI
 
 AI is off after every plugin load and is not needed for Calendar import.
 On Android, open **AI settings** in the companion's plugin settings or in a
-Calendar snapshot preview. Choose OpenAI or Google Gemini, select a model from
-the drop-down and enter your own key for that provider. The plugin does not fetch a model list or verify keys remotely.
+Calendar snapshot preview. Choose an OpenAI model from the drop-down and enter your own key. The plugin does not fetch a model list or verify keys remotely.
 The key is stored through Obsidian secret storage, outside this plugin's vault
 files. This is not a promise of an operating-system keystore or isolation from
 other trusted Obsidian plugins. The model choice is a local setting;
-the enable switch is never persisted. Each provider has its own vault-bound
-secret ID; switching providers disables AI and does not reuse the other key.
+the enable switch is never persisted. Disabled provider data is retained but
+its keys are not read and it cannot generate requests in this release.
 
 To use it later:
 
-1. Choose a provider and model, save the model and its key locally, then enable AI for this session.
+1. Choose an OpenAI model, save the model and key locally, then enable OpenAI for this session.
 2. In a current Calendar preview, choose **Draft from selected records**.
 3. Select up to 50 snapshots (none are preselected), write a prompt, and review
    the exact content, including any relationship identifiers in the snapshots.
    The vault name is omitted.
 4. Explicitly approve transmission to the named provider and possible API charges,
-   then choose **Generate once with OpenAI** or **Generate once with Gemini**.
+   then choose **Generate once with OpenAI**.
    One request goes directly to the selected provider, with no hosted Yoofloe relay.
 5. Review the result and optionally save a new literal Markdown note under
    `Yoofloe Calendar/AI drafts`. It cannot modify Calendar or award Flow points.
@@ -134,39 +133,16 @@ and [data controls](https://developers.openai.com/api/docs/guides/your-data).
 
 Automated checks use synthetic keys and injected responses, with no provider
 requests. OpenAI has additionally completed an owner-approved physical-phone
-request; Gemini live authentication remains unverified without a user-provided
-Google AI Studio key. Test evidence is kept locally, outside release assets.
+request. Test evidence is kept locally, outside release assets. Dormant provider
+checks are skipped in the current public release.
 
-### Google Gemini model choices
+### Dormant provider source
 
-The bundled Google text models were checked against the official
-[Gemini models](https://ai.google.dev/gemini-api/docs/models) and
-[pricing](https://ai.google.dev/gemini-api/docs/pricing) on **2026-11-08**:
-
-| Choice | Model ID | Intended use |
-| --- | --- | --- |
-| Gemini 3.5 Flash-Lite (recommended) | `gemini-3.5-flash-lite` | Economical summaries, translation and simple drafts |
-| Gemini 3.8 Flash | `gemini-3.8-flash` | Latest Flash model for more demanding work |
-| Gemini 4 Argon | `gemini-4-argon` | Latest flagship reasoning model; paid tier only |
-
-Custom IDs remain editable with examples. The curated choices are not an
-inventory of a user's access. Opening settings and selecting a model do not
-fetch Google models or test a key.
-
-Gemini sends a single non-streaming `generateContent` request directly to
-`https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent`.
-The Google key is sent in `x-goog-api-key`, never a URL, note or settings file.
-There is no plugin output-token cap, tool execution, automatic retry, grounding,
-explicit cached-content resource or Yoofloe relay. Only non-thought model text
-is displayed. Provider-limited partial output can be reviewed and saved.
-Thinking-token usage is shown when Google reports it, separately from candidate
-output tokens; reasoning can incur charges.
-
-Google's free and paid API tiers have different data-use terms. Google may use
-free-tier content to improve products; this warning and the official
-[data terms](https://ai.google.dev/gemini-api/terms) appear in settings. Do not
-assume an API call is free because Gemini is selected or because a request
-fails. Account tier, quota, availability, price and retention remain with Google.
+The Gemini implementation, curated catalog and stored provider data are retained
+for a future release. Gemini is not registered in the public UI or session,
+its modules are excluded from the public browser bundle, and an older saved
+provider choice falls back to OpenAI without deleting the saved data or keys.
+Reactivation requires an owner-approved provider registry/adapter change.
 
 ### OpenAI model choices and direct entry
 

@@ -4,7 +4,6 @@ import { CalendarSession, type TransferStore } from "./session";
 import { saveDelivery, type NoteStore } from "./notes";
 import { AiPreferences } from "./ai-preferences";
 import { OPENAI_ADAPTER } from "./openai";
-import { GEMINI_ADAPTER } from "./gemini";
 import { AiSession } from "./ai-session";
 import { AiDraftModal, AiSettingsModal, type AiContext } from "./ai-modals";
 import { recordLabel } from "./record-types";
@@ -48,7 +47,7 @@ export default class CalendarCompanionPlugin extends Plugin {
       const current = () => this.live && Platform.isAndroidApp && this.app.vault === owner && owner.getName() === name;
       const preferences = new AiPreferences({ current, binding: () => owner.adapter.getResourcePath(""), load: () => this.loadData(), save: value => this.saveData(value),
         secrets: () => requireApiVersion("1.11.5") && typeof this.app.secretStorage?.getSecret === "function" && typeof this.app.secretStorage?.setSecret === "function" ? this.app.secretStorage : null });
-      const session = new AiSession({ adapters: [OPENAI_ADAPTER, GEMINI_ADAPTER], current, key: provider => preferences.key(provider), transport: async request => {
+      const session = new AiSession({ adapters: [OPENAI_ADAPTER], current, key: provider => preferences.key(provider), transport: async request => {
         if (!current()) throw Error("Vault changed");
         // Optional BYOK feature: this is the only network call. See README, Optional AI.
         const response = await requestUrl(request); return { status: response.status, text: response.text };
@@ -74,7 +73,7 @@ class CompanionSettings extends PluginSettingTab {
     new Setting(this.containerEl).setName(Platform.isAndroidApp ? "Local Calendar connection" : "Direct connection is not supported on this platform")
       .setDesc("Review selected text snapshots and save ordinary Markdown notes. No Yoofloe account, model provider, or hosted relay is required.")
       .addButton(button => button.setButtonText(Platform.isAndroidApp ? "Connect Calendar" : "View requirements").onClick(() => this.companion.openCompanion()));
-    if (Platform.isAndroidApp) new Setting(this.containerEl).setName("AI drafts (optional; off by default)").setDesc("Choose OpenAI or Gemini and use your own API key for approved drafts. API charges apply only if you choose to generate.")
+    if (Platform.isAndroidApp) new Setting(this.containerEl).setName("AI drafts (optional; off by default)").setDesc("Use your own OpenAI API key for approved drafts. API charges apply only if you choose to generate.")
       .addButton(button => button.setButtonText("AI settings").onClick(() => this.companion.openAiSettings()));
   }
 }
