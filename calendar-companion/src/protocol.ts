@@ -48,9 +48,15 @@ export function assertId(value: unknown): asserts value is string {
   if (typeof value !== "string" || !uuid.test(value)) throw Error("Invalid transfer identity.");
 }
 
+/** Reject ASCII controls in names/IDs without constructing a control-character regex. */
+function hasControlCharacters(value: string): boolean {
+  for (let i = 0; i < value.length; i++) { const code = value.charCodeAt(i); if (code < 32 || code === 127) return true; }
+  return false;
+}
+
 /** Create a one-use request. The random key stays in the selected vault, never in a URL. */
 export function createRequest(vaultName: string, now = Date.now()): Request {
-  if (!vaultName || encoder.encode(vaultName).length > 256 || /[\x00-\x1f\x7f]/.test(vaultName)) throw Error("This vault name is not supported.");
+  if (!vaultName || encoder.encode(vaultName).length > 256 || hasControlCharacters(vaultName)) throw Error("This vault name is not supported.");
   const requestId = crypto.randomUUID(); assertId(requestId);
   return { format: "yoofloe.calendar.request", version: TRANSPORT_VERSION, requestId,
     vault: encode(encoder.encode(vaultName)), nonce: encode(crypto.getRandomValues(new Uint8Array(32))),
@@ -83,7 +89,7 @@ export function validateDelivery(value: unknown, request: Request): Delivery {
   for (const record of value.records) {
     shape(record, ["id", "kind", "sourceId", "revision", "title", "text", "date"]); assertId(record.id);
     if (!isRecordKind(record.kind) || !Number.isSafeInteger(record.revision) || (record.revision as number) < 1) throw Error("Invalid Calendar record.");
-    if (typeof record.sourceId !== "string" || !record.sourceId || encoder.encode(record.sourceId).length > 1000 || /[\x00-\x1f\x7f]/.test(record.sourceId)) throw Error("Invalid source identity.");
+    if (typeof record.sourceId !== "string" || !record.sourceId || encoder.encode(record.sourceId).length > 1000 || hasControlCharacters(record.sourceId)) throw Error("Invalid source identity.");
     if (typeof record.title !== "string" || encoder.encode(record.title).length > 4096 || typeof record.text !== "string" || encoder.encode(record.text).length > 256 * 1024) throw Error("A record is too large for this transfer.");
     if (record.date !== null && (typeof record.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(record.date) || Number.isNaN(Date.parse(record.date)) || new Date(record.date).toISOString().slice(0, 10) !== record.date)) throw Error("Invalid Calendar date.");
     const identity = `${record.kind}:${record.id}`;

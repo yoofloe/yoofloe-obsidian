@@ -1,10 +1,7 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   verify:
@@ -38,6 +35,3 @@ jobs:
 
       - name: Build plugin
         run: npm run build
-
-      - name: Build MCP wrapper
-        run: npm run build:mcp

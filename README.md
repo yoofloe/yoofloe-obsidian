@@ -1,136 +1,115 @@
-# Yoofloe for Obsidian
+# Yoofloe Calendar Companion
 
-Yoofloe for Obsidian brings selected, personal Yoofloe context into your Obsidian vault. It can create grounded Markdown notes through **your own Vertex AI project** and can safely capture approved personal notes or tasks back to Yoofloe.
+Bring selected Yoofloe Calendar records into your Obsidian vault as Markdown.
+Keep plans, study notes, project context and focus history together, then
+optionally turn a selection into an AI draft with your own OpenAI or Gemini key.
 
-The plugin and the separate Yoofloe Obsidian MCP wrapper are available to Yoofloe Free and Pro users. Neither includes a Yoofloe-provided model or Yoofloe model credits:
+**Direct connection works on Android phones and tablets only.** Install
+**Yoofloe Calendar 1.8.4 or later** and **Obsidian 1.11.5 or later** on the same
+device and Android user profile. Desktop, iPhone and iPad cannot connect directly;
+imported Markdown remains readable and editable wherever you use your vault.
 
-- Direct plugin generation calls the Vertex AI project and model that **you** configure. Google Cloud usage and billing remain between you and Google Cloud.
-- The MCP wrapper lets a connected agent, such as Codex or Claude Code, use the model path that **you** configure for that agent. The agent provider's terms and billing apply.
+## Connect Calendar
 
-Public install guides also live at `https://www.yoofloe.com/docs/external-tools`.
+1. Open **Settings → Yoofloe Calendar Companion → Connect Calendar**.
+2. In Calendar, choose the **Yoofloe Calendar Inbox** folder inside your vault,
+   load records, select what to share and approve the transfer.
+3. Back in Obsidian, review the snapshots and choose **Save Markdown notes**.
 
-## Install
+Use a vault in local shared device storage, such as Documents. Android cannot
+grant Calendar access to an app-private vault. Calendar receives access to the
+selected inbox directory, rather than your whole vault. Requests expire after
+ten minutes; **Check reply** is available if the return callback was missed.
 
-### Community Plugin Store
+Notes, Calendar tasks/events, Study, Project, Garden and Flow records are
+supported, including their relationships and attachment references. Choose up
+to 50 snapshots per transfer, with title search and grouped record types.
+Trash is excluded unless explicitly included. Changing a page or filter clears
+the selection so you can review the new set.
 
-1. Open `Settings -> Community plugins -> Browse` in Obsidian.
-2. Search for `Yoofloe`.
-3. Install and enable the plugin.
+Each snapshot is saved as a new Markdown note under
+`Yoofloe Calendar/Snapshots v2/`. Identical imports are skipped. Notes you have
+edited are preserved. Editing imported Markdown does not modify Calendar or
+award Flow points. Original media files stay in Calendar; this transfers their
+metadata and references, rather than making a full media backup.
 
-### Manual fallback
+## Optional AI drafts
 
-1. Download the latest release assets from `https://github.com/yoofloe/yoofloe-obsidian/releases`.
-2. Copy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/yoofloe/`.
-3. Enable `Yoofloe` in Obsidian Community Plugins.
+Calendar import requires no model provider or paid service. AI starts off after
+every plugin load.
 
-### Yoofloe Obsidian MCP
+1. Open **AI settings**, select **OpenAI** or **Google Gemini**, and choose a model.
+   **Custom** accepts an exact API model ID; examples appear beside the field.
+2. Save your own provider key locally, then enable AI for this session.
+3. In a Calendar preview, choose **Draft from selected records**. Select records,
+   enter your request and review the exact content and destination.
+4. Approve the transmission and possible API charges, then generate once.
+   Review the result before saving it as a new note in
+   `Yoofloe Calendar/AI drafts/`.
 
-1. Download `yoofloe-obsidian-mcp-wrapper.zip` from the latest GitHub release.
-2. Unzip it somewhere local to the agent runtime.
-3. Configure the MCP client with `node`, the unzipped `mcp-server.js`, `YOOFLOE_PAT`, and `YOOFLOE_VAULT_PATH`.
-4. Keep real PAT values out of committed `.mcp.json`, shell profiles, logs, and prompts.
+Keys are stored through Obsidian secret storage with separate vault-bound IDs
+for OpenAI and Gemini, outside this plugin's vault files. The model choice is a
+local setting; the enable switch is not persisted. Switching providers turns AI
+off and never reuses the other provider's key. Other trusted Obsidian plugins
+share Obsidian's trust boundary.
 
-See `docs/mcp-wrapper.md` and `docs/agent-direct.md` for setup notes.
+Only the explicit generation action contacts a provider. Settings, model
+selection, local key storage, imports and saving notes make no provider calls.
+There are no automatic key checks, model-list requests or retries. A request
+already sent may still be billed if the connection fails or a window closes.
+The plugin sends no output-token cap; provider limits still apply, and longer
+responses or reasoning can cost more. Input is bounded to 50 records and 1 MiB.
 
-## Quick start
+The curated model lists were checked on **2026-11-08**. Availability, quotas,
+prices and data handling depend on your provider account:
 
-1. Install the plugin and open `Settings -> Yoofloe`.
-2. Click `Connect with Yoofloe web`, approve the pairing request, and return to Obsidian.
-3. For direct generation on desktop, choose `Your Vertex AI project`, add the desktop OAuth client and secret from **your** Google Cloud project, connect Google, and choose a Vertex model.
-4. Open `Yoofloe: Open AI Writer`, select only the Yoofloe sources you want to use, and choose `Generate note`.
-5. To use another AI provider, download the MCP wrapper and connect it to an MCP-capable agent that already uses your preferred model.
-6. Optional: open `Yoofloe Capture`, preview a memo, journal, or task card, and approve only the personal records you want to write back.
+- [OpenAI models](https://developers.openai.com/api/docs/models),
+  [pricing](https://developers.openai.com/api/docs/pricing) and
+  [data controls](https://developers.openai.com/api/docs/guides/your-data).
+- [Gemini models](https://ai.google.dev/gemini-api/docs/models),
+  [pricing](https://ai.google.dev/gemini-api/docs/pricing) and
+  [data terms](https://ai.google.dev/gemini-api/terms).
 
-## Direct Vertex AI setup
+Google's free and paid API tiers have different data-use terms. Google may use
+free-tier content to improve products; the same notice is shown in settings.
+Gemini 4 Argon has no free tier. Choose the Economy option when you want an
+economical starting point; choosing it does not guarantee a free API request.
 
-Direct plugin generation is desktop-only because Google desktop OAuth uses a local callback. It requires:
+## Privacy and network use
 
-- a Desktop App OAuth client ID and client secret from your Google Cloud project;
-- your Google Cloud project ID;
-- a Vertex AI model ID; and
-- a Google sign-in that authorizes that project.
+Ordinary Calendar import needs no Yoofloe account, server database, cloud relay
+or AI provider. Loading this plugin performs no transfer reads, secret reads or
+network requests. Only approved records are exported from Calendar. Calendar's
+app lock, Android folder approval and record approval remain in place.
 
-The client secret and refresh token are stored in Obsidian secure storage, not in `data.json`. Google access tokens stay in memory only. The plugin sends the selected Yoofloe context directly from Obsidian to your Vertex AI project; it does not send your Google OAuth credentials to Yoofloe.
+A transfer uses a one-use key and an authenticated encrypted reply in the vault
+inbox. The plugin verifies the current vault, request, expiry, format and bounds
+before permitting create-only writes. Your own vault sync tools may copy those
+temporary files. Processes and trusted plugins that already have vault access
+are not isolated by this exchange. Imported source text and saved AI output are
+rendered literally, without executable HTML, remote images or active embeds.
 
-Vertex AI availability, pricing, retention, and terms depend on your Google Cloud project and configuration. Review those terms before sending private or sensitive content.
+Optional generation sends only the reviewed prompt and selected snapshot
+content directly to the chosen provider, without the vault name or a Yoofloe
+relay. Related-record IDs inside selected snapshots are included in the review.
+OpenAI uses `https://api.openai.com/v1/responses` with `store: false`; that setting
+does not promise zero retention under every OpenAI policy. Gemini uses
+`https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent`.
+Keys are sent in request headers, never URLs. The plugin does not execute model
+tool calls or modify source records from an AI response.
 
-## Yoofloe access and boundaries
+## Development
 
-- Yoofloe uses a `pat_yfl_...` Personal Access Token to fetch read-only, personal-only context. Tokens expire after 90 days unless regenerated sooner.
-- Capture writeback requires a separate read-write pairing approval and remains personal-only.
-- The plugin and MCP wrapper do not include couple/shared exports and a PAT cannot decrypt Yoofloe v2 zero-knowledge ciphertext by itself.
-- Your vault remains local unless you explicitly include selected text or current-note content in a Writer request, or type/select text for Capture.
-- Writer generation uses only the Yoofloe sources you choose. Finance and Business sources are marked sensitive and are off by default.
-- Yoofloe Capture is preview-first: it can create approved personal Journal/Memo records, create or complete personal Schedule tasks, and make limited soft deletes. It does not expose folders, bulk mutation, hard delete, Finance, Business, or couple/shared writeback in v1.
+```text
+npm ci
+npm run check
+npm run lint
+npm test
+npm run build
+```
 
-## MCP model choice
+Release assets are `main.js`, `manifest.json` and `styles.css` from the committed
+root build. The plugin uses the existing community ID `yoofloe`.
 
-The MCP wrapper supplies PAT-authenticated, bounded Yoofloe tools and vault-safe output boundaries. It does not select or call an AI model. Your MCP client or connected agent selects its own provider, model, credentials, and billing path.
-
-## Common errors
-
-- Token verification uses a GET status request and does not collect Schedule, Garden, or other personal domain records. Deploy the matching backend before installing this update. An older backend returns an update-required diagnostic; the client never falls back to a data request for verification.
-- The MCP server can start with incomplete configuration so its session-status tool can explain missing PAT or vault settings. Content and local-write tools are exposed only after configuration is valid.
-- Empty sources, omitted encrypted text and unavailable monetary totals are shown in generated Writer notes. Combined Finance amounts are unavailable when currencies differ or required amounts/currencies are unreadable.
-- Writer currently requests all selected sources; automatic prompt-based source reduction is not enabled. Raw context is an explicit advanced choice.
-
-- `Yoofloe API token is missing`: reconnect through `Settings -> Yoofloe`, or use the manual PAT field.
-- `Configure your own Vertex AI project`: finish the provider setup in the plugin, or use the MCP wrapper with a compatible agent.
-- `Reconnect Google`: the local Google OAuth session expired or was revoked; reconnect from plugin settings.
-- `Add your Google Cloud Project ID`: use the project ID, not the numeric project number.
-- `Open a Markdown note`: open a Markdown note before choosing `Current note` as the destination.
-- `Your Yoofloe token expired` or `was revoked`: reconnect Yoofloe to obtain an active token.
-- `Review the current External AI Access notice`: open Yoofloe Settings and review the active external-access notice.
-- `The Yoofloe connection changed`: retry using the account and endpoint currently selected. Delayed results from the previous connection are discarded.
-
-## Security and privacy
-
-- All network traffic uses Obsidian `requestUrl`.
-- A Yoofloe PAT is required for Yoofloe context and writeback endpoints.
-- Direct Vertex AI generation uses your own OAuth credentials and provider project. The plugin never sends those credentials to Yoofloe.
-- MCP generation uses the provider configured in the agent you choose. That provider is a user-selected third party, not a Yoofloe model provider for this workflow.
-- Google Cloud and agent-provider handling, including pricing and retention, are governed by the provider relationship you choose.
-- Review Yoofloe's AI Features Notice before enabling an external AI workflow.
-
-## Data flow
-
-1. Obsidian fetches a personal-only Yoofloe context bundle with your PAT.
-2. Direct Writer generation sends the selected bundle and optional explicitly enabled current-note context to your Vertex AI project from Obsidian.
-3. MCP generation sends context only when your connected agent invokes an MCP tool, then the agent uses its own configured model path.
-4. Capture calls `obsidian-write-preview`, shows candidate cards, and calls `obsidian-write-execute` only for cards you approve.
-
-The `life` domain includes Activity Log entries, Habit Tracker definitions, habit date check-ins, goals, and study evidence.
-
-## Domains contacted
-
-- `https://hhiyerojemcujzcmlzao.supabase.co/functions/v1/obsidian-data-api`
-- `https://hhiyerojemcujzcmlzao.supabase.co/functions/v1/obsidian-gardener-api`
-- `https://hhiyerojemcujzcmlzao.supabase.co/functions/v1/obsidian-write-preview`
-- `https://hhiyerojemcujzcmlzao.supabase.co/functions/v1/obsidian-write-execute`
-- `https://accounts.google.com` during Google OAuth connection
-- `https://oauth2.googleapis.com` for Google OAuth token exchange and refresh
-- `https://*.aiplatform.googleapis.com` when you use your Vertex AI project
-
-## Community Plugin review notes
-
-The Community Plugin payload contains only `main.js`, `manifest.json`, and `styles.css`. It:
-
-- works on desktop, tablet, and mobile for pairing and Capture;
-- uses desktop-only direct Vertex AI setup for generation;
-- requires a Yoofloe `pat_yfl_...` token;
-- writes generated Markdown locally into the vault;
-- can write only explicitly approved personal Capture actions after a separate read-write pairing approval; and
-- ships the MCP wrapper as a separate GitHub release asset, not in the Community Plugin Store payload.
-
-## AI document commands
-
-- `Yoofloe: Open AI Writer`
-- `Yoofloe: Open Yoofloe Capture`
-- `Create first Yoofloe AI note`
-- `Create MCP setup note`
-- `AI Insight Brief`
-- `AI Decision Memo`
-- `AI Action Plan`
-- `AI Deep Dive`
-
-The Writer provides `Daily review`, `Weekly plan`, `Decision memo`, `Finance snapshot`, and `Free prompt`. Library is available as a selected personal context source. `AI Deep Dive` asks for a focus instruction before generation.
+[Report an issue](https://github.com/yoofloe/yoofloe-obsidian/issues) ·
+[MIT license](LICENSE)

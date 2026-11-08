@@ -18,7 +18,7 @@ for(const platform of ['desktop','ios','android-tablet'])test(`${platform}: plug
   class Modal {constructor(app){this.app=app;this.contentEl=new Element();}open(){this.onOpen();}close(){this.onClose();}}
   class PluginSettingTab {constructor(app,plugin){this.app=app;this.plugin=plugin;this.containerEl=new Element();}}
   class Setting {
-    setName(text){messages.push(text);return this;}setDesc(text){messages.push(text);return this;}
+    setHeading(){return this;}setName(text){messages.push(text);return this;}setDesc(text){messages.push(text);return this;}
     addButton(callback){const button={setButtonText(){return button;},setCta(){return button;},setDisabled(){return button;},onClick(){return button;}};callback(button);return this;}
   }
   const sdk={Plugin,Modal,PluginSettingTab,Setting,App:class{},TFolder:class{},Notice:class{constructor(text){messages.push(text);}},Platform:{isAndroidApp:platform==='android-tablet',isPhone:false,isIosApp:platform==='ios'}};

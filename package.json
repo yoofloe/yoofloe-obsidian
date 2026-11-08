@@ -1,26 +1,15 @@
 {
   "name": "obsidian-yoofloe",
-  "version": "0.3.31",
-  "description": "Yoofloe AI insight documents grounded in your data.",
+  "version": "0.4.0",
+  "description": "Local Yoofloe Calendar snapshots and optional provider-key AI drafts for Android Obsidian.",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node scripts/test.mjs",
+    "test": "node calendar-companion/build.mjs --test && node --test calendar-companion/tests/*.test.mjs",
     "build": "node esbuild.config.mjs production",
-    "build:mcp": "node esbuild.mcp.mjs production",
-    "package:mcp": "node scripts/package-mcp-wrapper.mjs",
-    "dev": "node esbuild.config.mjs --watch",
-    "dev:mcp": "node esbuild.mcp.mjs --watch",
-    "start:mcp": "node mcp-server.js",
     "check": "tsc --noEmit",
-    "lint": "eslint src",
-    "security:audit": "npm audit --audit-level=high",
-    "security:snyk:oss": "npx --yes snyk@1.1304.0 test --severity-threshold=high --fail-on=all",
-    "security:scan": "npm run security:audit && npm run security:snyk:oss"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.20.2",
-    "zod": "^3.25.76"
+    "lint": "eslint calendar-companion/src src/main.ts",
+    "security:audit": "npm audit --audit-level=high"
   },
   "devDependencies": {
     "@types/node": "^22.14.1",
@@ -30,11 +19,7 @@
     "eslint": "^9.39.4",
     "eslint-plugin-obsidianmd": "^0.2.4",
     "globals": "^17.5.0",
-    "obsidian": "^1.8.10",
+    "obsidian": "^1.11.5",
     "typescript": "^5.8.3"
-  },
-  "overrides": {
-    "@hono/node-server": "^1.19.14",
-    "hono": "^4.12.16"
   }
 }

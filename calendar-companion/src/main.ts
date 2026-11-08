@@ -9,12 +9,12 @@ import { AiSession } from "./ai-session";
 import { AiDraftModal, AiSettingsModal, type AiContext } from "./ai-modals";
 import { recordLabel } from "./record-types";
 
-const REQUIREMENTS = "Android phones and tablets only. Requires Obsidian and a compatible Yoofloe Calendar build on the same device and Android user profile. Direct connection is unavailable on desktop, iPhone, and iPad.";
+const REQUIREMENTS = "Android phones and tablets only. Requires Yoofloe Calendar 1.8.4 or later and Obsidian 1.11.5 or later on the same device and Android user profile. Direct connection is unavailable on desktop, iPhone, and iPad.";
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
 
 /** All writes are create-only and bound to the vault captured by the calling modal. */
 function noteStore(vault: Vault): NoteStore {
-  return { exists: async path => vault.getAbstractFileByPath(path) !== null, read: path => vault.adapter.read(path),
+  return { exists: path => Promise.resolve(vault.getAbstractFileByPath(path) !== null), read: path => vault.adapter.read(path),
     mkdir: async path => { const item = vault.getAbstractFileByPath(path); if (item && !(item instanceof TFolder)) throw Error("Folder conflict"); if (!item) await vault.createFolder(path); },
     create: async (path, text) => { await vault.create(path, text); } };
 }
@@ -68,9 +68,9 @@ export default class CalendarCompanionPlugin extends Plugin {
 class CompanionSettings extends PluginSettingTab {
   constructor(app: App, private readonly companion: CalendarCompanionPlugin) { super(app, companion); }
   display(): void {
-    this.containerEl.empty(); this.containerEl.createEl("h2", { text: "Yoofloe Calendar Companion" });
+    this.containerEl.empty(); new Setting(this.containerEl).setName("Connect your records").setHeading();
     this.containerEl.createEl("p", { text: REQUIREMENTS });
-    this.containerEl.createEl("p", { text: "Development preview: use the matching Calendar build with Obsidian Companion support. Older Calendar releases do not answer these requests." });
+    this.containerEl.createEl("p", { text: "Install or update Yoofloe Calendar on this device before connecting. Calendar versions before 1.8.4 do not support this connection." });
     new Setting(this.containerEl).setName(Platform.isAndroidApp ? "Local Calendar connection" : "Direct connection is not supported on this platform")
       .setDesc("Review selected text snapshots and save ordinary Markdown notes. No Yoofloe account, model provider, or hosted relay is required.")
       .addButton(button => button.setButtonText(Platform.isAndroidApp ? "Connect Calendar" : "View requirements").onClick(() => this.companion.openCompanion()));
@@ -108,7 +108,7 @@ class CompanionModal extends Modal {
     const el = this.contentEl; el.empty(); el.createEl("h2", { text: "Yoofloe Calendar Companion" });
     el.createEl("p", { text: REQUIREMENTS });
     if (!Platform.isAndroidApp) { el.createEl("p", { text: "Notes created on Android remain ordinary Markdown and can be read or edited here after transfer." }); return; }
-    el.createEl("p", { text: "Development preview. Both apps need the matching companion build. A shared-storage vault is required; Android cannot grant Calendar access to an app-private vault." });
+    el.createEl("p", { text: "Use a vault in shared device storage. Android cannot grant Calendar access to an app-private vault. Calendar 1.8.4 or later is required." });
     if (this.message) el.createEl("p", { text: this.message, cls: "calendar-companion-status", attr: { role: "status" } });
     const session = this.session;
     if (!session) return;
@@ -116,7 +116,7 @@ class CompanionModal extends Modal {
       el.createEl("p", { text: "Start a request, then in Calendar choose this vault's 'Yoofloe Calendar Inbox' folder. Select the records you want to share and approve the transfer." });
       el.createEl("p", { text: "The transfer uses temporary files in this vault. Your configured vault sync tools may copy those files. The companion itself does not upload them." });
       new Setting(el).addButton(button => button.setButtonText(this.saved ? "Start another request" : "Connect Calendar").setCta().setDisabled(this.busy).onClick(() => void this.start()));
-      new Setting(el).addButton(button => button.setButtonText("Get Yoofloe Calendar").onClick(() => window.open(STORE_URL, "_blank")));
+      new Setting(el).addButton(button => button.setButtonText("Get Yoofloe Calendar").onClick(() => this.contentEl.ownerDocument.defaultView?.open(STORE_URL, "_blank")));
       return;
     }
     const preview = session.preview;
@@ -148,7 +148,7 @@ class CompanionModal extends Modal {
   private async start(): Promise<void> {
     if (!this.session || this.busy || !this.current() || !Platform.isAndroidApp) return;
     this.busy = true; this.message = "";
-    try { const url = await this.session.start(); if (!this.current()) return; this.render(); window.open(url, "_blank"); }
+    try { const url = await this.session.start(); if (!this.current()) return; this.render(); this.contentEl.ownerDocument.defaultView?.open(url, "_blank"); }
     catch { this.message = "Calendar could not be opened. Install or update the matching companion build, then try again."; }
     finally { this.busy = false; this.render(); }
   }

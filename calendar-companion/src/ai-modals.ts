@@ -98,11 +98,11 @@ export class AiSettingsModal extends Modal {
     });
     el.createEl("p", { text: "AI starts off after each plugin load. Settings, key storage and the enable switch make no API calls. There are no automatic requests, key checks or retries." });
     if (this.message) el.createEl("p", { text: this.message, cls: "calendar-companion-status", attr: { role: "status" } });
-    const modelSetting = new Setting(el).setName("Model").setDesc("Not sure? Start with Economy (recommended). Selecting a model sends no API request.");
+    const modelSetting = new Setting(el).setName("Model").setDesc("Not sure? Start with economy (recommended). Selecting a model sends no API request.");
     const details = el.createDiv({ cls: "calendar-companion-model-details" });
     modelSetting.addDropdown(dropdown => {
       for (const model of catalog.models) dropdown.addOption(model.id, model.label);
-      dropdown.addOption(CUSTOM_MODEL_CHOICE, "Custom · Enter a model ID").setValue(this.modelChoice).setDisabled(this.busy);
+      dropdown.addOption(CUSTOM_MODEL_CHOICE, "Custom · enter a model ID").setValue(this.modelChoice).setDisabled(this.busy);
       dropdown.selectEl.setAttribute("aria-label", `${name} model`);
       dropdown.onChange(value => {
         if (value !== CUSTOM_MODEL_CHOICE && !findAiModel(this.provider, value)) return;
@@ -181,8 +181,8 @@ export class AiDraftModal extends Modal {
       return;
     }
     const list = el.createDiv({ cls: "calendar-companion-records" });
-    this.records.forEach((record, index) => new Setting(list).setName(record.title || "Untitled").setDesc(`${recordLabel(record.kind)}${record.date ? ` · ${record.date}` : ""}`)
-      .addToggle(toggle => toggle.setValue(this.selected.has(index)).onChange(value => { if (value) this.selected.add(index); else this.selected.delete(index); })));
+    this.records.forEach((record, index) => { new Setting(list).setName(record.title || "Untitled").setDesc(`${recordLabel(record.kind)}${record.date ? ` · ${record.date}` : ""}`)
+      .addToggle(toggle => toggle.setValue(this.selected.has(index)).onChange(value => { if (value) this.selected.add(index); else this.selected.delete(index); })); });
     new Setting(el).setName("Your request").addTextArea(input => { input.inputEl.rows = 4; input.inputEl.maxLength = 4000; input.inputEl.setAttribute("aria-label", `Your request to ${name}`); input.setPlaceholder("What would you like to draft?").setValue(this.prompt).onChange(value => { this.prompt = value; }); });
     el.createEl("p", { text: "Select up to 50 records across workspaces, with at most 1 MiB of prompt and content. Larger selections can increase API charges. Configure a provider and model, then enable AI in settings first." });
     new Setting(el).addButton(button => button.setButtonText("Review request").setDisabled(!this.options).onClick(() => this.prepare()));

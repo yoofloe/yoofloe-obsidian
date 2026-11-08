@@ -1,16 +1,16 @@
-# Yoofloe Calendar Companion - development preview
+# Yoofloe Calendar Companion - implementation notes
 
-Android phones and tablets only. Obsidian and a matching Calendar build with
+Android phones and tablets only. Obsidian and Yoofloe Calendar 1.8.4 or later with
 Obsidian Companion support must be installed in the same Android user profile
 on the same device. Direct connection is unavailable on desktop, iPhone and
 iPad. Created notes are ordinary Markdown and remain usable without the plugin.
 
-This development candidate is the Calendar-focused replacement for the earlier
-server-connected product. It is not yet the public release payload.
+The public plugin uses registry ID `yoofloe`. Root source, manifest and build
+commands package this Calendar-focused product. Historical releases remain in Git.
 
 ## Requirements and use
 
-- Obsidian 1.11.5 or later and the matching transport-v2 Calendar development candidate.
+- Obsidian 1.11.5 or later and the Yoofloe Calendar 1.8.4 or later with transport v2.
 - A vault in local device/shared storage, such as Documents. Android cannot
   grant the Calendar app access to an app-private vault through this workflow.
 - Explicit approval for the vault's `Yoofloe Calendar Inbox` directory and the
