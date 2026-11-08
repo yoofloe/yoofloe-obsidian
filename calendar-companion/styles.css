@@ -1,4 +1,5 @@
-.calendar-companion { max-width: 680px; }
+.calendar-companion { max-width: 680px; display: block; overflow-y: auto; }
+.calendar-companion > * { flex-shrink: 0; }
 .calendar-companion .calendar-companion-records { max-height: 45vh; overflow: auto; }
 .calendar-companion section { padding: 0.75rem; border: 1px solid var(--background-modifier-border); border-radius: 0.5rem; margin-block: 0.75rem; }
 .calendar-companion pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }

@@ -1,4 +1,5 @@
 import { type Delivery, type RecordSnapshot } from "./protocol";
+import { type OpenAiDraft } from "./openai";
 const encoder = new TextEncoder();
 export interface NoteStore {
   exists(path: string): Promise<boolean>; read(path: string): Promise<string>;
@@ -38,4 +39,15 @@ export async function saveDelivery(delivery: Delivery, store: NoteStore, guard: 
     if (!item.exists) { await store.create(item.path, item.text); created++; }
   }
   return { created, skipped: planned.length - created };
+}
+
+/** Save an explicitly accepted AI draft as a new literal note; never update source records. */
+export async function saveAiDraft(draft: OpenAiDraft, store: NoteStore, guard: () => void): Promise<string> {
+  guard();
+  const path = `Yoofloe Calendar/AI drafts/${crypto.randomUUID()}.md`;
+  const text = `---\nyoofloe_calendar_ai_draft: 1\nincomplete: ${draft.incomplete}\n---\n\n# OpenAI draft\n\nAI-generated text. Review for accuracy. This note does not change Calendar or Flow rewards.\n\n${literal(draft.text)}\n`;
+  await store.mkdir("Yoofloe Calendar"); guard();
+  await store.mkdir("Yoofloe Calendar/AI drafts"); guard();
+  await store.create(path, text);
+  return path;
 }
