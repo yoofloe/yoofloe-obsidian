@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
-import { OpenAiSession } from '../dist/openai.js';
+import { OPENAI_ADAPTER } from '../dist/openai.js';
+import { GEMINI_ADAPTER } from '../dist/gemini.js';
+import { AiSession } from '../dist/ai-session.js';
 const { build } = createRequire(new URL('../../package.json', import.meta.url))('esbuild');
 const bundle = await build({ absWorkingDir: fileURLToPath(new URL('../', import.meta.url)), entryPoints: ['src/ai-modals.ts'], write: false, bundle: true, format: 'cjs', platform: 'browser', external: ['obsidian'], target: 'es2022' });
 
@@ -46,10 +48,16 @@ const button = (modal, text) => { const found = modal.contentEl.allSettings().fl
 const field = (modal, name) => { const row = modal.contentEl.allSettings().find(row => row.name === name); assert(row, `field ${name}`); return row.controls[0]; };
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 function fixture(initialModel = 'offline-test-model') {
-  const calls = [], files = new Map(); let key = null, savedOptions = { model: initialModel };
-  const preferences = { read: async () => ({ ...savedOptions }), hasKey: async () => Boolean(key), key: async () => key,
-    save: async options => { savedOptions = { ...options }; }, saveKey: async value => { key = value; }, clearKey: async () => { key = null; } };
-  const session = new OpenAiSession({ current: () => true, key: preferences.key, transport: async request => { calls.push(request); return { status: 200, text: JSON.stringify({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '<b>A synthetic draft</b>' }] }] }) }; } });
+  const calls = [], files = new Map(), keys = new Map(); let provider = 'openai';
+  const savedOptions = new Map([['openai', { model: initialModel }], ['gemini', { model: 'gemini-3.5-flash-lite' }]]);
+  const preferences = { readProvider: async () => provider, selectProvider: async value => { provider = value; },
+    read: async (name = 'openai') => ({ ...savedOptions.get(name) }), hasKey: async (name = 'openai') => Boolean(keys.get(name)), key: async (name = 'openai') => keys.get(name) ?? null,
+    save: async (options, name = 'openai') => { savedOptions.set(name, { ...options }); }, saveKey: async (value, name = 'openai') => { keys.set(name, value); }, clearKey: async (name = 'openai') => { keys.delete(name); } };
+  const session = new AiSession({ adapters: [OPENAI_ADAPTER, GEMINI_ADAPTER], current: () => true, key: preferences.key, transport: async request => {
+    calls.push(request);
+    if (request.url.includes('generativelanguage.googleapis.com')) return { status: 200, text: JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { role: 'model', parts: [{ text: '<b>A Gemini fixture draft</b>' }] } }] }) };
+    return { status: 200, text: JSON.stringify({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '<b>A synthetic draft</b>' }] }] }) };
+  } });
   return { ai: { session, preferences, current: () => true }, calls, files, store: { mkdir: async () => {}, create: async (path, text) => { assert(!files.has(path)); files.set(path, text); } } };
 }
 test('settings UI loads disabled, stores and removes a synthetic key with zero transport calls', async () => {
@@ -101,7 +109,7 @@ test('Custom preserves an existing model ID and its draft when switching presets
   const f = fixture('my-account-model-2026'), { OpenAiSettingsModal } = modals();
   const modal = new OpenAiSettingsModal({}, f.ai, () => {}); modal.open(); await settle();
   assert.equal(field(modal, 'Model').value, '__custom__'); assert.equal(field(modal, 'Custom model ID').value, 'my-account-model-2026');
-  assert.equal(field(modal, 'Custom model ID').placeholder, 'e.g. gpt-6-luna'); assert(modal.contentEl.allText().includes('not a ChatGPT display name or an API key'));
+  assert.equal(field(modal, 'Custom model ID').placeholder, 'e.g. gpt-6-luna'); assert(modal.contentEl.allText().includes('not a chat display name or an API key'));
   field(modal, 'Custom model ID').fire('my-new-model'); field(modal, 'Model').fire('gpt-6-luna'); field(modal, 'Model').fire('__custom__');
   assert.equal(field(modal, 'Custom model ID').value, 'my-new-model');
   field(modal, 'Custom model ID').fire(''); assert.equal(button(modal, 'Save model settings').disabled, true);
@@ -119,4 +127,45 @@ test('selecting and saving a model preserves an unsaved masked key; closing clea
   const kept = field(modal, 'No API key saved').inputEl; assert.equal(kept.value, 'sk-unsaved-offline-fixture-only');
   assert.equal(kept.type, 'password'); assert.equal(await f.ai.preferences.hasKey(), false); assert.equal(f.calls.length, 0);
   modal.close(); assert.equal(kept.value, '');
+});
+
+
+test('Gemini provider has a separate masked key, current model choices, Custom and no configuration calls', async () => {
+  const f = fixture('gpt-6-luna'), { AiSettingsModal } = modals();
+  await f.ai.preferences.saveKey('sk-openai-offline-fixture-only'); f.ai.session.enableForSession(true);
+  const modal = new AiSettingsModal({}, f.ai, () => {}); modal.open(); await settle();
+  const openAiInput = field(modal, 'API key saved locally').inputEl; openAiInput.value = 'sk-unsaved-openai-fixture-only';
+  field(modal, 'AI provider').fire('gemini'); await settle();
+  assert.equal(f.ai.session.enabled, false); assert.equal(field(modal, 'No API key saved').inputEl.value, '');
+  assert.equal(openAiInput.value, ''); assert.equal(field(modal, 'Enable Gemini for this session').disabled, true);
+  assert.equal(field(modal, 'Model').value, 'gemini-3.5-flash-lite');
+  assert.deepEqual([...field(modal, 'Model').choices.keys()], ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-4-argon', '__custom__']);
+  assert(modal.contentEl.allText().includes('Google may use free-tier API content'));
+  field(modal, 'Model').fire('__custom__'); field(modal, 'Custom model ID').fire('gemini-account-custom');
+  const geminiInput = field(modal, 'No API key saved').inputEl; geminiInput.value = 'AIza-unsaved-gemini-offline-fixture';
+  field(modal, 'AI provider').fire('openai'); await settle();
+  assert.equal(geminiInput.value, ''); assert.equal(field(modal, 'API key saved locally').inputEl.value, 'sk-unsaved-openai-fixture-only');
+  field(modal, 'AI provider').fire('gemini'); await settle();
+  assert.equal(field(modal, 'Custom model ID').value, 'gemini-account-custom');
+  assert.equal(field(modal, 'No API key saved').inputEl.value, 'AIza-unsaved-gemini-offline-fixture');
+  button(modal, 'Save model settings').fire(); await settle();
+  assert.equal((await f.ai.preferences.read('gemini')).model, 'gemini-account-custom');
+  assert.equal(await f.ai.preferences.hasKey('gemini'), false); assert.equal(f.calls.length, 0);
+  const finalInput = field(modal, 'No API key saved').inputEl; modal.close(); assert.equal(finalInput.value, '');
+});
+
+test('Gemini draft review names Google and uses the Gemini key only after explicit approval', async () => {
+  const f = fixture(), { AiDraftModal } = modals();
+  await f.ai.preferences.selectProvider('gemini'); await f.ai.preferences.saveKey('AIza-offline-gemini-fixture-not-real', 'gemini'); f.ai.session.enableForSession(true);
+  const record = { kind: 'study_session', title: 'Fixture study', text: 'Recorded 40 minutes', date: '2026-11-08' };
+  const modal = new AiDraftModal({}, f.ai, [record], f.store, () => true, () => {}); modal.open(); await settle();
+  field(modal, 'Fixture study').fire(true); field(modal, 'Your request').fire('Review this study record.'); button(modal, 'Review request').fire();
+  assert(modal.contentEl.allText().includes('Destination: Gemini API')); assert.equal(f.calls.length, 0);
+  assert.equal(button(modal, 'Generate once with Gemini').disabled, true);
+  field(modal, 'I approve this transmission and any Gemini API charges').fire(true);
+  button(modal, 'Generate once with Gemini').fire(); await settle();
+  assert.equal(f.calls.length, 1); assert(f.calls[0].url.endsWith('/gemini-3.5-flash-lite:generateContent'));
+  assert.equal(f.calls[0].headers['x-goog-api-key'], 'AIza-offline-gemini-fixture-not-real');
+  button(modal, 'Save draft as new note').fire(); await settle();
+  assert([...f.files.values()][0].includes('# Gemini draft')); assert([...f.files.values()][0].includes('&lt;b&gt;')); modal.close();
 });

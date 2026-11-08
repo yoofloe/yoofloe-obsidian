@@ -1,5 +1,5 @@
 import { type Delivery, type RecordSnapshot } from "./protocol";
-import { type OpenAiDraft } from "./openai";
+import { type AiDraft, type AiProvider } from "./ai-session";
 import { recordLabel } from "./record-types";
 const encoder = new TextEncoder();
 export interface NoteStore {
@@ -44,10 +44,10 @@ export async function saveDelivery(delivery: Delivery, store: NoteStore, guard: 
 }
 
 /** Save an explicitly accepted AI draft as a new literal note; never update source records. */
-export async function saveAiDraft(draft: OpenAiDraft, store: NoteStore, guard: () => void): Promise<string> {
+export async function saveAiDraft(draft: AiDraft, store: NoteStore, guard: () => void, provider: AiProvider = "openai"): Promise<string> {
   guard();
   const path = `Yoofloe Calendar/AI drafts/${crypto.randomUUID()}.md`;
-  const text = `---\nyoofloe_calendar_ai_draft: 1\nincomplete: ${draft.incomplete}\n---\n\n# OpenAI draft\n\nAI-generated text. Review for accuracy. This note does not change Calendar or Flow rewards.\n\n${literal(draft.text)}\n`;
+  const text = `---\nyoofloe_calendar_ai_draft: 1\nincomplete: ${draft.incomplete}\n---\n\n# ${provider === "gemini" ? "Gemini" : "OpenAI"} draft\n\nAI-generated text. Review for accuracy. This note does not change Calendar or Flow rewards.\n\n${literal(draft.text)}\n`;
   await store.mkdir("Yoofloe Calendar"); guard();
   await store.mkdir("Yoofloe Calendar/AI drafts"); guard();
   await store.create(path, text);

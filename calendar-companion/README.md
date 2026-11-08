@@ -5,9 +5,8 @@ Obsidian Companion support must be installed in the same Android user profile
 on the same device. Direct connection is unavailable on desktop, iPhone and
 iPad. Created notes are ordinary Markdown and remain usable without the plugin.
 
-This is a separate plugin (`yoofloe-calendar-companion`), not an update that
-replaces the existing cloud-based `yoofloe` plugin or its MCP wrapper. This
-preview is not a Community Plugin or Play Store release.
+This development candidate is the Calendar-focused replacement for the earlier
+server-connected product. It is not yet the public release payload.
 
 ## Requirements and use
 
@@ -90,27 +89,28 @@ Cancellation removes only an unchanged request marker owned by the current
 session. After a verified import, unchanged authenticated reply files are also
 removed. Modified or uncertain files are preserved rather than deleted.
 
-## Optional OpenAI
+## Optional AI: OpenAI or Google Gemini
 
-OpenAI is off after every plugin load and is not needed for Calendar import.
-On Android, open **OpenAI settings** in the companion's plugin settings or in a
-Calendar snapshot preview. Choose a model from the drop-down and enter your own
-OpenAI API key. The plugin does not fetch a model list or verify keys remotely.
+AI is off after every plugin load and is not needed for Calendar import.
+On Android, open **AI settings** in the companion's plugin settings or in a
+Calendar snapshot preview. Choose OpenAI or Google Gemini, select a model from
+the drop-down and enter your own key for that provider. The plugin does not fetch a model list or verify keys remotely.
 The key is stored through Obsidian secret storage, outside this plugin's vault
 files. This is not a promise of an operating-system keystore or isolation from
 other trusted Obsidian plugins. The model choice is a local setting;
-the enable switch is never persisted.
+the enable switch is never persisted. Each provider has its own vault-bound
+secret ID; switching providers disables AI and does not reuse the other key.
 
 To use it later:
 
-1. Choose a model and save the model and key locally, then enable OpenAI for this session.
+1. Choose a provider and model, save the model and its key locally, then enable AI for this session.
 2. In a current Calendar preview, choose **Draft from selected records**.
 3. Select up to 50 snapshots (none are preselected), write a prompt, and review
    the exact content, including any relationship identifiers in the snapshots.
    The vault name is omitted.
-4. Explicitly approve transmission and possible OpenAI API charges, then choose
-   **Generate once with OpenAI**. This sends one request directly to
-   `https://api.openai.com/v1/responses`, with no hosted Yoofloe relay.
+4. Explicitly approve transmission to the named provider and possible API charges,
+   then choose **Generate once with OpenAI** or **Generate once with Gemini**.
+   One request goes directly to the selected provider, with no hosted Yoofloe relay.
 5. Review the result and optionally save a new literal Markdown note under
    `Yoofloe Calendar/AI drafts`. It cannot modify Calendar or award Flow points.
 
@@ -132,11 +132,43 @@ OpenAI data policy. See the official
 [Responses API](https://developers.openai.com/api/reference/typescript/resources/responses/methods/create)
 and [data controls](https://developers.openai.com/api/docs/guides/your-data).
 
-The OpenAI path is tested only with synthetic keys, injected mock responses and
-local UI fixtures. No real model/API request or charge was made during this
-implementation; live authentication and model behavior remain unverified.
+Automated checks use synthetic keys and injected responses, with no provider
+requests. OpenAI has additionally completed an owner-approved physical-phone
+request; Gemini live authentication remains unverified without a user-provided
+Google AI Studio key. Test evidence is kept locally, outside release assets.
 
-### Model choices and direct entry
+### Google Gemini model choices
+
+The bundled Google text models were checked against the official
+[Gemini models](https://ai.google.dev/gemini-api/docs/models) and
+[pricing](https://ai.google.dev/gemini-api/docs/pricing) on **2026-11-08**:
+
+| Choice | Model ID | Intended use |
+| --- | --- | --- |
+| Gemini 3.5 Flash-Lite (recommended) | `gemini-3.5-flash-lite` | Economical summaries, translation and simple drafts |
+| Gemini 3.8 Flash | `gemini-3.8-flash` | Latest Flash model for more demanding work |
+| Gemini 4 Argon | `gemini-4-argon` | Latest flagship reasoning model; paid tier only |
+
+Custom IDs remain editable with examples. The curated choices are not an
+inventory of a user's access. Opening settings and selecting a model do not
+fetch Google models or test a key.
+
+Gemini sends a single non-streaming `generateContent` request directly to
+`https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent`.
+The Google key is sent in `x-goog-api-key`, never a URL, note or settings file.
+There is no plugin output-token cap, tool execution, automatic retry, grounding,
+explicit cached-content resource or Yoofloe relay. Only non-thought model text
+is displayed. Provider-limited partial output can be reviewed and saved.
+Thinking-token usage is shown when Google reports it, separately from candidate
+output tokens; reasoning can incur charges.
+
+Google's free and paid API tiers have different data-use terms. Google may use
+free-tier content to improve products; this warning and the official
+[data terms](https://ai.google.dev/gemini-api/terms) appear in settings. Do not
+assume an API call is free because Gemini is selected or because a request
+fails. Account tier, quota, availability, price and retention remain with Google.
+
+### OpenAI model choices and direct entry
 
 The bundled choices were checked against the official
 [OpenAI model catalog](https://developers.openai.com/api/docs/models) and
@@ -168,7 +200,8 @@ token limit and no automatic retry to obtain text.
 Mobile settings and prompt fields reserve extra scroll space while focused and
 scroll the editable field above overlaid keyboards. This also handles hosts
 whose viewport does not shrink when the keyboard opens. No field value is read
-by the keyboard-visibility helper.
+by the keyboard-visibility helper. Checkboxes and other controls that do not
+open the keyboard do not trigger the input-scroll adjustment.
 
 ## Local build and checks
 

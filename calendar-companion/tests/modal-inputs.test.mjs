@@ -9,7 +9,7 @@ function fixture() {
   const win = Object.assign(new Target(), { visualViewport: viewport, innerHeight: 900,
     requestAnimationFrame: cb => { frames.set(++id, cb); return id; }, cancelAnimationFrame: key => frames.delete(key),
     setTimeout: cb => { timers.set(++id, cb); return id; }, clearTimeout: key => timers.delete(key) });
-  const input = { matches: selector => selector === 'input, textarea', scrollIntoView: options => { assert.equal(options.block, 'start'); scrolls++; } };
+  const input = { type: 'text', matches: selector => selector.startsWith('textarea, input:not(') && !['checkbox','radio','button','submit','range','color','file','hidden'].includes(input.type), scrollIntoView: options => { assert.equal(options.block, 'start'); scrolls++; } };
   Object.defineProperty(input, 'value', { get() { throw Error('Never read protected input contents'); } });
   const doc = { defaultView: win, activeElement: input };
   const content = Object.assign(new Target(), { ownerDocument: doc, style: { paddingBottom: '12px' }, contains: value => value === input });
@@ -35,4 +35,11 @@ test('closing the modal cancels pending keyboard animation work and detaches lis
   f.content.dispatchEvent(new Event('focusin')); dispose(); f.frame(); f.settle();
   f.content.dispatchEvent(new Event('focusin')); f.win.dispatchEvent(new Event('resize')); f.viewport.dispatchEvent(new Event('resize'));
   assert.equal(f.frames.size, 0); assert.equal(f.timers.size, 0); assert.equal(f.scrolls(), 0); assert.equal(f.content.style.paddingBottom, '12px');
+});
+
+for (const type of ['checkbox','radio','button','range','color','file','hidden']) test(`${type} controls do not reserve keyboard space or move the record selection`, () => {
+  const f = fixture(); f.input.type = type;
+  const dispose = keepModalInputsVisible(f.content, () => true);
+  f.content.dispatchEvent(new Event('focusin')); f.frame(); f.settle();
+  assert.equal(f.scrolls(), 0); assert.equal(f.content.style.paddingBottom, '12px'); dispose();
 });

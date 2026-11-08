@@ -8,7 +8,7 @@ export function keepModalInputsVisible(content: HTMLElement, current: () => bool
   const reveal = () => {
     if (!live || !current()) return;
     const input = content.ownerDocument.activeElement;
-    if (!input || !content.contains(input) || !input.matches("input, textarea")) { reset(); return; }
+    if (!input || !content.contains(input) || !input.matches("textarea, input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=range]):not([type=color]):not([type=file]):not([type=hidden])")) { reset(); return; }
     const height = viewport?.height || win.innerHeight;
     // Extra scroll room also covers hosts whose layout/visual viewport does not shrink with the IME.
     content.style.paddingBottom = `${Math.ceil(height)}px`;
