@@ -9,6 +9,10 @@ optionally turn a selection into an AI draft with your own OpenAI key.
 device and Android user profile. Desktop, iPhone and iPad cannot connect directly;
 imported Markdown remains readable and editable wherever you use your vault.
 
+[Get Yoofloe Calendar for Android](https://play.google.com/store/apps/details?id=com.yoofloe.calendar)
+to keep your plans, notes, study and project progress together, with a quiet
+place to focus. The same link is available directly in this plugin's settings.
+
 ## Connect Calendar
 
 1. Open **Settings → Yoofloe Calendar Companion → Connect Calendar**.

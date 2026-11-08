@@ -69,7 +69,9 @@ class CompanionSettings extends PluginSettingTab {
   display(): void {
     this.containerEl.empty(); new Setting(this.containerEl).setName("Connect your records").setHeading();
     this.containerEl.createEl("p", { text: REQUIREMENTS });
-    this.containerEl.createEl("p", { text: "Install or update Yoofloe Calendar on this device before connecting. Calendar versions before 1.8.4 do not support this connection." });
+    new Setting(this.containerEl).setName("Yoofloe Calendar")
+      .setDesc("Keep your plans, notes, study and project progress together, with a quiet place to focus. Install the Android app on this device to connect your records.")
+      .addButton(button => button.setButtonText("Get Yoofloe Calendar").onClick(() => this.containerEl.ownerDocument.defaultView?.open(STORE_URL, "_blank")));
     new Setting(this.containerEl).setName(Platform.isAndroidApp ? "Local Calendar connection" : "Direct connection is not supported on this platform")
       .setDesc("Review selected text snapshots and save ordinary Markdown notes. No Yoofloe account, model provider, or hosted relay is required.")
       .addButton(button => button.setButtonText(Platform.isAndroidApp ? "Connect Calendar" : "View requirements").onClick(() => this.companion.openCompanion()));
