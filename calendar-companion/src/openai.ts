@@ -1,8 +1,8 @@
-import { type RecordSnapshot } from "./protocol";
+import { MAX_RECORDS, type RecordSnapshot } from "./protocol";
 import { findOpenAiModel } from "./openai-models";
 
 export const OPENAI_ENDPOINT = "https://api.openai.com/v1/responses";
-export const MAX_AI_INPUT_BYTES = 16 * 1024;
+export const MAX_AI_INPUT_BYTES = 1024 * 1024;
 const encoder = new TextEncoder();
 export interface OpenAiOptions { model: string }
 export interface OpenAiReview { readonly model: string; readonly input: string; readonly recordCount: number; readonly reasoningEffort?: "none" | "low" }
@@ -68,9 +68,9 @@ export class OpenAiSession {
     if (!current()) throw Error("This Calendar preview changed. Start a new review.");
     if (this.busy) throw Error("Wait for the current request to finish. It will not be retried automatically.");
     const selected = validateOpenAiOptions(options);
-    if (records.length < 1 || records.length > 10 || !prompt.trim() || encoder.encode(prompt).length > 4000) throw Error("Choose 1-10 records and a prompt of at most 4000 UTF-8 bytes.");
+    if (records.length < 1 || records.length > MAX_RECORDS || !prompt.trim() || encoder.encode(prompt).length > 4000) throw Error("Choose 1-50 records and a prompt of at most 4000 UTF-8 bytes.");
     const input = JSON.stringify({ request: prompt.trim(), calendar_records: records.map(record => ({ kind: record.kind, title: record.title, text: record.text, date: record.date })) });
-    if (encoder.encode(input).length > MAX_AI_INPUT_BYTES) throw Error("This selection exceeds the 16 KiB input limit. Choose fewer or smaller records.");
+    if (encoder.encode(input).length > MAX_AI_INPUT_BYTES) throw Error("This selection exceeds the 1 MiB input limit. Choose fewer or smaller records.");
     const review = Object.freeze({ ...selected, input, recordCount: records.length, reasoningEffort: findOpenAiModel(selected.model)?.effort });
     this.reviews.set(review, { epoch: this.epoch, used: false, current }); return review;
   }

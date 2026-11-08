@@ -5,6 +5,7 @@ import { saveDelivery, type NoteStore } from "./notes";
 import { AiPreferences } from "./ai-preferences";
 import { OpenAiSession } from "./openai";
 import { OpenAiDraftModal, OpenAiSettingsModal, type AiContext } from "./ai-modals";
+import { recordLabel } from "./record-types";
 
 const REQUIREMENTS = "Android phones and tablets only. Requires Obsidian and a compatible Yoofloe Calendar build on the same device and Android user profile. Direct connection is unavailable on desktop, iPhone, and iPad.";
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -123,7 +124,7 @@ class CompanionModal extends Modal {
       for (const record of preview.records) {
         const row = list.createEl("section");
         row.createEl("h3", { text: record.title || "Untitled" });
-        row.createEl("p", { text: `${record.kind}${record.date ? ` · ${record.date}` : ""} · revision ${record.revision}` });
+        row.createEl("p", { text: `${recordLabel(record.kind)}${record.date ? ` · ${record.date}` : ""} · revision ${record.revision}` });
         row.createEl("pre", { text: record.text });
       }
       new Setting(el).addButton(button => button.setButtonText("Save Markdown notes").setCta().setDisabled(this.busy).onClick(() => void this.save()));

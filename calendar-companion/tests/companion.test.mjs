@@ -4,17 +4,18 @@ import { readFile } from 'node:fs/promises';
 import { createRequest, launchUrl, encode, decode, aad, openReply, WINDOW_MS, INBOX } from '../dist/protocol.js';
 import { CalendarSession } from '../dist/session.js';
 import { saveDelivery, renderRecord } from '../dist/notes.js';
+import { RECORD_TYPES } from '../dist/record-types.js';
 const now = 1794132000000;
 const dataset = 'cbe6155c-5df4-41da-9463-23baa343557c';
-const record = { id: '556217a6-8374-3c85-a6f8-e8c2a01ad990', kind: 'task', revision: 1,
+const record = { id: '556217a6-8374-3c85-a6f8-e8c2a01ad990', kind: 'task', sourceId: '556217a6-8374-3c85-a6f8-e8c2a01ad990', revision: 1,
   title: 'Read chapter', text: 'Status: completed\nDue: 2026-11-08', date: '2026-11-08' };
-const data = request => ({ version: 1, requestId: request.requestId, datasetId: dataset, exportedAt: now, records: [{ ...record }] });
+const data = request => ({ version: 2, requestId: request.requestId, datasetId: dataset, exportedAt: now, records: [{ ...record }] });
 
 async function reply(request, value = data(request)) {
   const key = await crypto.subtle.importKey('raw', decode(request.key, 32), 'AES-GCM', false, ['encrypt']);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({ name:'AES-GCM',iv,additionalData:aad(request) },key,new TextEncoder().encode(JSON.stringify(value)));
-  return JSON.stringify({format:'yoofloe.calendar.reply',version:1,requestId:request.requestId,iv:encode(iv),ciphertext:encode(new Uint8Array(ciphertext))});
+  return JSON.stringify({format:'yoofloe.calendar.reply',version:2,requestId:request.requestId,iv:encode(iv),ciphertext:encode(new Uint8Array(ciphertext))});
 }
 function store() {
   const files = new Map(), directories = new Set();
@@ -38,6 +39,9 @@ test('wrong request, tampering, expiry, malformed dates and duplicate records fa
   const invalid=data(request);invalid.records[0].date='2026-02-30';await assert.rejects(openReply(await reply(request,invalid),request,now),/date/);
   const duplicate=data(request);duplicate.records.push({...record});await assert.rejects(openReply(await reply(request,duplicate),request,now),/duplicate/);
   const unknown=data(request);unknown.records[0].overwrite=true;await assert.rejects(openReply(await reply(request,unknown),request,now),/format/);
+  const kind=data(request);kind.records[0].kind='purchase_receipt';await assert.rejects(openReply(await reply(request,kind),request,now),/record/);
+  const source=data(request);source.records[0].sourceId='invalid\nsource';await assert.rejects(openReply(await reply(request,source),request,now),/source identity/);
+  const legacy=data(request);legacy.version=1;await assert.rejects(openReply(await reply(request,legacy),request,now),/version/);
 });
 test('unsupported platforms perform no storage I/O',async()=>{
   const forbidden=new Proxy({}, {get(){throw Error('unexpected storage access');}});
@@ -74,4 +78,24 @@ test('rendered plain text does not activate HTML, remote images, or Obsidian emb
 test('actual Kotlin-generated AES-GCM output opens in the production browser reader', {skip:!process.env.CALENDAR_INTEROP_VECTOR}, async()=>{
   const fixture=JSON.parse(await readFile(process.env.CALENDAR_INTEROP_VECTOR,'utf8'));
   assert.deepEqual(await openReply(fixture.reply,fixture.request,fixture.request.createdAt),fixture.plaintext);
+  assert.deepEqual(fixture.recordTypes.map(type=>[type.id,type.group,type.label]),RECORD_TYPES);
+  assert.equal(fixture.plaintext.records.length,36);
+});
+
+test('all record types preserve cross-kind identities in the v2 namespace without changing older snapshots',async()=>{
+  const disk=store(), request=createRequest('Test',now), delivery=data(request);
+  delivery.records=RECORD_TYPES.map(([kind])=>({...record,kind,sourceId:`native:${kind}`}));
+  const verified=await openReply(await reply(request,delivery),request,now);
+  const legacyPath=`Yoofloe Calendar/${dataset}/task-${record.id}-r1.md`;
+  disk.files.set(legacyPath,'Preserved old snapshot and private edits');
+  assert.deepEqual(await saveDelivery(verified,disk,()=>{}),{created:36,skipped:0});
+  assert.equal(disk.files.get(legacyPath),'Preserved old snapshot and private edits');
+  assert.equal([...disk.files.keys()].filter(path=>path.startsWith('Yoofloe Calendar/Snapshots v2/')).length,36);
+  assert.deepEqual(await saveDelivery(verified,disk,()=>{}),{created:0,skipped:36});
+});
+test('rendering hashes semantic fields in a fixed order and retains quoted native identifiers',async()=>{
+  const differentlyOrdered={date:record.date,text:record.text,title:record.title,revision:record.revision,sourceId:record.sourceId,kind:record.kind,id:record.id};
+  assert.equal(await renderRecord(dataset,record),await renderRecord(dataset,differentlyOrdered));
+  const text=await renderRecord(dataset,{...record,sourceId:'flow:operation:contains "quote"'});
+  assert(text.includes('source_native_id: "flow:operation:contains \\"quote\\""'));
 });

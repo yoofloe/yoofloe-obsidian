@@ -56,9 +56,9 @@ test('preset requests use a bounded short-draft profile; unknown custom models k
 test('invalid model, empty selection, excessive selection and oversized UTF-8 input send nothing', () => {
   const f = setup(); f.session.enableForSession(true);
   for (const bad of [{ model: '' }, { model: '../ key' }, { model: fakeKey }]) assert.throws(() => f.session.prepare([record], 'x', bad));
-  assert.throws(() => f.session.prepare([], 'x', options)); assert.throws(() => f.session.prepare(Array(11).fill(record), 'x', options));
+  assert.throws(() => f.session.prepare([], 'x', options)); assert.throws(() => f.session.prepare(Array(51).fill(record), 'x', options));
   assert.throws(() => f.session.prepare([record], ' ', options)); assert.throws(() => f.session.prepare([record], '한'.repeat(1400), options));
-  assert.throws(() => f.session.prepare([{ ...record, text: 'x'.repeat(17000) }], 'x', options), /16 KiB/);
+  assert.throws(() => f.session.prepare([{ ...record, text: 'x'.repeat(1024*1024) }], 'x', options), /1 MiB/);
   assert.equal(f.keyReads(), 0); assert.equal(f.calls.length, 0);
 });
 test('missing, malformed and failing local key reads never invoke the transport', async () => {

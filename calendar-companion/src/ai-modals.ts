@@ -5,6 +5,7 @@ import { CUSTOM_MODEL_CHOICE, DEFAULT_OPENAI_MODEL, findOpenAiModel, MODEL_CATAL
 import { type RecordSnapshot } from "./protocol";
 import { saveAiDraft, type NoteStore } from "./notes";
 import { keepModalInputsVisible } from "./modal-inputs";
+import { recordLabel } from "./record-types";
 
 export interface AiContext {
   session: OpenAiSession; preferences: AiPreferences; current(): boolean;
@@ -145,7 +146,7 @@ export class OpenAiDraftModal extends Modal {
     }
     if (this.review) {
       el.createEl("p", { text: `Destination: OpenAI. Model: ${this.review.model}. Output: model default, with no plugin token cap. ${this.review.recordCount} selected record(s).` });
-      el.createEl("p", { text: "This is the prompt and Calendar content that will be sent. Record IDs and the vault name are omitted." });
+      el.createEl("p", { text: "Review the prompt and selected record content below, including any related-record references. The vault name is not included." });
       el.createEl("pre", { text: JSON.stringify(JSON.parse(this.review.input), null, 2), cls: "calendar-companion-request" });
       new Setting(el).setName("I approve this transmission and any OpenAI API charges").addToggle(toggle => toggle.setValue(this.confirmed).setDisabled(this.busy).onChange(value => { this.confirmed = value; this.render(); }));
       new Setting(el)
@@ -155,10 +156,10 @@ export class OpenAiDraftModal extends Modal {
       return;
     }
     const list = el.createDiv({ cls: "calendar-companion-records" });
-    this.records.forEach((record, index) => new Setting(list).setName(record.title || "Untitled").setDesc(`${record.kind}${record.date ? ` · ${record.date}` : ""}`)
+    this.records.forEach((record, index) => new Setting(list).setName(record.title || "Untitled").setDesc(`${recordLabel(record.kind)}${record.date ? ` · ${record.date}` : ""}`)
       .addToggle(toggle => toggle.setValue(this.selected.has(index)).onChange(value => { if (value) this.selected.add(index); else this.selected.delete(index); })));
     new Setting(el).setName("Your request").addTextArea(input => { input.inputEl.rows = 4; input.inputEl.maxLength = 4000; input.inputEl.setAttribute("aria-label", "Your request to OpenAI"); input.setPlaceholder("What would you like to draft?").setValue(this.prompt).onChange(value => { this.prompt = value; }); });
-    el.createEl("p", { text: "Select 1–10 records; maximum 16 KiB of prompt and content. Configure a model and enable OpenAI in settings first." });
+    el.createEl("p", { text: "Select up to 50 records across workspaces, with at most 1 MiB of prompt and content. Larger selections can increase API charges. Configure a model and enable OpenAI in settings first." });
     new Setting(el).addButton(button => button.setButtonText("Review request").setDisabled(!this.options).onClick(() => this.prepare()));
   }
   private prepare(): void {

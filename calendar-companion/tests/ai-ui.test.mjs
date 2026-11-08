@@ -69,7 +69,7 @@ test('draft UI requires selection, review and per-request approval before a mock
   const modal = new OpenAiDraftModal({}, f.ai, [record], f.store, () => true, () => {}); modal.open(); await settle();
   assert.equal(field(modal, 'Fixture task').value, false); assert.equal(f.calls.length, 0);
   field(modal, 'Your request').fire('Prepare a checklist.'); button(modal, 'Review request').fire();
-  assert(modal.contentEl.allText().includes('Choose 1-10')); assert.equal(field(modal, 'Your request').inputEl.value, 'Prepare a checklist.');
+  assert(modal.contentEl.allText().includes('Choose 1-50')); assert.equal(field(modal, 'Your request').inputEl.value, 'Prepare a checklist.');
   field(modal, 'Fixture task').fire(true); button(modal, 'Review request').fire();
   assert.equal(f.calls.length, 0); assert(modal.contentEl.allText().includes('Status: pending')); assert(!modal.contentEl.allText().includes(record.id));
   assert.equal(button(modal, 'Generate once with OpenAI').disabled, true);

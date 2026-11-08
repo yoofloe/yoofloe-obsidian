@@ -11,7 +11,7 @@ preview is not a Community Plugin or Play Store release.
 
 ## Requirements and use
 
-- Obsidian 1.11.5 or later and the matching Calendar development candidate.
+- Obsidian 1.11.5 or later and the matching transport-v2 Calendar development candidate.
 - A vault in local device/shared storage, such as Documents. Android cannot
   grant the Calendar app access to an app-private vault through this workflow.
 - Explicit approval for the vault's `Yoofloe Calendar Inbox` directory and the
@@ -19,8 +19,11 @@ preview is not a Community Plugin or Play Store release.
 
 1. Open the companion and choose **Connect Calendar**.
 2. In Calendar, choose this vault's **Yoofloe Calendar Inbox** folder using the
-   Android folder picker. Choose Notes, Tasks or Events, then **Load records**.
-3. Select up to 50 text snapshots and choose **Approve and send**.
+   Android folder picker. Choose **All records** or a type in the grouped menu,
+   optionally search titles, then **Load records**.
+3. Browse bounded pages and select up to 50 snapshots, then **Approve and send**.
+   Changing a type, query or page clears selection. Trash is excluded unless
+   **Include records in Trash** is explicitly checked.
 4. Back in Obsidian, review the full snapshots and choose **Save Markdown notes**.
    **Check reply** is available if the app callback was missed.
 
@@ -28,10 +31,38 @@ Requests expire after ten minutes. Missing responses can mean a missing or old
 Calendar build, cancellation, an incorrect folder, or an expired request; they
 are not evidence that the app is definitely uninstalled.
 
-The preview makes read-only snapshots. Editing a note does not update Calendar
-tasks or award Flow points. Photos, rich formatting, reminders and recurrence
-remain in Calendar. Notes use dataset/kind/record/revision identities. Identical
-snapshots are skipped; independently edited destination files are preserved.
+The preview makes read-only text/metadata snapshots. Editing a note does not
+update Calendar tasks or award Flow points. Recurrence, reminder definitions,
+rich source text and related-record identifiers are literal data; importing
+does not schedule reminders or execute markup. Attachment metadata and source
+references are included, while original binary media remains in Calendar.
+Snapshots use dataset/kind/record/revision identities. Identical snapshots are
+skipped; independently edited destination files are preserved.
+
+### Workspace coverage
+
+The closed catalog contains 36 content types:
+
+| Workspace | Records |
+| --- | --- |
+| Notes | Notes and folders, full text, tags, dates, pin/color and attachment references |
+| Calendar | Tasks/folders/checklists, events, D-Days, templates and planner metadata |
+| Study | Sessions, folders, semesters, lectures, plans and milestones |
+| Project | Folders, projects, stages, income, expenses and exchange-rate entries |
+| Garden | Focus/break history, recorded durations and background reference |
+| Flow | Avatar/environment, characters/pets, places, assignments, bindings, progress, point history, owned content IDs and careers |
+| Relationships / media | Planner note links, Study/Project links, focus contexts/bindings and managed attachment metadata |
+
+Non-UUID native keys receive stable namespaced UUIDs, with the original source
+ID retained as quoted metadata. Sources without a revision get a stable content
+fingerprint that changes when their projection changes. Operational authority,
+keys, receipt secrets, internal outboxes and device execution markers are not
+content exports. Source values remain in the app.
+
+Transport v2 requires both matching preview builds. New Markdown goes under
+`Yoofloe Calendar/Snapshots v2/<dataset>/`; old preview files are retained. The
+new namespace prevents richer projections from overwriting older imports with
+the same source revision. This is not a full binary-media backup.
 
 ## Data and trust boundaries
 
@@ -74,8 +105,9 @@ To use it later:
 
 1. Choose a model and save the model and key locally, then enable OpenAI for this session.
 2. In a current Calendar preview, choose **Draft from selected records**.
-3. Select 1–10 snapshots (none are preselected), write a prompt, and review the
-   exact prompt and record text. Vault name and source IDs are omitted.
+3. Select up to 50 snapshots (none are preselected), write a prompt, and review
+   the exact content, including any relationship identifiers in the snapshots.
+   The vault name is omitted.
 4. Explicitly approve transmission and possible OpenAI API charges, then choose
    **Generate once with OpenAI**. This sends one request directly to
    `https://api.openai.com/v1/responses`, with no hosted Yoofloe relay.
@@ -88,7 +120,8 @@ make no API calls. Failed requests are never retried automatically. An
 already-sent request may still be charged even if the window closes or the
 connection fails; do not assume a failure means it was free.
 
-Input is bounded to 16 KiB. The plugin sends **no output-token cap** and ignores
+Input is bounded to 1 MiB and 50 selected records. Larger selections can cost
+more. The plugin sends **no output-token cap** and ignores
 the previous 512/4096-token settings. Output length uses the selected model's
 default; OpenAI's own limits still apply. Longer output can increase API charges.
 Partial text can be reviewed and saved, without an automatic retry. Bounded
