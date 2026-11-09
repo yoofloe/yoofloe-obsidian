@@ -71,8 +71,11 @@ export function createRequest(vaultName: string, now = Date.now()): RequestV2 {
 /** Query requests are separate from full v2 snapshots and bind to a stable vault identity. */
 export function createQuestionRequest(vaultName: string, vaultId: string, query: QuestionQuery, now = Date.now()): RequestV3 {
   assertId(vaultId); const base = createRequest(vaultName, now);
+  const q = validateQuestionQuery(query);
+  const canonical = Object.freeze({ areas: q.areas, period: q.period, from: q.from, through: q.through, zone: q.zone, terms: q.terms,
+    profile: q.profile, includeLinkedNotes: q.includeLinkedNotes, maxRecords: q.maxRecords, maxTextBytes: q.maxTextBytes });
   return { format: base.format, version: 3, requestId: base.requestId, vault: base.vault, vaultId,
-    nonce: base.nonce, key: base.key, createdAt: base.createdAt, expiresAt: base.expiresAt, query: validateQuestionQuery(query) };
+    nonce: base.nonce, key: base.key, createdAt: base.createdAt, expiresAt: base.expiresAt, query: canonical };
 }
 
 /** Expired and future-dated requests never authorize a delivery. */

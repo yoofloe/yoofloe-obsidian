@@ -15,6 +15,14 @@ const request = () => createQuestionRequest('Test vault',vaultId,query(),now);
 const record = () => ({id:crypto.randomUUID(),kind:'study_session',sourceId:'private-native-id',revision:1,title:'Polish study',text:'Recorded: 40 minutes. Planned: 90 minutes.',date:'2026-11-08'});
 const delivery = r => ({version:3,requestId:r.requestId,datasetId:crypto.randomUUID(),exportedAt:now,records:[record()],context:{scope:r.query,...resolvePeriod(r.query,r.createdAt),zone:r.query.zone,scanned:8,matched:1,partial:false,metrics:[{key:'study_recorded_seconds',value:2400},{key:'garden_measured_seconds',value:6}]}});
 
+test('browser request marker fixes every query field order regardless of caller insertion order',()=>{
+  const reversed=Object.fromEntries(Object.entries(query()).reverse());
+  const r=createQuestionRequest('Test vault',vaultId,reversed,now);
+  assert.deepEqual(Object.keys(r),['format','version','requestId','vault','vaultId','nonce','key','createdAt','expiresAt','query']);
+  assert.deepEqual(Object.keys(r.query),['areas','period','from','through','zone','terms','profile','includeLinkedNotes','maxRecords','maxTextBytes']);
+  assert.equal(JSON.stringify(r.query),JSON.stringify(query()));assert(Object.isFrozen(r.query));
+});
+
 test('Kotlin v3 AES-GCM opens in the real reader; vault identity and version prevent crossover',async()=>{
   const vector=JSON.parse(await readFile(new URL('fixtures/query-interop.json',import.meta.url),'utf8'));
   assert.deepEqual(await openReply(vector.reply,vector.request,vector.request.createdAt),vector.plaintext);
