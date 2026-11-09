@@ -141,7 +141,7 @@ export class YoofloeAiView extends ItemView {
     privacy.createEl("span", { text: `OpenAI · paid · ${w.mode === "ask" ? "read only" : `${w.mode === "organize" ? "organize" : "edit"} ${w.writeScope === "current" ? "note" : w.writeScope}`} · ${w.maximum} calls max`, cls: "y-ai-privacy-short" });
     privacy.setAttribute("title", "Data goes directly to OpenAI, including relevant note excerpts within the permitted scope. Local key storage does not make AI local. New notes may be created in the output folder.");
     const controls = dock.createDiv({ cls: "y-ai-row" });
-    this.button(controls, "Review data", () => void w.review(), w.busy);
+    this.button(controls, "Review data", () => { prompt.blur(); void w.review(); }, w.busy);
     const run = this.button(controls, w.busy ? "Stop" : "", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, !w.busy && (!w.ready || !w.configured || !w.prompt.trim()), w.busy ? "mod-warning" : "mod-cta");
     if (!w.busy) {
       run.createEl("span", { text: "Send to OpenAI", cls: "y-ai-run-full" });
