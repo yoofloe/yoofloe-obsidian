@@ -1,11 +1,11 @@
 # Yoofloe Calendar Companion
 
-Bring selected Yoofloe Calendar records into your Obsidian vault as Markdown.
-Keep plans, study notes, project context and focus history together, then
-optionally turn a selection into an AI draft with your own OpenAI key.
+Ask about your plans, notes, study, projects and focus history. The companion
+finds relevant records locally on your Android device, then lets you review
+the compact context before optionally generating a draft with your own OpenAI key.
 
 **Direct connection works on Android phones and tablets only.** Install
-**Yoofloe Calendar 1.8.4 or later** and **Obsidian 1.11.5 or later** on the same
+**Yoofloe Calendar 1.8.5 or later** and **Obsidian 1.11.5 or later** on the same
 device and Android user profile. Desktop, iPhone and iPad cannot connect directly;
 imported Markdown remains readable and editable wherever you use your vault.
 
@@ -13,9 +13,44 @@ imported Markdown remains readable and editable wherever you use your vault.
 to keep your plans, notes, study and project progress together, with a quiet
 place to focus. The same link is available directly in this plugin's settings.
 
-## Connect Calendar
+## Ask Calendar
 
-1. Open **Settings → Yoofloe Calendar Companion → Connect Calendar**.
+1. Open **Settings → Yoofloe Calendar Companion → Ask Calendar**.
+2. Enter a question, for example **Summarize my study and focus time this week**.
+   Check the suggested workspaces, dates and topic. **Adjust search** lets you
+   change these when needed; individual folders do not need to be selected.
+3. Choose **Find relevant records**. Calendar remembers your approved Inbox.
+   Android may require one folder choice on the first connection, or after its
+   permission is revoked. Select only **Yoofloe Calendar Inbox** inside this vault.
+4. In Calendar, check the scope and choose **Find relevant records** to approve
+   reading locally and returning compact matching excerpts to this vault.
+5. Back in Obsidian, review the sources and exact outgoing input. Choose
+   **Generate once with OpenAI** only if you approve sending that input and
+   any OpenAI API charges. Review the answer before saving a new draft note.
+
+Search itself makes no AI call. A small local planner recognizes common
+workspace/date phrases in English, Korean and Polish; it is not a general
+language model. Ambiguous questions ask for a workspace. The suggested topic
+is visible and can be edited or cleared. Empty results suggest changing the
+topic or dates, rather than silently reading all records.
+
+Search excludes Trash, unrelated workspaces and whole folder trees. Flow is
+included only when requested, and project financial entries only for a budget
+question. Linked notes are included only when linked to matching records.
+Metadata scanning is bounded to 512 candidates, results to 20 excerpts, and
+combined excerpt text to 32 KiB. Dates are anchored to the request's local day.
+Results declare partial coverage when capped or shortened. Recorded study time,
+measured Garden time and planned durations have different meanings.
+
+Question excerpts never enter the full-snapshot namespace. Existing records,
+Markdown files, model choices and vault-bound key IDs are preserved. Editing
+the question, scope or model requires a fresh applicable review. Every generation
+is one-use; failures are not retried automatically.
+
+## Import complete records manually
+
+1. Open **Settings → Yoofloe Calendar Companion → Import complete records**,
+   or choose **Import complete records manually** from the question screen.
 2. In Calendar, choose the **Yoofloe Calendar Inbox** folder inside your vault,
    load records, select what to share and approve the transfer.
 3. Back in Obsidian, review the snapshots and choose **Save Markdown notes**.
@@ -37,16 +72,18 @@ edited are preserved. Editing imported Markdown does not modify Calendar or
 award Flow points. Original media files stay in Calendar; this transfers their
 metadata and references, rather than making a full media backup.
 
-## Optional AI drafts
+## Optional AI settings
 
 Calendar import requires no model provider or paid service. AI starts off after
 every plugin load.
 
 1. Open **AI settings** and choose an OpenAI model.
    **Custom** accepts an exact API model ID; examples appear beside the field.
-2. Save your own provider key locally, then enable AI for this session.
-3. In a Calendar preview, choose **Draft from selected records**. Select records,
-   enter your request and review the exact content and destination.
+2. Save your own provider key locally. For **Ask Calendar**, no separate enable
+   switch or record-by-record selection is needed: the explicit **Generate once
+   with OpenAI** action approves just the displayed input and model.
+3. The advanced full-snapshot importer retains **Draft from selected records**,
+   its selection/review flow and session enable switch.
 4. Approve the transmission and possible API charges, then generate once.
    Review the result before saving it as a new note in
    `Yoofloe Calendar/AI drafts/`.
@@ -61,7 +98,8 @@ selection, local key storage, imports and saving notes make no provider calls.
 There are no automatic key checks, model-list requests or retries. A request
 already sent may still be billed if the connection fails or a window closes.
 The plugin sends no output-token cap; provider limits still apply, and longer
-responses or reasoning can cost more. Input is bounded to 50 records and 1 MiB.
+responses or reasoning can cost more. The advanced manual flow has a separate
+50-record and 1 MiB input bound; question retrieval uses the smaller limits above.
 
 The curated model lists were checked on **2026-11-08**. Availability, quotas,
 prices and data handling depend on your provider account:
@@ -83,9 +121,10 @@ temporary files. Processes and trusted plugins that already have vault access
 are not isolated by this exchange. Imported source text and saved AI output are
 rendered literally, without executable HTML, remote images or active embeds.
 
-Optional generation sends only the reviewed prompt and selected snapshot
-content directly to the chosen provider, without the vault name or a Yoofloe
-relay. Related-record IDs inside selected snapshots are included in the review.
+Optional generation sends only the reviewed prompt and context directly to
+OpenAI, without the vault name or a Yoofloe relay. Question context uses short
+source references such as C1 and excludes local source IDs, paths and raw DTOs.
+The advanced full-snapshot mode can include related-record IDs, visible in its review.
 OpenAI uses `https://api.openai.com/v1/responses` with `store: false`; that setting
 does not promise zero retention under every OpenAI policy. Keys are sent in request headers, never URLs. The plugin does not execute model
 tool calls or modify source records from an AI response.

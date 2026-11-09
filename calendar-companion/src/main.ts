@@ -7,8 +7,9 @@ import { OPENAI_ADAPTER } from "./openai";
 import { AiSession } from "./ai-session";
 import { AiDraftModal, AiSettingsModal, type AiContext } from "./ai-modals";
 import { recordLabel } from "./record-types";
+import { QuestionModal } from "./question-modal";
 
-const REQUIREMENTS = "Android phones and tablets only. Requires Yoofloe Calendar 1.8.4 or later and Obsidian 1.11.5 or later on the same device and Android user profile. Direct connection is unavailable on desktop, iPhone, and iPad.";
+const REQUIREMENTS = "Android phones and tablets only. Requires Yoofloe Calendar 1.8.5 or later and Obsidian 1.11.5 or later on the same device and Android user profile. Direct connection is unavailable on desktop, iPhone, and iPad.";
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
 
 /** All writes are create-only and bound to the vault captured by the calling modal. */
@@ -21,23 +22,35 @@ function noteStore(vault: Vault): NoteStore {
 /** Standalone Calendar companion. Loading the plugin never reads a transfer or contacts a server. */
 export default class CalendarCompanionPlugin extends Plugin {
   private modal: CompanionModal | null = null;
+  private question: QuestionModal | null = null;
   private aiSettings: AiSettingsModal | null = null;
   private ai: AiContext | null = null;
   private live = true;
   onload(): void {
     this.addSettingTab(new CompanionSettings(this.app, this));
-    this.addCommand({ id: "open-calendar-companion", name: "Connect Calendar", callback: () => this.openCompanion() });
-    this.addRibbonIcon("calendar", "Connect Yoofloe Calendar", () => this.openCompanion());
+    this.addCommand({ id: "open-calendar-companion", name: "Ask Calendar", callback: () => this.openQuestion() });
+    this.addCommand({ id: "import-calendar-snapshots", name: "Import complete Calendar records manually", callback: () => this.openCompanion() });
+    this.addRibbonIcon("calendar", "Ask Yoofloe Calendar", () => this.openQuestion());
     this.registerObsidianProtocolHandler(ACTION, params => {
       if (!Platform.isAndroidApp || !this.live) { new Notice(REQUIREMENTS); return; }
-      if (!params.requestId) { this.openCompanion(); return; }
+      if (!params.requestId) { this.openQuestion(); return; }
+      if (params.vault === this.app.vault.getName() && this.question?.requestId === params.requestId) { void this.question.receive(params.requestId); return; }
       if (!this.modal || params.vault !== this.app.vault.getName()) { new Notice("No matching connection in this vault. Start a new Calendar request."); return; }
       void this.modal.receive(params.requestId ?? "");
     });
   }
+  openQuestion(): void {
+    if (!this.live) return;
+    if (this.question) { this.question.open(); return; }
+    this.modal?.close();
+    this.question = new QuestionModal(this.app, { live: () => this.live, closed: () => { this.question = null; },
+      ai: () => this.aiContext(), openAiSettings: () => this.openAiSettings(), manualImport: () => this.openCompanion(), notes: noteStore(this.app.vault), requirements: REQUIREMENTS });
+    this.question.open();
+  }
   openCompanion(): void {
     if (!this.live) return;
     if (this.modal) { this.modal.open(); return; }
+    this.question?.close();
     this.modal = new CompanionModal(this.app, () => this.live, () => { this.modal = null; }, () => this.aiContext(), () => this.openAiSettings());
     this.modal.open();
   }
@@ -61,7 +74,7 @@ export default class CalendarCompanionPlugin extends Plugin {
     if (this.aiSettings) { this.aiSettings.open(); return; }
     this.aiSettings = new AiSettingsModal(this.app, this.aiContext(), () => { this.aiSettings = null; }); this.aiSettings.open();
   }
-  onunload(): void { this.live = false; this.ai?.session.enableForSession(false); this.aiSettings?.close(); this.aiSettings = null; this.modal?.close(); this.modal = null; this.ai = null; }
+  onunload(): void { this.live = false; this.ai?.session.enableForSession(false); this.aiSettings?.close(); this.aiSettings = null; this.question?.close(); this.question = null; this.modal?.close(); this.modal = null; this.ai = null; }
 }
 
 class CompanionSettings extends PluginSettingTab {
@@ -73,8 +86,10 @@ class CompanionSettings extends PluginSettingTab {
       .setDesc("Keep your plans, notes, study and project progress together, with a quiet place to focus. Install the Android app on this device to connect your records.")
       .addButton(button => button.setButtonText("Get Yoofloe Calendar").onClick(() => this.containerEl.ownerDocument.defaultView?.open(STORE_URL, "_blank")));
     new Setting(this.containerEl).setName(Platform.isAndroidApp ? "Local Calendar connection" : "Direct connection is not supported on this platform")
-      .setDesc("Review selected text snapshots and save ordinary Markdown notes. No Yoofloe account, model provider, or hosted relay is required.")
-      .addButton(button => button.setButtonText(Platform.isAndroidApp ? "Connect Calendar" : "View requirements").onClick(() => this.companion.openCompanion()));
+      .setDesc("Ask a question to find only relevant records on your phone. Calendar remembers the approved inbox. Local search requires no AI provider or Yoofloe account.")
+      .addButton(button => button.setButtonText(Platform.isAndroidApp ? "Ask Calendar" : "View requirements").onClick(() => this.companion.openQuestion()));
+    if (Platform.isAndroidApp) new Setting(this.containerEl).setName("Manual import (advanced)").setDesc("Choose complete records and save Markdown snapshots without AI.")
+      .addButton(button => button.setButtonText("Import complete records").onClick(() => this.companion.openCompanion()));
     if (Platform.isAndroidApp) new Setting(this.containerEl).setName("AI drafts (optional; off by default)").setDesc("Use your own OpenAI API key for approved drafts. API charges apply only if you choose to generate.")
       .addButton(button => button.setButtonText("AI settings").onClick(() => this.companion.openAiSettings()));
   }
@@ -109,7 +124,7 @@ class CompanionModal extends Modal {
     const el = this.contentEl; el.empty(); el.createEl("h2", { text: "Yoofloe Calendar Companion" });
     el.createEl("p", { text: REQUIREMENTS });
     if (!Platform.isAndroidApp) { el.createEl("p", { text: "Notes created on Android remain ordinary Markdown and can be read or edited here after transfer." }); return; }
-    el.createEl("p", { text: "Use a vault in shared device storage. Android cannot grant Calendar access to an app-private vault. Calendar 1.8.4 or later is required." });
+    el.createEl("p", { text: "Use a vault in shared device storage. Android cannot grant Calendar access to an app-private vault. Calendar 1.8.5 or later is required." });
     if (this.message) el.createEl("p", { text: this.message, cls: "calendar-companion-status", attr: { role: "status" } });
     const session = this.session;
     if (!session) return;

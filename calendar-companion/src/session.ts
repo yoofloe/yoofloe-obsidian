@@ -1,4 +1,5 @@
-import { assertLive, createRequest, INBOX, launchUrl, MAX_REPLY_BYTES, openReply, type Delivery, type Request } from "./protocol";
+import { assertLive, createRequest, createQuestionRequest, INBOX, launchUrl, MAX_REPLY_BYTES, openReply, type Delivery, type Request } from "./protocol";
+import { QUERY_REPLY_BYTES, type QuestionQuery } from "./question-query";
 
 export interface TransferStore {
   exists(path: string): Promise<boolean>; mkdir(path: string): Promise<void>;
@@ -26,10 +27,10 @@ export class CalendarSession {
   get preview() { return this.delivery; }
 
   /** The caller must invoke this from an explicit Android user action. */
-  async start(): Promise<string> {
+  async start(question?: { vaultId: string; query: QuestionQuery; inboxHint?: string }): Promise<string> {
     this.guard();
     if (this.busy || this.pending) throw Error("Cancel the current request before starting another.");
-    const owner = this.options.vaultName(), request = createRequest(owner, this.now());
+    const owner = this.options.vaultName(), request = question ? createQuestionRequest(owner, question.vaultId, question.query, this.now()) : createRequest(owner, this.now());
     this.busy = true; this.owner = owner; this.pending = request;
     try {
       const store = this.options.store;
@@ -37,7 +38,7 @@ export class CalendarSession {
       this.guard(request);
       if (await store.exists(this.path(request, false)) || await store.exists(this.path(request, true))) throw Error("The request path is already in use.");
       this.guard(request); await store.write(this.path(request, false), JSON.stringify(request)); this.guard(request);
-      return launchUrl(request);
+      return launchUrl(request, question?.inboxHint);
     } catch (error) { await this.cancel(); throw error; }
     finally { this.busy = false; }
   }
@@ -52,7 +53,7 @@ export class CalendarSession {
       const path = this.path(request, true), size = await this.options.store.size(path);
       this.guard(request);
       if (size === null) throw Error("No reply yet. Install or update Calendar, approve the transfer, then retry.");
-      if (size > MAX_REPLY_BYTES) throw Error("This transfer is too large.");
+      if (size > (request.version === 3 ? QUERY_REPLY_BYTES : MAX_REPLY_BYTES)) throw Error("This transfer is too large.");
       const raw = await this.options.store.read(path); this.guard(request);
       const result = await openReply(raw, request, this.now()); this.guard(request);
       this.replyText = raw; this.delivery = result; return result;

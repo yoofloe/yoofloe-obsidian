@@ -7,8 +7,18 @@
 .calendar-companion .calendar-companion-hint { color: var(--text-muted); font-size: var(--font-small); margin-block: 0.5rem; overflow-wrap: anywhere; }
 .calendar-companion-model-details .setting-item { padding-block: 0.5rem; }
 .calendar-companion input, .calendar-companion textarea { scroll-margin-block-start: 24px; }
+.calendar-question > h2 { margin-bottom: 0.25rem; }
+.calendar-question > .setting-item { padding-block: 0.65rem; border-top: none; }
+.calendar-question-field .setting-item { display: block; }
+.calendar-question-field .setting-item-control { margin-top: 0.5rem; width: 100%; }
+.calendar-question textarea { width: 100%; min-height: 5.5rem; resize: vertical; }
+.calendar-query-scope { padding: 0.65rem 0.8rem; background: var(--background-secondary); border-radius: 0.65rem; font-size: var(--font-small); }
+.calendar-question details { margin-block: 0.65rem; }
+.calendar-question summary { cursor: pointer; color: var(--text-muted); font-size: var(--font-small); padding-block: 0.4rem; }
+.calendar-question details pre { max-height: 34vh; overflow-y: auto; font-size: var(--font-small); }
+.calendar-question section h3 { font-size: var(--font-ui-medium); margin-block: 0 0.4rem; }
 @media (max-width: 600px) {
-  .calendar-companion .setting-item:has(select), .calendar-companion .setting-item:has(textarea) { flex-direction: column; align-items: stretch; }
-  .calendar-companion .setting-item-control:has(select), .calendar-companion .setting-item-control:has(textarea) { justify-content: stretch; width: 100%; }
+  .calendar-companion .setting-item { flex-wrap: wrap; gap: 0.5rem; }
+  .calendar-companion .setting-item-control { flex-wrap: wrap; max-width: 100%; }
   .calendar-companion select, .calendar-companion textarea { max-width: 100%; width: 100%; }
 }

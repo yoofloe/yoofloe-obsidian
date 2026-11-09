@@ -9,7 +9,7 @@ for(const platform of ['desktop','ios','android-tablet'])test(`${platform}: plug
   const messages=[], commands=[], tabs=[];let io=0;
   const forbidden=()=>{io++;throw Error('Unexpected I/O before a user-started transfer');};
   class Element {
-    classList={add(){}}; empty(){};createEl(_tag,options){if(options?.text)messages.push(options.text);return new Element();}createDiv(){return new Element();}
+    classList={add(){}}; empty(){};setAttribute(){};createEl(_tag,options){if(options?.text)messages.push(options.text);return new Element();}createDiv(){return new Element();}
   }
   class Plugin {
     constructor(app){this.app=app;}addSettingTab(tab){tabs.push(tab);}addCommand(command){commands.push(command);}addRibbonIcon(){}
@@ -20,6 +20,8 @@ for(const platform of ['desktop','ios','android-tablet'])test(`${platform}: plug
   class Setting {
     setHeading(){return this;}setName(text){messages.push(text);return this;}setDesc(text){messages.push(text);return this;}
     addButton(callback){const button={setButtonText(){return button;},setCta(){return button;},setDisabled(){return button;},onClick(){return button;}};callback(button);return this;}
+    addField(callback){const field={inputEl:new Element(),addOption(){return field;},setValue(){return field;},setPlaceholder(){return field;},setDisabled(){return field;},onChange(){return field;}};callback(field);return this;}
+    addTextArea(callback){return this.addField(callback);}addDropdown(callback){return this.addField(callback);}addText(callback){return this.addField(callback);}
   }
   const sdk={Plugin,Modal,PluginSettingTab,Setting,App:class{},TFolder:class{},Notice:class{constructor(text){messages.push(text);}},Platform:{isAndroidApp:platform==='android-tablet',isPhone:false,isIosApp:platform==='ios'}};
   const adapter=new Proxy({}, {get(){return forbidden;}});
