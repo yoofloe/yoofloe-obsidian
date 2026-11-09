@@ -16,7 +16,7 @@ class Element {
   getBoundingClientRect(){return {width:360,height:750};}
   createEl(tag,options={}){const e=new Element();e.tag=tag;e.text=options.text;e.cls=options.cls;this.children.push(e);return e;}
   createDiv(options){return this.createEl('div',options);}all(){return [this,...this.children.flatMap(e=>e.all())];}
-  querySelectorAll(selector){return this.all().filter(e=>e.tag===selector);}
+  querySelectorAll(selector){return this.all().filter(e=>selector==='input[type="checkbox"]'?e.tag==='input'&&e.type==='checkbox':e.tag===selector);}
   controls(){return this.all().flatMap(e=>e.settings.flatMap(s=>s.controls));}
 }
 class Control {
@@ -29,7 +29,7 @@ class Setting {
  add(cb){const c=new Control();this.controls.push(c);cb(c);return this;}addButton(cb){return this.add(cb);}addTextArea(cb){return this.add(cb);}addDropdown(cb){return this.add(cb);}addText(cb){return this.add(cb);}
 }
 class Modal {constructor(app){this.app=app;this.contentEl=new Element();this.modalEl=new Element();this.modalEl.parentElement=new Element();}open(){this.onOpen();}close(){this.onClose();}}
-const context={module:{exports:{}},require:()=>({App:class{},Modal,Setting,Notice:class{},Component:class{load(){}unload(){}},MarkdownRenderer:{render:async(_app,md,el)=>{el.createEl('div',{text:md});}}}),crypto,TextEncoder,TextDecoder,Date,Intl,Error,URL,btoa,atob};
+const context={module:{exports:{}},require:()=>({App:class{},Modal,Setting,Notice:class{},Component:class{load(){}unload(){}},MarkdownRenderer:{render:async(_app,md,el)=>{el.createEl('div',{text:md});if(md.includes('- [ ]')){const box=el.createEl('input');box.type='checkbox';box.disabled=false;}}}}),crypto,TextEncoder,TextDecoder,Date,Intl,Error,URL,btoa,atob};
 vm.runInNewContext(bundle.outputFiles[0].text,context);const {NoteModal}=context.module.exports;
 const until=async f=>{for(let i=0;i<50&&!f();i++)await new Promise(r=>setTimeout(r,2));assert(f());};
 const button=(m,text)=>{const c=m.contentEl.controls().find(c=>c.text===text);assert(c,`Expected ${text}`);return c;};
@@ -45,6 +45,7 @@ test('phone sheet actions prepare locally; one Generate survives hide, returns w
  resolve({status:200,text:JSON.stringify({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'## Summary\n- [ ] Review'}]}]})});await until(()=>!work.busy);
  modal=new NoteModal({},work,{closed(){},settings(){},startNew(){},nextTitle:()=>null});modal.open();
  assert(modal.contentEl.all().some(e=>e.text==='Your draft'));assert(!modal.contentEl.controls().some(c=>c.text==='Generate once'));
+ await until(()=>modal.contentEl.all().some(e=>e.type==='checkbox'&&e.disabled));
  button(modal,'Append to note').fire();await until(()=>work.applied);assert.equal(writes,1);assert(text.includes('- [ ] Review'));
  assert(button(modal,'Append to note').disabled);assert.equal(calls,1);modal.close();work.dispose();
 });

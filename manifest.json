@@ -1,7 +1,7 @@
 {
   "id": "yoofloe",
   "name": "Yoofloe Calendar Companion",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "minAppVersion": "1.11.5",
   "description": "Use AI in your open note and find relevant Yoofloe Calendar records on Android, with your own OpenAI key and local Markdown import.",
   "author": "Yoofloe",
