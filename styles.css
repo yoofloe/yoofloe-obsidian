@@ -22,3 +22,63 @@
   .calendar-companion .setting-item-control { flex-wrap: wrap; max-width: 100%; }
   .calendar-companion select, .calendar-companion textarea { max-width: 100%; width: 100%; }
 }
+
+/* Note AI shares the host theme. Layout responds to the sheet's available width. */
+.calendar-note-modal {
+  width: min(1040px, calc(100vw - 32px));
+  height: min(86dvh, calc(var(--ycc-viewport-height, 100dvh) - 24px));
+  max-height: calc(var(--ycc-viewport-height, 100dvh) - 16px);
+  padding: 0;
+  overflow: hidden;
+}
+.calendar-note-modal .modal-close-button { display: none; }
+.calendar-note-modal .modal-content { margin: 0; padding: 0; min-height: 0; }
+.calendar-note {
+  display: flex; flex-direction: column; height: 100%; overflow: hidden;
+  container: ycc-note / inline-size;
+}
+.calendar-note-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 0.65rem 1rem; border-bottom: 1px solid var(--background-modifier-border);
+  flex-shrink: 0;
+}
+.calendar-note-header h2 { font-size: var(--font-ui-medium); margin: 0; }
+.calendar-note .setting-item { border: 0; padding: 0; min-width: 0; }
+.calendar-note .setting-item-info:empty { display: none; }
+.calendar-note .setting-item-control { min-width: 0; gap: 0.4rem; }
+.calendar-note button { min-height: 44px; white-space: normal; height: auto; }
+.calendar-note-scroll { overflow: auto; overscroll-behavior: contain; padding: 0.85rem 1rem; flex: 1; min-height: 0; }
+.calendar-note-title { font-weight: var(--font-semibold); margin: 0 0 0.25rem; overflow-wrap: anywhere; }
+.calendar-note-meta, .calendar-note-cost { color: var(--text-muted); font-size: var(--font-small); line-height: 1.45; margin-block: 0.4rem; }
+.calendar-note-status { font-size: var(--font-small); padding: 0.7rem; border-radius: 0.65rem; background: var(--background-secondary); }
+.calendar-note summary { padding-block: 0.7rem; min-height: 44px; cursor: pointer; font-size: var(--font-small); color: var(--text-muted); }
+.calendar-note pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: var(--font-small); line-height: 1.6; user-select: text; margin: 0; }
+.calendar-note-result { background: var(--background-secondary); border-radius: 0.7rem; padding: 0.85rem; margin-block: 0.5rem; min-width: 0; }
+.calendar-note-result h3 { font-size: var(--font-ui-small); margin: 0 0 0.65rem; }
+.calendar-note-review pre { font-family: var(--font-monospace); font-size: var(--font-smallest); }
+.calendar-note-calendar .setting-item { display: block; margin-block: 0.6rem; }
+.calendar-note-calendar .setting-item-control { margin-top: 0.4rem; }
+.calendar-note textarea, .calendar-note select { width: 100%; max-width: 100%; }
+.calendar-note-composer {
+  border-top: 1px solid var(--background-modifier-border); background: var(--background-primary);
+  padding: 0.65rem 1rem max(0.65rem, env(safe-area-inset-bottom)); flex-shrink: 0;
+  max-height: 65%; overflow: auto;
+}
+.calendar-note-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
+.calendar-note-actions button { box-shadow: none; background: var(--background-secondary); border-radius: 1.25rem; padding: 0.4rem 0.8rem; font-size: var(--font-small); }
+.calendar-note-actions button[aria-pressed="true"] { background: var(--interactive-accent); color: var(--text-on-accent); }
+.calendar-note-composer > .setting-item, .calendar-note-composer .setting-item-control { width: 100%; }
+.calendar-note-composer textarea { min-height: 3.8rem; max-height: 7rem; resize: none; }
+.calendar-note-composer > .setting-item button { width: 100%; }
+.calendar-note-output-actions > .setting-item, .calendar-note-output-actions button { width: 100%; }
+.calendar-note-composer details > .setting-item { margin-bottom: 0.4rem; }
+@container ycc-note (min-width: 740px) {
+  .calendar-note-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
+  .calendar-note-source { min-width: 0; }
+  .calendar-note-result { margin-top: 0; }
+}
+@media (max-width: 600px) {
+  .modal-container.calendar-note-container { align-items: flex-end; padding: 0; }
+  .calendar-note-modal { width: 100%; height: min(92dvh, var(--ycc-viewport-height, 100dvh)); max-height: var(--ycc-viewport-height, 100dvh); border-radius: 18px 18px 0 0; margin: 0; }
+  .calendar-note-modal .modal-content { padding: 0; }
+}

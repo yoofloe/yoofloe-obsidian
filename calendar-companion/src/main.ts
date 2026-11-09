@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Platform, Plugin, PluginSettingTab, Setting, TFolder, requestUrl, requireApiVersion, type Vault } from "obsidian";
+import { App, MarkdownView, Modal, Notice, Platform, Plugin, PluginSettingTab, Setting, TFolder, requestUrl, requireApiVersion, type Editor, type Vault } from "obsidian";
 import { ACTION, INBOX } from "./protocol";
 import { CalendarSession, type TransferStore } from "./session";
 import { saveDelivery, type NoteStore } from "./notes";
@@ -8,9 +8,13 @@ import { AiSession } from "./ai-session";
 import { AiDraftModal, AiSettingsModal, type AiContext } from "./ai-modals";
 import { recordLabel } from "./record-types";
 import { QuestionModal } from "./question-modal";
+import { NoteWork } from "./note-work";
+import { NoteModal } from "./note-modal";
+import type { NoteTarget } from "./note-context";
 
 const REQUIREMENTS = "Android phones and tablets only. Requires Yoofloe Calendar 1.8.5 or later and Obsidian 1.11.5 or later on the same device and Android user profile. Direct connection is unavailable on desktop, iPhone, and iPad.";
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
+const NOTE_REQUIREMENTS = "Note AI works in Obsidian on Android phones and tablets. It uses your own OpenAI key; Yoofloe Calendar is needed only when you add Calendar context.";
 
 /** All writes are create-only and bound to the vault captured by the calling modal. */
 function noteStore(vault: Vault): NoteStore {
@@ -25,19 +29,95 @@ export default class CalendarCompanionPlugin extends Plugin {
   private question: QuestionModal | null = null;
   private aiSettings: AiSettingsModal | null = null;
   private ai: AiContext | null = null;
+  private noteAi: AiSession | null = null;
+  private noteWork: NoteWork | null = null;
+  private noteView: NoteModal | null = null;
+  private nextNote: { target: NoteTarget; selection: { from: number; to: number } } | null = null;
+  private aiGate = { busy: false };
+  private actions = new Map<MarkdownView, HTMLElement>();
   private live = true;
   onload(): void {
     this.addSettingTab(new CompanionSettings(this.app, this));
     this.addCommand({ id: "open-calendar-companion", name: "Ask Calendar", callback: () => this.openQuestion() });
     this.addCommand({ id: "import-calendar-snapshots", name: "Import complete Calendar records manually", callback: () => this.openCompanion() });
     this.addRibbonIcon("calendar", "Ask Yoofloe Calendar", () => this.openQuestion());
+    this.addCommand({ id: "note-ai", name: "Note AI", icon: "sparkles", mobileOnly: true,
+      editorCallback: (editor, info) => { if (info instanceof MarkdownView) this.openNote(editor, info); else new Notice("Open this Markdown note in the editor first."); } });
+    if (Platform.isAndroidApp && this.app.workspace) {
+      this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, info) => {
+        if (info instanceof MarkdownView) menu.addItem(item => item.setTitle("Note AI").setIcon("sparkles").onClick(() => this.openNote(editor, info)));
+      }));
+      this.registerEvent(this.app.workspace.on("file-menu", (menu, file, _source, leaf) => {
+        const view = leaf?.view ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (view instanceof MarkdownView && view.file === file) menu.addItem(item => item.setTitle("Note AI").setIcon("sparkles").onClick(() => this.openNote(view.editor, view)));
+      }));
+      const update = () => this.updateNoteActions();
+      this.registerEvent(this.app.workspace.on("layout-change", update));
+      this.registerEvent(this.app.workspace.on("active-leaf-change", update));
+      this.app.workspace.onLayoutReady(update);
+      this.register(() => { for (const action of this.actions.values()) action.remove(); this.actions.clear(); });
+    }
     this.registerObsidianProtocolHandler(ACTION, params => {
       if (!Platform.isAndroidApp || !this.live) { new Notice(REQUIREMENTS); return; }
       if (!params.requestId) { this.openQuestion(); return; }
+      if (params.vault === this.app.vault.getName() && this.noteWork?.requestId === params.requestId) { void this.noteWork.receive(params.requestId); this.showNote(); return; }
       if (params.vault === this.app.vault.getName() && this.question?.requestId === params.requestId) { void this.question.receive(params.requestId); return; }
       if (!this.modal || params.vault !== this.app.vault.getName()) { new Notice("No matching connection in this vault. Start a new Calendar request."); return; }
       void this.modal.receive(params.requestId ?? "");
     });
+  }
+  private updateNoteActions(): void {
+    if (!this.live) return;
+    const views = this.app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).filter((view): view is MarkdownView => view instanceof MarkdownView);
+    for (const [view, element] of this.actions) if (!views.includes(view)) { element.remove(); this.actions.delete(view); }
+    for (const view of views) if (!this.actions.has(view)) this.actions.set(view, view.addAction("sparkles", "Note AI", () => this.openNote(view.editor, view)));
+  }
+  openActiveNote(): void {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view) this.openNote(view.editor, view); else new Notice("Open a Markdown note in the editor first.");
+  }
+  private openNote(editor: Editor, view: MarkdownView): void {
+    if (!this.live || !Platform.isAndroidApp) { new Notice(NOTE_REQUIREMENTS); return; }
+    const file = view.file, owner = this.app.vault, path = file?.path;
+    if (!file || !path || view.getMode() !== "source") { new Notice("Switch this Markdown note to editing mode first."); return; }
+    const selections = editor.listSelections();
+    if (selections.length !== 1) { new Notice("Choose one text selection, or place the cursor in your note."); return; }
+    const positions = [editor.posToOffset(selections[0].anchor), editor.posToOffset(selections[0].head)].sort((a, b) => a - b);
+    const current = () => this.live && this.app.vault === owner && owner.getAbstractFileByPath(path) === file && file.path === path && view.file === file && view.editor === editor &&
+      view.getMode() === "source" && this.app.workspace.getLeavesOfType("markdown").some(leaf => leaf.view === view);
+    const target: NoteTarget = { identity: file, path, title: file.basename, read: () => current() ? editor.getValue() : null,
+      change: (from, to, text) => { if (!current()) throw Error("The original note is no longer open."); editor.transaction({ changes: [{ from: editor.offsetToPos(from), to: editor.offsetToPos(to), text }] }, "yoofloe-note-ai"); } };
+    this.nextNote = { target, selection: { from: positions[0], to: positions[1] } };
+    if (this.noteWork?.target.identity === file && this.noteWork.target.path === path) {
+      // Rebind a reopened leaf, keeping the original reviewed text and conflict digest.
+      this.noteWork.target.read = target.read; this.noteWork.target.change = target.change;
+    }
+    if (!this.noteWork) this.startNote(); else this.showNote();
+  }
+  private startNote(): void {
+    if (this.noteWork?.busy || !this.nextNote) return;
+    const next = this.nextNote; this.nextNote = null;
+    this.noteView?.close(); this.noteWork?.dispose();
+    const context = this.aiContext(), owner = this.app.vault;
+    if (!this.noteAi) this.noteAi = this.createAiSession(() => context.current(), context.preferences);
+    const adapter = owner.adapter;
+    this.noteWork = new NoteWork(next.target, next.selection, { current: () => context.current(), ai: this.noteAi, preferences: context.preferences,
+      inboxHint: () => adapter.getResourcePath(`${INBOX}/`), calendar: () => new CalendarSession({ vaultName: () => this.app.vault.getName(), allowed: () => context.current(),
+        store: { exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path), write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
+          size: async path => { const stat = await adapter.stat(path); return stat?.type === "file" ? stat.size : null; }, remove: path => adapter.remove(path) } }),
+      save: async (path, text) => { if (!context.current()) throw Error("Vault changed"); await owner.create(path, text); } });
+    this.showNote(); void this.noteWork.initialize();
+  }
+  private showNote(): void {
+    if (!this.noteWork?.current) return;
+    if (this.noteView) { this.noteView.open(); return; }
+    this.question?.close(); this.modal?.close();
+    this.noteView = new NoteModal(this.app, this.noteWork, { closed: () => { this.noteView = null; }, settings: () => this.openAiSettings(),
+      startNew: () => {
+        if (!this.nextNote && this.noteWork) { const view = this.app.workspace.getActiveViewOfType(MarkdownView); if (view) this.openNote(view.editor, view); }
+        this.startNote();
+      }, nextTitle: () => this.nextNote?.target.title ?? null });
+    this.noteView.open();
   }
   openQuestion(): void {
     if (!this.live) return;
@@ -60,27 +140,33 @@ export default class CalendarCompanionPlugin extends Plugin {
       const current = () => this.live && Platform.isAndroidApp && this.app.vault === owner && owner.getName() === name;
       const preferences = new AiPreferences({ current, binding: () => owner.adapter.getResourcePath(""), load: () => this.loadData(), save: value => this.saveData(value),
         secrets: () => requireApiVersion("1.11.5") && typeof this.app.secretStorage?.getSecret === "function" && typeof this.app.secretStorage?.setSecret === "function" ? this.app.secretStorage : null });
-      const session = new AiSession({ adapters: [OPENAI_ADAPTER], current, key: provider => preferences.key(provider), transport: async request => {
-        if (!current()) throw Error("Vault changed");
-        // Optional BYOK feature: this is the only network call. See README, Optional AI.
-        const response = await requestUrl(request); return { status: response.status, text: response.text };
-      } });
+      const session = this.createAiSession(current, preferences);
       this.ai = { current, preferences, session };
     }
     return this.ai;
   }
+  private createAiSession(current: () => boolean, preferences: AiPreferences): AiSession {
+    return new AiSession({ adapters: [OPENAI_ADAPTER], current, gate: this.aiGate, key: provider => preferences.key(provider), transport: async request => {
+      if (!current()) throw Error("Vault changed");
+      // Optional BYOK feature: this is the only network call. See README, Optional AI.
+      const response = await requestUrl(request); return { status: response.status, text: response.text };
+    } });
+  }
   openAiSettings(): void {
     if (!this.live || !Platform.isAndroidApp) return;
     if (this.aiSettings) { this.aiSettings.open(); return; }
-    this.aiSettings = new AiSettingsModal(this.app, this.aiContext(), () => { this.aiSettings = null; }); this.aiSettings.open();
+    this.aiSettings = new AiSettingsModal(this.app, this.aiContext(), () => { this.aiSettings = null; void this.noteWork?.refreshSettings(); }); this.aiSettings.open();
   }
-  onunload(): void { this.live = false; this.ai?.session.enableForSession(false); this.aiSettings?.close(); this.aiSettings = null; this.question?.close(); this.question = null; this.modal?.close(); this.modal = null; this.ai = null; }
+  onunload(): void { this.live = false; this.noteView?.close(); this.noteWork?.dispose(); this.noteWork = null; this.nextNote = null; this.noteAi = null; this.ai?.session.enableForSession(false); this.aiSettings?.close(); this.aiSettings = null; this.question?.close(); this.question = null; this.modal?.close(); this.modal = null; this.ai = null; }
 }
 
 class CompanionSettings extends PluginSettingTab {
   constructor(app: App, private readonly companion: CalendarCompanionPlugin) { super(app, companion); }
   display(): void {
     this.containerEl.empty(); new Setting(this.containerEl).setName("Connect your records").setHeading();
+    this.containerEl.createEl("p", { text: NOTE_REQUIREMENTS });
+    if (Platform.isAndroidApp) new Setting(this.containerEl).setName("Note AI").setDesc("Ask, summarize, refine or extract tasks from the note you have open. You can also use the note’s sparkle action, menu or mobile toolbar command.")
+      .addButton(button => button.setButtonText("Open note AI").onClick(() => this.companion.openActiveNote()));
     this.containerEl.createEl("p", { text: REQUIREMENTS });
     new Setting(this.containerEl).setName("Yoofloe Calendar")
       .setDesc("Keep your plans, notes, study and project progress together, with a quiet place to focus. Install the Android app on this device to connect your records.")

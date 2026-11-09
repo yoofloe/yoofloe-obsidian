@@ -55,7 +55,7 @@ export const OPENAI_ADAPTER: AiAdapter = {
   validateModel(model) { validateOpenAiOptions({ model }); }, validateKey: validateOpenAiKey,
   profile: model => ({ reasoningEffort: findOpenAiModel(model)?.effort }),
   request: (review, key) => ({ url: OPENAI_ENDPOINT, method: "POST", contentType: "application/json", headers: { Authorization: `Bearer ${key}` }, throw: false,
-    body: JSON.stringify({ model: review.model, instructions: DRAFT_INSTRUCTION, input: review.input, store: false, stream: false,
+    body: JSON.stringify({ model: review.model, instructions: review.instructions ?? DRAFT_INSTRUCTION, input: review.input, store: false, stream: false,
       ...(review.reasoningEffort ? { reasoning: { effort: review.reasoningEffort } } : {}) }) }),
   parse: parseOpenAiDraft,
 };

@@ -1,10 +1,11 @@
 # Yoofloe Calendar Companion
 
-Ask about your plans, notes, study, projects and focus history. The companion
+Work with the note you have open, or ask about your plans, study, projects and focus history. Note AI can summarize, refine and extract tasks from your selected text or current note using your own OpenAI key. The companion
 finds relevant records locally on your Android device, then lets you review
 the compact context before optionally generating a draft with your own OpenAI key.
 
-**Direct connection works on Android phones and tablets only.** Install
+**Note AI works on Android phones and tablets with Obsidian 1.11.5 or later.**
+It does not require the Calendar app. To add Calendar context or import records, install
 **Yoofloe Calendar 1.8.5 or later** and **Obsidian 1.11.5 or later** on the same
 device and Android user profile. Desktop, iPhone and iPad cannot connect directly;
 imported Markdown remains readable and editable wherever you use your vault.
@@ -12,6 +13,45 @@ imported Markdown remains readable and editable wherever you use your vault.
 [Get Yoofloe Calendar for Android](https://play.google.com/store/apps/details?id=com.yoofloe.calendar)
 to keep your plans, notes, study and project progress together, with a quiet
 place to focus. The same link is available directly in this plugin's settings.
+
+## AI in your open note
+
+1. Open a Markdown note in editing mode. Select a passage, or leave the cursor
+   in the note to use its full text. Tap the note's sparkle action or choose
+   **Note AI** in the note menu or command palette. The command can also be
+   added to Obsidian's mobile toolbar.
+2. Choose **Ask**, **Summarize**, **Refine** or **To-do list**, then adjust the
+   request. The source is captured from your editor, including unsaved edits.
+   No other notes or folders are read. Notes over 32 KiB require a shorter
+   selection or an explicit **Use current section** choice; they are not
+   silently shortened and described as a complete-note summary.
+3. Review **Exactly what will be sent**, the model and saved-key status.
+   **Generate once** approves one paid OpenAI request. Choosing an action,
+   opening settings and hiding the sheet never send a request.
+4. Review the result. **Add below selection** or **Append to note** keeps the
+   original text. **More actions** offers explicit selection replacement,
+   copy and saving a new note beside the source. An insertion is one editor
+   transaction and can be reverted with Obsidian Undo.
+
+The phone layout keeps the request and Generate action in a compact bottom
+sheet. Wider layouts show the source and result in two columns. Hiding the
+sheet, rotating or switching notes keeps the request and paid result for the
+current vault session. Reopen Note AI to resume it. A different note never
+silently receives the previous note's result. Closing the vault, disabling the
+plugin or restarting Obsidian ends this temporary in-memory work; save or copy
+the result first.
+
+If the source is edited, renamed, closed or deleted, unsafe insertion/replacement
+is refused and the result remains available for copying or saving separately.
+Generated headings, lists and task checkboxes remain Markdown. HTML, embeds,
+links and executable fenced blocks are made inert before insertion. Existing
+full-snapshot import formatting is unchanged.
+
+**Add Calendar context (optional)** performs the same bounded local search as
+Ask Calendar below. State what you need from Calendar; approve the relevant
+excerpts in the app, then review the combined note and Calendar input before
+generating. No folder-by-folder setup or AI-powered search planner is used.
+The note and request remain here while you switch apps.
 
 ## Ask Calendar
 
@@ -80,7 +120,8 @@ every plugin load.
 1. Open **AI settings** and choose an OpenAI model.
    **Custom** accepts an exact API model ID; examples appear beside the field.
 2. Save your own provider key locally. For **Ask Calendar**, no separate enable
-   switch or record-by-record selection is needed: the explicit **Generate once
+   switch or record-by-record selection is needed. Note AI also uses a single
+   explicit **Generate once** action; for Calendar the **Generate once
    with OpenAI** action approves just the displayed input and model.
 3. The advanced full-snapshot importer retains **Draft from selected records**,
    its selection/review flow and session enable switch.
