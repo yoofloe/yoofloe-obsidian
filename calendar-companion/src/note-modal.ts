@@ -115,7 +115,7 @@ export class NoteModal extends Modal {
     }
     const review = scroll.createEl("details", { cls: "calendar-note-review" }); review.createEl("summary", { text: "Exactly what will be sent" });
     const preview = review.createEl("pre");
-    const updatePreview = () => { try { preview.textContent = work.input || "Choose an action or write a request."; return !!work.input; } catch (error) { preview.textContent = error instanceof Error ? error.message : "Shorten the request."; return false; } };
+    const updatePreview = () => { try { const input = work.input; preview.textContent = input || "Choose an action or write a request."; return !!input; } catch (error) { preview.textContent = error instanceof Error ? error.message : "Shorten the request."; return false; } };
     const validInput = updatePreview();
     scroll.createEl("p", { text: `${work.model || "Choose a model"} · ${work.configured ? "Key saved locally" : "Key needed"}`, cls: "calendar-note-meta" });
     this.button(scroll, "AI settings", () => this.options.settings(), work.busy);
@@ -127,6 +127,7 @@ export class NoteModal extends Modal {
     if (work.used && !work.draft) scroll.createEl("p", { text: "This request is finished. No automatic retry. Start a new request only when you are ready to send again.", cls: "calendar-note-meta" });
 
     const footer = el.createDiv({ cls: "calendar-note-composer" });
+    const submit = el.createDiv({ cls: "calendar-note-submit" });
     if (!work.used) {
       const chips = footer.createDiv({ cls: "calendar-note-actions", attr: { "aria-label": "AI actions" } });
       for (const action of ["ask", "summary", "refine", "tasks"] as const) {
@@ -146,10 +147,10 @@ export class NoteModal extends Modal {
         input.inputEl.rows = 2; input.inputEl.maxLength = 4000; input.inputEl.setAttribute("aria-label", "Request for this note");
         input.setPlaceholder("Write, rewrite, diagram or ask about these notes…").setValue(work.prompt).setDisabled(work.locked).onChange(value => { work.setPrompt(value); generate?.setDisabled(!updatePreview() || work.locked || !work.source || !work.configured || !work.model); });
       });
-      footer.createEl("p", { text: "Uses your OpenAI key · API charges apply · one request", cls: "calendar-note-cost" });
-      generate = this.button(footer, "Generate once", () => void work.generate(), !validInput || work.locked || !work.source || !work.configured || !work.model, true);
+      submit.createEl("p", { text: "Uses your OpenAI key · API charges apply · one request", cls: "calendar-note-cost" });
+      generate = this.button(submit, "Generate once", () => void work.generate(), !validInput || work.locked || !work.source || !work.configured || !work.model, true);
     } else if (work.draft) {
-      const buttons = footer.createDiv({ cls: "calendar-note-output-actions" });
+      const buttons = submit.createDiv({ cls: "calendar-note-output-actions" });
       const proposal = work.proposal;
       if (proposal?.target === "new") {
         new Setting(scroll).setName("New note title").addText(control => control.setValue(proposal.title).setDisabled(work.busy || work.saved).onChange(value => { proposal.title = value; }));

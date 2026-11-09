@@ -107,7 +107,10 @@ export default class CalendarCompanionPlugin extends Plugin {
       inboxHint: () => adapter.getResourcePath(`${INBOX}/`), calendar: () => new CalendarSession({ vaultName: () => this.app.vault.getName(), allowed: () => context.current(),
         store: { exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path), write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
           size: async path => { const stat = await adapter.stat(path); return stat?.type === "file" ? stat.size : null; }, remove: path => adapter.remove(path) } }),
-      save: async (path, text) => { if (!context.current()) throw Error("Vault changed"); await owner.create(path, text); } });
+      save: async (path, text) => {
+        if (!context.current()) throw Error("Vault changed"); const file = await owner.create(path, text);
+        if (!context.current() || owner.getAbstractFileByPath(path) !== file || await owner.read(file) !== text) throw Error("The new note could not be confirmed. The result is kept.");
+      } });
     this.showNote(); void this.noteWork.initialize();
   }
   private showNote(): void {

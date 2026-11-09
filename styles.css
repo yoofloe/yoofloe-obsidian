@@ -46,7 +46,7 @@
 }
 .calendar-note-header h2 { font-size: var(--font-ui-medium); margin: 0; }
 .calendar-note-header > div:first-child { min-width: 0; }
-.calendar-note-header .calendar-note-title { font-size: var(--font-small); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0.25rem 0 0; }
+.calendar-note-header .calendar-note-title { font-size: var(--font-small); color: var(--text-muted); white-space: normal; max-height: 4.5em; overflow: auto; overflow-wrap: anywhere; margin: 0.25rem 0 0; }
 .is-mobile .modal-container.calendar-note-container .modal.calendar-note-modal { padding: 0; }
 .modal.calendar-note-modal .calendar-note .setting-item { border: 0; padding: 0; min-width: 0; }
 .calendar-note .calendar-note-button .setting-item-info,
@@ -68,8 +68,15 @@
 .calendar-note-composer {
   border-top: 1px solid var(--background-modifier-border); background: var(--background-primary);
   padding: 0.65rem 1rem; flex-shrink: 0;
-  max-height: 65%; overflow: auto;
+  max-height: 50%; overflow: auto; overscroll-behavior: contain;
 }
+.calendar-note-composer:empty, .calendar-note-submit:empty { display: none; }
+.calendar-note-submit { flex-shrink: 0; padding: 0.35rem 1rem 0.65rem; background: var(--background-primary); }
+.calendar-note-submit .setting-item, .calendar-note-submit .setting-item-control, .calendar-note-submit button { width: 100%; }
+.calendar-note-markdown { min-width: 0; overflow-wrap: anywhere; }
+.calendar-note-markdown .mermaid, .calendar-note-markdown .table-wrapper { max-width: 100%; overflow: auto; }
+.calendar-note-markdown svg { max-width: 100%; height: auto; }
+.calendar-note-more { margin-bottom: 0.45rem; }
 .calendar-note-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
 .calendar-note-actions button { box-shadow: none; background: var(--background-secondary); border-radius: 1.25rem; padding: 0.4rem 0.8rem; font-size: var(--font-small); }
 .calendar-note-actions button[aria-pressed="true"] { background: var(--interactive-accent); color: var(--text-on-accent); }
@@ -85,7 +92,7 @@
 }
 @media (max-height: 500px) {
   .calendar-note-header { padding-block: 0.3rem; }
-  .calendar-note-composer { padding-block: 0.35rem; max-height: 60%; }
+  .calendar-note-composer { padding-block: 0.35rem; max-height: 40%; flex-shrink: 1; }
   .calendar-note-composer textarea { min-height: 44px; height: 44px; }
   .calendar-note-cost { margin-block: 0.2rem; font-size: var(--font-smallest); }
 }

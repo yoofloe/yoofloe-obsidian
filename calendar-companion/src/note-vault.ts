@@ -44,6 +44,7 @@ export function createNoteWorkspace(app: App, vault: Vault, current: () => boole
             if (!valid(file, path) || editorFor(file) || original !== expected) throw Error("This note changed. The proposal was kept.");
             return markdown;
           });
+          if (!valid(file, path) || (editor ? editor.getValue() : await vault.read(file)) !== markdown) throw Error("The saved edit could not be confirmed. Your original backup and proposal are kept; no retry was made.");
         },
       }));
       return { documents, scanned, total: all.length };
@@ -56,7 +57,9 @@ export function createNoteWorkspace(app: App, vault: Vault, current: () => boole
         if (!existing) { await vault.createFolder(folder); guard(); }
       }
       const path = `Yoofloe Calendar/AI backups/${crypto.randomUUID()}.md`;
-      await vault.create(path, original); guard(); return path;
+      const file = await vault.create(path, original); guard();
+      if (!valid(file, path) || await vault.read(file) !== original) throw Error("The original backup could not be confirmed. The source note was not changed.");
+      return path;
     },
   };
 }
