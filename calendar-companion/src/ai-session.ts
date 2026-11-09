@@ -1,6 +1,7 @@
 import { MAX_RECORDS, type RecordSnapshot, type DeliveryV3 } from "./protocol";
 import { buildQuestionInput, inputDigest } from "./question-input";
 import { buildNoteInput, NOTE_INSTRUCTION, type NoteCapture } from "./note-context";
+import { noteAnswerFormat, NOTE_CHANGE_INSTRUCTION, type NoteExtra } from "./note-workspace";
 
 export type AiProvider = "openai" | "gemini";
 export interface AiModelOptions { model: string }
@@ -10,6 +11,7 @@ export interface AiReview {
   readonly reasoningEffort?: "none" | "low";
   readonly digest?: string;
   readonly instructions?: string;
+  readonly responseFormat?: Record<string, unknown>;
 }
 export interface AiDraft { text: string; incomplete: boolean; inputTokens: number | null; outputTokens: number | null; thinkingTokens?: number | null }
 export interface AiHttpRequest { url: string; method: "POST"; headers: Record<string, string>; contentType: "application/json"; body: string; throw: false }
@@ -75,17 +77,19 @@ export class AiSession {
     } finally { this.busy = false; if (this.options.gate) this.options.gate.busy = false; }
   }
   /** A note review belongs to a work item, whose lifetime does not depend on its sheet. */
-  async prepareNote(capture: NoteCapture, prompt: string, options: AiModelOptions, current: () => boolean, calendar?: DeliveryV3): Promise<AiReview> {
+  async prepareNote(capture: NoteCapture, prompt: string, options: AiModelOptions, current: () => boolean, calendar?: DeliveryV3, context: NoteExtra = {}): Promise<AiReview> {
     const epoch = this.epoch; this.guard(epoch);
     if (this.inFlight || !current()) throw Error("Wait for the current request to finish.");
     const adapter = this.adapters.get("openai"); if (!adapter) throw Error("OpenAI is unavailable.");
     adapter.validateModel(options.model);
-    const input = buildNoteInput(capture, prompt, calendar);
+    const input = buildNoteInput(capture, prompt, calendar, context);
     if (encoder.encode(input).length > MAX_AI_INPUT_BYTES) throw Error("This note and Calendar context exceed the input budget.");
     const digest = await inputDigest(input); this.guard(epoch);
     if (!current()) throw Error("The note review changed. Review it again.");
     const review = Object.freeze({ provider: "openai" as const, model: options.model, input, digest,
-      recordCount: 1 + (calendar?.records.length ?? 0), instructions: NOTE_INSTRUCTION, ...adapter.profile?.(options.model) });
+      recordCount: 1 + (calendar?.records.length ?? 0) + (context.documents?.length ?? 0),
+      instructions: NOTE_INSTRUCTION + (context.proposeEdits ? " " + NOTE_CHANGE_INSTRUCTION : ""),
+      ...(context.proposeEdits ? { responseFormat: noteAnswerFormat(["N1", ...(context.documents ?? []).map(doc => doc.reference)]) } : {}), ...adapter.profile?.(options.model) });
     this.reviews.set(review, { epoch, used: false, current }); return review;
   }
   /** Query retrieval has a separate compact input and never persists full-snapshot records. */

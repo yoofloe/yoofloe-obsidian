@@ -29,9 +29,34 @@ place to focus. The same link is available directly in this plugin's settings.
    **Generate once** approves one paid OpenAI request. Choosing an action,
    opening settings and hiding the sheet never send a request.
 4. Review the result. **Add below selection** or **Append to note** keeps the
-   original text. **More actions** offers explicit selection replacement,
-   copy and saving a new note beside the source. An insertion is one editor
-   transaction and can be reverted with Obsidian Undo.
+   original text. If you requested a rewrite, review **Proposed changes** and
+   **Review changes**, then explicitly replace the selection, section or complete
+   note. Full-note changes first save the exact original in
+   `Yoofloe Calendar/AI backups/`. **Undo last AI edit** restores it only if no
+   newer edit would be lost. Normal editor insertions also support Obsidian Undo.
+
+You can write an entire document from an empty note, rewrite existing prose,
+restructure it, translate it, create tables and task lists, explain math, or add
+Mermaid flowcharts, timelines and charts. Use the **Diagram, chart, table…**
+selector for starting requests, or describe any writing/editing task yourself.
+Diagrams, tables and LaTeX render directly in the draft and remain editable
+Markdown when saved. There is no extra rendering service or runtime dependency.
+
+**Related Markdown notes** finds up to four relevant complete notes from local
+titles, links and bounded content search. No individual folders need selection.
+Check the source previews before generating; local file paths stay on your
+device. Search considers at most 2000 metadata entries, reads up to 32 candidates,
+and includes only complete notes up to 32 KiB each. The displayed scanned/total
+counts make limited coverage explicit. AI backups and hidden folders are excluded.
+
+A response may propose updates to several reviewed notes and new documents.
+Choose a proposed file, review its original/draft/diff and apply it individually.
+The model only names reviewed references; it never supplies filesystem paths or
+executes write tools. New documents are created beside the source using the
+reviewed title, and an existing file with that name is preserved. **Continue with
+this answer** keeps previous answers, refreshes the source and lets you make
+another explicit request. Only bounded excerpts of the last two answers enter
+the next API input; all answers remain available in this vault session.
 
 The phone layout keeps the request and Generate action in a compact bottom
 sheet. Wider layouts show the source and result in two columns. Hiding the
@@ -43,8 +68,9 @@ the result first.
 
 If the source is edited, renamed, closed or deleted, unsafe insertion/replacement
 is refused and the result remains available for copying or saving separately.
-Generated headings, lists and task checkboxes remain Markdown. HTML, embeds,
-links and executable fenced blocks are made inert before insertion. Existing
+Generated headings, lists, links, tables, math and safe Mermaid remain Markdown.
+Active HTML, embeds, diagram callbacks/configuration and executable plugin
+fenced blocks are made inert before insertion. Existing
 full-snapshot import formatting is unchanged.
 
 **Add Calendar context (optional)** performs the same bounded local search as
@@ -123,6 +149,9 @@ every plugin load.
    switch or record-by-record selection is needed. Note AI also uses a single
    explicit **Generate once** action; for Calendar the **Generate once
    with OpenAI** action approves just the displayed input and model.
+   Saving a key confirms a local readback, shows an immediate notification and
+   leaves an inline saved status beside the masked field. This is a storage
+   confirmation, not an API authorization test; saving makes no provider call.
 3. The advanced full-snapshot importer retains **Draft from selected records**,
    its selection/review flow and session enable switch.
 4. Approve the transmission and possible API charges, then generate once.

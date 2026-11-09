@@ -123,7 +123,7 @@ export class AiSettingsModal extends Modal {
     new Setting(el).addButton(button => { this.saveModelButton = button; button.setButtonText("Save model settings").onClick(() => void this.change(() => this.ai.preferences.save({ ...this.options }, this.provider))); }); this.updateModelSave();
     new Setting(el).setName(this.configured ? "API key saved locally" : "No API key saved").setDesc(`${name} only. Stored through Obsidian secret storage, outside this plugin's vault files. Other trusted plugins share Obsidian's trust boundary.`)
       .addText(input => { this.keyInput = input.inputEl; input.inputEl.type = "password"; input.inputEl.autocomplete = "off"; input.inputEl.setAttribute("aria-label", `${name} API key`); input.setPlaceholder("Your own API key").setValue(this.keyDrafts.get(this.provider) ?? "").setDisabled(this.busy); });
-    if (this.keyMessage) el.createEl("p", { text: this.keyMessage, cls: "calendar-companion-status", attr: { role: "status", "aria-live": "polite" } });
+    if (this.keyMessage || this.configured) el.createEl("p", { text: this.keyMessage || "A key is stored on this device. API access is checked only when you generate.", cls: "calendar-companion-status", attr: { role: "status", "aria-live": "polite" } });
     new Setting(el)
       .addButton(button => button.setButtonText("Save key locally").setDisabled(this.busy).onClick(() => { const value = this.keyInput?.value ?? ""; void this.change(() => this.ai.preferences.saveKey(value, this.provider), true); }))
       .addButton(button => button.setButtonText("Remove saved key").setDisabled(this.busy || !this.configured).onClick(() => void this.change(() => this.ai.preferences.clearKey(this.provider), true)));

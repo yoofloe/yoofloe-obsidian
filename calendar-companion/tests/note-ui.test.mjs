@@ -18,13 +18,13 @@ class Element {
   controls(){return this.all().flatMap(e=>e.settings.flatMap(s=>s.controls));}
 }
 class Control {
- inputEl=new Element();disabled=false;setButtonText(t){this.text=t;return this;}setDisabled(v){this.disabled=v;return this;}setCta(){return this;}
+ inputEl=new Element();selectEl=new Element();disabled=false;setButtonText(t){this.text=t;return this;}setDisabled(v){this.disabled=v;return this;}setCta(){return this;}
  setValue(v){this.value=v;return this;}setPlaceholder(){return this;}addOption(){return this;}onClick(cb){this.click=cb;return this;}onChange(cb){this.change=cb;return this;}
  fire(value){assert(!this.disabled,`${this.text} disabled`);if(this.click)return this.click();return this.change(value);}
 }
 class Setting {
  controls=[];settingEl=new Element();constructor(el){el.settings.push(this);}setName(v){this.name=v;return this;}
- add(cb){const c=new Control();this.controls.push(c);cb(c);return this;}addButton(cb){return this.add(cb);}addTextArea(cb){return this.add(cb);}addDropdown(cb){return this.add(cb);}
+ add(cb){const c=new Control();this.controls.push(c);cb(c);return this;}addButton(cb){return this.add(cb);}addTextArea(cb){return this.add(cb);}addDropdown(cb){return this.add(cb);}addText(cb){return this.add(cb);}
 }
 class Modal {constructor(app){this.app=app;this.contentEl=new Element();this.modalEl=new Element();this.modalEl.parentElement=new Element();}open(){this.onOpen();}close(){this.onClose();}}
 const context={module:{exports:{}},require:()=>({App:class{},Modal,Setting,Notice:class{},Component:class{load(){}unload(){}},MarkdownRenderer:{render:async(_app,md,el)=>{el.createEl('div',{text:md});}}}),crypto,TextEncoder,TextDecoder,Date,Intl,Error,URL,btoa,atob};

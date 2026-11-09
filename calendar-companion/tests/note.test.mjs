@@ -37,6 +37,11 @@ test('long notes require an explicit complete section or selection; no silent tr
   const all=fixture('whole note'),n=await captureNote(all.target,{from:0,to:0});
   await assert.rejects(applyNote(n,'x','replace',()=>true));
 });
+test('an empty Markdown note can be used to create a document from a request and optional Calendar context',async()=>{
+ const f=fixture(''),capture=await captureNote(f.target,{from:0,to:0});
+ assert.equal(capture.scope,'note');assert.equal(JSON.parse(buildNoteInput(capture,'Write a study plan')).note.text,'');
+ await applyNote(capture,'# Study plan\n- [ ] Read','append',()=>true);assert(f.text.includes('# Study plan'));
+});
 test('Markdown keeps headings and tasks but deactivates executable blocks, images, links and HTML',()=>{
   const safe=safeNoteMarkdown('# Heading\n- [ ] Task\n- [x] Done\n<script>x</script>\n![pic](https://x)\n![[secret]]\n[go](obsidian://open)\n\\\\![x](https://x)\n```dataviewjs\nalert(1)\n```');
   assert(safe.startsWith('# Heading\n- [ ] Task\n- [x] Done'));

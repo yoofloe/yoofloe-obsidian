@@ -11,6 +11,7 @@ import { QuestionModal } from "./question-modal";
 import { NoteWork } from "./note-work";
 import { NoteModal } from "./note-modal";
 import type { NoteTarget } from "./note-context";
+import { createNoteWorkspace } from "./note-vault";
 
 const REQUIREMENTS = "Android phones and tablets only. Requires Yoofloe Calendar 1.8.5 or later and Obsidian 1.11.5 or later on the same device and Android user profile. Direct connection is unavailable on desktop, iPhone, and iPad.";
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -102,6 +103,7 @@ export default class CalendarCompanionPlugin extends Plugin {
     if (!this.noteAi) this.noteAi = this.createAiSession(() => context.current(), context.preferences);
     const adapter = owner.adapter;
     this.noteWork = new NoteWork(next.target, next.selection, { current: () => context.current(), ai: this.noteAi, preferences: context.preferences,
+      workspace: createNoteWorkspace(this.app, owner, () => context.current(), next.target.path),
       inboxHint: () => adapter.getResourcePath(`${INBOX}/`), calendar: () => new CalendarSession({ vaultName: () => this.app.vault.getName(), allowed: () => context.current(),
         store: { exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path), write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
           size: async path => { const stat = await adapter.stat(path); return stat?.type === "file" ? stat.size : null; }, remove: path => adapter.remove(path) } }),

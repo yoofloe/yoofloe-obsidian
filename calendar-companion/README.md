@@ -6,8 +6,19 @@
 section from the editor buffer. It excludes local paths/identities from provider
 input. A full-document SHA-256 and the original file/view identity guard one
 editor transaction, with no disk overwrite, automatic rebasing or auto-apply.
-The separate Markdown sanitizer keeps headings/lists/tasks and makes active
-HTML, links, embeds and fenced plugin code inert; v2 snapshot escaping is unchanged.
+The Markdown sanitizer keeps headings/lists/tasks, tables, math, ordinary links
+and bounded Mermaid diagrams while making active HTML, embeds, diagram
+directives/callbacks and fenced plugin code inert; v2 snapshot escaping is unchanged.
+
+`note-workspace.ts` defines strict structured proposals bound to local source
+references. Responses use `text.format` JSON schema, not tool calls. Every
+proposal is validated again locally; unknown/duplicate targets and non-write
+actions are refused. `note-vault.ts` searches a bounded local set and reads live
+editor buffers before disk. Closed notes use compare-and-set `vault.process`;
+open notes use one editor transaction. Whole-note updates first create an exact
+original Markdown backup, then recheck the source. Conditional Undo refuses to
+overwrite newer edits. Create-only new notes never overwrite a name collision.
+Follow-up requests retain prior answers locally and send only bounded history.
 
 `NoteWork` owns source, request, optional v3 Calendar session and paid result.
 `NoteModal` only subscribes to it. Closing the sheet does not dispose the work;
