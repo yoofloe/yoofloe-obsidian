@@ -15,6 +15,7 @@ class Element {
   getBoundingClientRect(){return {width:360,height:750};}
   createEl(tag,options={}){const e=new Element();e.tag=tag;e.text=options.text;e.cls=options.cls;this.children.push(e);return e;}
   createDiv(options){return this.createEl('div',options);}all(){return [this,...this.children.flatMap(e=>e.all())];}
+  querySelectorAll(selector){return this.all().filter(e=>e.tag===selector);}
   controls(){return this.all().flatMap(e=>e.settings.flatMap(s=>s.controls));}
 }
 class Control {

@@ -71,7 +71,12 @@ export class NoteModal extends Modal {
       result.createEl("h3", { text: "Your draft" });
       const markdown = safeNoteMarkdown(work.draft.text), preview = result.createDiv({ cls: "calendar-note-markdown" });
       if (new TextEncoder().encode(markdown).length <= 131072) {
-        void MarkdownRenderer.render(this.app, markdown, preview, work.target.path, this.rendering).catch(() => { preview.empty(); preview.createEl("pre", { text: markdown }); });
+        void MarkdownRenderer.render(this.app, markdown, preview, work.target.path, this.rendering).then(() => {
+          for (const table of preview.querySelectorAll("table")) {
+            const wrapper = preview.ownerDocument.createElement("div"); wrapper.className = "calendar-note-table";
+            table.parentElement?.insertBefore(wrapper, table); wrapper.appendChild(table);
+          }
+        }).catch(() => { preview.empty(); preview.createEl("pre", { text: markdown }); });
       } else { preview.createEl("p", { text: "Large draft shown as Markdown source. The full result is kept." }); preview.createEl("pre", { text: markdown }); }
     }
     else result.createEl("p", { text: work.busy ? "Working… You can hide this sheet and return from the note’s AI action." : "Ask about this text, or choose an action below. Nothing is sent until you generate.", cls: "calendar-note-meta" });

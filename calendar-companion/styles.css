@@ -73,8 +73,9 @@
 .calendar-note-composer:empty, .calendar-note-submit:empty { display: none; }
 .calendar-note-submit { flex-shrink: 0; padding: 0.35rem 1rem 0.65rem; background: var(--background-primary); }
 .calendar-note-submit .setting-item, .calendar-note-submit .setting-item-control, .calendar-note-submit button { width: 100%; }
-.calendar-note-markdown { min-width: 0; overflow-wrap: anywhere; }
-.calendar-note-markdown .mermaid, .calendar-note-markdown .table-wrapper { max-width: 100%; overflow: auto; }
+.calendar-note-markdown { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.calendar-note-markdown .mermaid, .calendar-note-markdown .table-wrapper,
+.calendar-note-markdown .calendar-note-table, .calendar-note-markdown .math-block { max-width: 100%; overflow: auto; overscroll-behavior: contain; }
 .calendar-note-markdown svg { max-width: 100%; height: auto; }
 .calendar-note-more { margin-bottom: 0.45rem; }
 .calendar-note-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
