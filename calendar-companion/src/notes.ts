@@ -24,6 +24,7 @@ export async function renderRecord(datasetId: string, record: RecordSnapshot): P
 /** Preflight all conflicts before writing; create-only paths make retry safe after an interrupted batch. */
 export async function saveDelivery(delivery: Delivery, store: NoteStore, guard: () => void): Promise<{ created: number; skipped: number }> {
   guard();
+  if (delivery.version !== 2) throw Error("Search excerpts cannot be saved as full snapshots. Use the manual import to save complete records.");
   const planned = [];
   for (const record of delivery.records) {
     const path = `Yoofloe Calendar/Snapshots v2/${delivery.datasetId}/${record.kind}-${record.id}-r${record.revision}.md`;

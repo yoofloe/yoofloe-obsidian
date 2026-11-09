@@ -1,6 +1,6 @@
 # Yoofloe Calendar Companion - implementation notes
 
-Android phones and tablets only. Obsidian and Yoofloe Calendar 1.8.4 or later with
+Android phones and tablets only. Obsidian and Yoofloe Calendar 1.8.5 or later with
 Obsidian Companion support must be installed in the same Android user profile
 on the same device. Direct connection is unavailable on desktop, iPhone and
 iPad. Created notes are ordinary Markdown and remain usable without the plugin.
@@ -8,9 +8,42 @@ iPad. Created notes are ordinary Markdown and remain usable without the plugin.
 The public plugin uses registry ID `yoofloe`. Root source, manifest and build
 commands package this Calendar-focused product. Historical releases remain in Git.
 
-## Requirements and use
+## Question retrieval (transport v3)
 
-- Obsidian 1.11.5 or later and the Yoofloe Calendar 1.8.4 or later with transport v2.
+The default **Ask Calendar** flow plans a closed, bounded query locally. Users
+ask a question instead of selecting individual folders or all records. Native
+Calendar checks a remembered, encrypted Inbox binding against the current
+persisted read/write Android grant and this request's stable vault UUID. A
+resource-path hint can position the first picker; it never grants permission.
+The binding is app-private, encrypted and excluded from Android backup.
+
+Native content reads require **Find relevant records** after scope review.
+Only relevant compact excerpts return through authenticated transport v3.
+Obsidian previews exact outbound input and its SHA-256 digest before a separate
+one-use **Generate once with OpenAI** approval. No AI planner, embeddings,
+automatic provider request or retry is used. Gemini remains hidden.
+
+Queries have 1–6 explicit workspaces, an anchored civil-date period, an IANA
+zone and 0–8 canonical topic terms. Cap metadata candidates at 512, returned
+excerpts at 20 and combined UTF-8 excerpt text at 32768 bytes. The encrypted
+reply cap is 262144 bytes. Empty results are valid and never broaden to All.
+Scope, date bounds, source kinds, coverage and metric keys are validated again
+in the plugin. Partial coverage must be declared. v3 excerpts cannot be saved
+to **Snapshots v2**. Existing v2 imports are unchanged.
+
+The request's stable non-secret `calendarVaultId` is merged into existing plugin
+settings. Provider settings are serialized and preserved, including dormant
+provider fields. Existing `ycc-openai-` vault-bound secret IDs are unchanged.
+Neither URL nor provider input contains the transfer key or vault identity.
+
+See the public README for the question-first workflow. The implementation
+contract and native AES-GCM interop are exercised by `question.test.mjs` and
+the one-use UI flow by `question-ui.test.mjs`. Device evidence is recorded
+separately; local test fixtures are not proof of physical-device verification.
+
+## Manual import requirements and use (transport v2)
+
+- Obsidian 1.11.5 or later and the Yoofloe Calendar 1.8.5 or later with transport v2.
 - A vault in local device/shared storage, such as Documents. Android cannot
   grant the Calendar app access to an app-private vault through this workflow.
 - Explicit approval for the vault's `Yoofloe Calendar Inbox` directory and the
