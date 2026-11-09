@@ -51,6 +51,7 @@ export class NoteModal extends Modal {
     this.contentEl.addEventListener("focusin", focus);
     const Observer = view?.MutationObserver, observer = Observer ? new Observer(resize) : null;
     observer?.observe(this.contentEl.ownerDocument.body, { attributes: true, attributeFilter: ["style"] });
+    observer?.observe(this.contentEl.ownerDocument.documentElement, { attributes: true, attributeFilter: ["style"] });
     this.stopViewport = () => { viewport?.removeEventListener("resize", resize); this.contentEl.removeEventListener("focusin", focus); observer?.disconnect(); if (focusTimer !== null) view?.clearTimeout(focusTimer); };
     this.render(); void this.work.refreshSettings();
   }
