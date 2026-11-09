@@ -55,6 +55,7 @@ export class QuestionModal extends Modal {
   }
   private renderScope(el: HTMLElement, button: ButtonComponent): void {
     el.empty();
+    if (!this.question.trim()) { el.createEl("p", { text: "What would you like to review?", cls: "calendar-companion-hint" }); button.setDisabled(true); return; }
     try {
       const query = this.planned();
       if (!query) { el.createEl("p", { text: "Choose a workspace below, or name it in your question.", cls: "calendar-companion-hint" }); button.setDisabled(true); return; }
