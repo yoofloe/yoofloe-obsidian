@@ -53,11 +53,27 @@ function diagramAllowed(body: string): boolean {
 }
 const CODE_LANGUAGES = new Set("text txt plaintext md markdown json yaml yml csv tsv xml html css js javascript ts typescript jsx tsx python py kotlin java swift c cpp csharp go rust ruby r sql bash sh shell powershell diff latex tex math".split(" "));
 
+/** Normalize every fence, including quoted/list/indented examples, before tracking top-level diagrams. */
+function inertFence(line: string): string {
+  let rest = line, prefix = "";
+  while (rest) {
+    const whitespace = /^[ \t]*/.exec(rest)![0]; prefix += whitespace; rest = rest.slice(whitespace.length);
+    const container = /^(?:>[ \t]?|[-*+][ \t]+|\d+[.)][ \t]+)/.exec(rest);
+    if (!container) break;
+    prefix += container[0]; rest = rest.slice(container[0].length);
+  }
+  const fence = /^(`{3,}|~{3,})(.*)$/.exec(rest);
+  if (!fence || !fence[2].trim()) return line;
+  const language = fence[2].trim().split(/\s/)[0].toLowerCase();
+  return prefix + fence[1] + (CODE_LANGUAGES.has(language) ? language : "text");
+}
+
 /** Keep native document formatting, tables, math and diagrams; deactivate embeds and plugin code. */
 export function safeNoteMarkdown(value: string): string {
   let fence: { char: string; length: number; start: number; language: string; body: string[] } | null = null;
   const lines: string[] = [];
   for (const line of value.replace(/\r\n?/g, "\n").replaceAll(String.fromCharCode(0), "").split("\n")) {
+    const normalized = inertFence(line);
     const match = /^( {0,3})(`{3,}|~{3,})(.*)$/.exec(line);
     if (match) {
       const char = match[2][0];
@@ -68,11 +84,12 @@ export function safeNoteMarkdown(value: string): string {
       }
       if (char === fence.char && match[2].length >= fence.length && !match[3].trim()) {
         if (fence.language === "mermaid" && diagramAllowed(fence.body.join("\n"))) lines[fence.start] = fence.char.repeat(fence.length) + "mermaid";
-        fence = null; lines.push(line); continue;
+        fence = null; lines.push(normalized); continue;
       }
     }
-    if (fence) { fence.body.push(line); lines.push(line); continue; }
-    const inert = line.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/^(\s*(?:&gt;\s*)+)/, prefix => prefix.replace(/&gt;/g, ">"))
+    if (fence) { fence.body.push(line); lines.push(normalized); continue; }
+    const inert = normalized.replace(/(`+)([ \t]*\$?=)/g, "$1\u200b$2")
+      .replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/^(\s*(?:&gt;\s*)+)/, prefix => prefix.replace(/&gt;/g, ">"))
       .replace(/\\*!\[/g, "\\![")
       .replace(/\b(javascript|vbscript|data|file|obsidian):/gi, "$1\\:");
     lines.push(inert);
