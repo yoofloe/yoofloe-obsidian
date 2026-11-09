@@ -40,6 +40,7 @@ export class AiWorkspace {
   private listeners = new Set<() => void>();
   private saveQueue: Promise<void> = Promise.resolve();
   private lastRequest = "";
+  private initialization: Promise<void> | null = null;
   constructor(private readonly options: {
     current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport;
     gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; calendar?: () => CalendarSession; inboxHint(): string;
@@ -51,12 +52,17 @@ export class AiWorkspace {
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   changed(): void { if (this.current) for (const listener of this.listeners) listener(); }
   async initialize(): Promise<void> {
+    if (!this.initialization) this.initialization = this.load();
+    await this.initialization;
+  }
+  private async load(): Promise<void> {
     if (this.ready) return;
     try {
       const raw = await this.options.storage.load(); if (!this.current) return;
       if (raw && typeof raw === "object") {
         const saved = raw as Record<string, unknown>;
         if (typeof saved.prompt === "string" && saved.prompt.length <= 32000) this.prompt = saved.prompt;
+        if (typeof saved.lastRequest === "string") this.lastRequest = saved.lastRequest.slice(0, 32000);
         if (typeof saved.source === "string" && this.options.host(() => this.current).files().some(file => file.path === saved.source)) this.source = { path: saved.source };
         if (["ask", "edit", "organize"].includes(String(saved.mode))) this.mode = saved.mode as WorkMode;
         for (const key of ["readScope", "writeScope"] as const) if (["current", "folder", "vault"].includes(String(saved[key]))) this[key] = saved[key] as WorkScope;
@@ -93,6 +99,11 @@ export class AiWorkspace {
   private createTask(executor: { execute(name: string, args: unknown): Promise<unknown> }): AgentTask {
     return new AgentTask({ current: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate });
   }
+  private rememberLast(): void {
+    if (!this.result) return;
+    const turn = { request: this.lastRequest, answer: this.result };
+    if (this.previous.at(-1)?.request !== turn.request || this.previous.at(-1)?.answer !== turn.answer) this.previous = [...this.previous, turn].slice(-2);
+  }
   private async prepare(agent: VaultAgent): Promise<string> {
     const note = await agent.initialContext(); if (!this.current) throw Error("Vault changed.");
     if (this.delivery) this.calendar?.assertCanSave(this.delivery);
@@ -113,7 +124,7 @@ export class AiWorkspace {
     this.busy = true; this.preview = ""; this.changed();
     let task: AgentTask | null = null;
     try {
-      if (this.task?.text) this.previous = [...this.previous, { request: this.lastRequest, answer: this.task.text }].slice(-2);
+      this.rememberLast();
       const agent = new VaultAgent(this.options.host(() => this.current && !task?.stopped), this.policy(), () => this.current && !task?.stopped);
       const input = await this.prepare(agent); if (!this.current) return;
       await this.persist(); // Draft is recoverable before the first billable request.
@@ -135,7 +146,7 @@ export class AiWorkspace {
   stop(): void { this.task?.stop(); this.changed(); }
   async newTask(source: WorkspaceSource | null = this.nextSource ?? this.source): Promise<void> {
     if (this.busy) return;
-    if (this.result) this.previous = [...this.previous, { request: this.prompt, answer: this.result }].slice(-2);
+    this.rememberLast();
     this.prompt = ""; this.task = null; this.agent = null; this.message = "Ready. No data is sent until you start."; this.bind(source, true); await this.persist(); this.changed();
   }
   async undo(journal: WorkJournal): Promise<void> {
@@ -172,7 +183,7 @@ export class AiWorkspace {
   }
   async removeCalendar(): Promise<void> { if (this.busy) return; await this.calendar?.dispose(); this.calendar = null; this.delivery = null; this.preview = ""; this.changed(); }
   persist(): Promise<void> {
-    const value = { prompt: this.prompt, source: this.source?.path ?? null, mode: this.mode, readScope: this.readScope, writeScope: this.writeScope,
+    const value = { prompt: this.prompt, lastRequest: this.lastRequest, source: this.source?.path ?? null, mode: this.mode, readScope: this.readScope, writeScope: this.writeScope,
       outputFolder: this.outputFolder, excluded: this.excluded, maximum: this.maximum, result: this.result, previous: this.previous };
     const next = this.saveQueue.then(async () => { if (!this.current) return; await this.options.storage.save(value); }); this.saveQueue = next.catch(() => {}); return next;
   }

@@ -74,10 +74,12 @@ export default class YoofloeAiPlugin extends Plugin {
   }
   private async showWorkspace(sourceView?: MarkdownView): Promise<void> {
     if (!this.live) return;
-    const active = sourceView ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = this.app.workspace.getActiveFile();
+    const active = sourceView ?? this.app.workspace.getActiveViewOfType(MarkdownView) ?? this.app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).find((view): view is MarkdownView => view instanceof MarkdownView && view.file === file);
     if (active) {
-      this.lastSource = this.capture(active);
-      if (this.lastSource?.selection) this.lastSource.selectionVersion = await inputDigest(active.editor.getValue());
+      const source = this.capture(active);
+      if (source?.selection) source.selectionVersion = await inputDigest(active.editor.getValue());
+      this.lastSource = source;
     }
     const work = this.workspace(); await work.initialize(); if (!this.live) return; work.bind(this.lastSource);
     let leaf = this.app.workspace.getLeavesOfType(AI_VIEW)[0];

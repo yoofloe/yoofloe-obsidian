@@ -62,13 +62,13 @@ export class YoofloeAiView extends ItemView {
     }
     if (w.nextSource) this.button(scroll, `New task for ${w.nextSource.path.split("/").at(-1)}`, () => void w.newTask(w.nextSource), w.busy, "y-ai-next");
     const models = scroll.createDiv({ cls: "y-ai-models" }), choices: Record<string, string> = {};
-    for (const model of modelCatalog("openai").models) choices[model.id] = model.label;
+    for (const model of modelCatalog("openai").models) choices[model.id] = model.label.replace(/^GPT-[\d.]+ /, "");
     if (w.model.model && !choices[w.model.model]) choices[w.model.model] = `Custom · ${w.model.model}`;
     this.select(models, "Model", choices, w.model.model, value => { void w.setModel({ model: value }); });
     const efforts: Record<string, string> = { default: EFFORT_LABELS.default };
     for (const effort of supportedEfforts(w.model.model)) efforts[effort] = EFFORT_LABELS[effort];
     this.select(models, "Thinking depth", efforts, w.model.effort ?? resolveEffort(w.model.model) ?? "default", value => { void w.setModel({ ...w.model, effort: value }); });
-    const scope = this.details(scroll, "scope", `${MODE_LABELS[w.mode]} · data: ${SCOPE_LABELS[w.readScope]}${w.source?.selection && w.readScope === "current" ? " selection" : ""}`);
+    const scope = this.details(scroll, "scope", `${MODE_LABELS[w.mode]} · data: ${w.readScope === "current" && !w.source ? "No attached note" : SCOPE_LABELS[w.readScope]}${w.source?.selection && w.readScope === "current" ? " selection" : ""}`);
     this.select(scope, "Allowed actions", MODE_LABELS, w.mode, value => { w.mode = value; this.render(); });
     this.select(scope, "Data sent to OpenAI", SCOPE_LABELS, w.readScope, value => { w.readScope = value; this.render(); });
     if (w.mode !== "ask") this.select(scope, "Notes AI can change", SCOPE_LABELS, w.writeScope, value => { w.writeScope = value; });
@@ -134,10 +134,10 @@ export class YoofloeAiView extends ItemView {
     const compose = el.createDiv({ cls: "y-ai-compose" });
     const prompt = compose.createEl("textarea", { text: w.prompt, attr: { rows: "3", "aria-label": "Ask Yoofloe AI", placeholder: w.source ? "What should we do with your notes?" : "Describe a document to create…" } }); prompt.disabled = w.busy; prompt.maxLength = 32000;
     const dock = el.createDiv({ cls: "y-ai-dock" });
-    const privacy = dock.createEl("p", { text: `Direct to OpenAI · your key · API charges apply. ${w.mode === "ask" ? "Read only" : "May change notes in the chosen scope"}. Up to ${w.maximum} request(s).`, cls: "y-ai-hint" }); privacy.setAttribute("title", "Data is sent to OpenAI, including additional relevant note excerpts within the permitted scope. Local key storage does not make AI local.");
+    const privacy = dock.createEl("p", { text: `OpenAI · API charges · max ${w.maximum} request(s). ${w.mode === "ask" ? "Read only" : `Edits: ${SCOPE_LABELS[w.writeScope]}`}.`, cls: "y-ai-hint" }); privacy.setAttribute("title", "Data goes directly to OpenAI, including relevant note excerpts within the permitted scope. Local key storage does not make AI local. New notes may be created in the output folder.");
     const controls = dock.createDiv({ cls: "y-ai-row" });
     this.button(controls, "Review data", () => void w.review(), w.busy);
-    const run = this.button(controls, w.busy ? "Stop" : "Send to OpenAI and start", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, !w.busy && (!w.ready || !w.configured || !w.prompt.trim()), w.busy ? "mod-warning" : "mod-cta");
+    const run = this.button(controls, w.busy ? "Stop" : "Send to OpenAI", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, !w.busy && (!w.ready || !w.configured || !w.prompt.trim()), w.busy ? "mod-warning" : "mod-cta");
     prompt.addEventListener("input", () => { w.setPrompt(prompt.value); run.disabled = !w.ready || !w.configured || !w.prompt.trim(); this.saveSoon(); });
     prompt.addEventListener("keydown", event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !run.disabled && !w.busy) { event.preventDefault(); run.click(); } });
     scroll.scrollTop = oldScroll;
