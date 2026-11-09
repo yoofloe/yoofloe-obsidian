@@ -2,13 +2,14 @@ import { MAX_RECORDS, type RecordSnapshot, type DeliveryV3 } from "./protocol";
 import { buildQuestionInput, inputDigest } from "./question-input";
 import { buildNoteInput, NOTE_INSTRUCTION, type NoteCapture } from "./note-context";
 import { noteAnswerFormat, NOTE_CHANGE_INSTRUCTION, type NoteExtra } from "./note-workspace";
+import { resolveEffort, type EffortSetting, type ReasoningEffort } from "./effort";
 
 export type AiProvider = "openai" | "gemini";
-export interface AiModelOptions { model: string }
+export interface AiModelOptions { model: string; effort?: EffortSetting }
 export interface AiOptions extends AiModelOptions { provider: AiProvider }
 export interface AiReview {
   readonly provider: AiProvider; readonly model: string; readonly input: string; readonly recordCount: number;
-  readonly reasoningEffort?: "none" | "low";
+  readonly reasoningEffort?: ReasoningEffort;
   readonly digest?: string;
   readonly instructions?: string;
   readonly responseFormat?: Record<string, unknown>;
@@ -18,7 +19,7 @@ export interface AiHttpRequest { url: string; method: "POST"; headers: Record<st
 export type AiTransport = (request: AiHttpRequest) => Promise<{ status: number; text: string }>;
 export interface AiAdapter {
   provider: AiProvider; label: string; validateModel(model: string): void; validateKey(value: string): string;
-  profile?(model: string): { reasoningEffort?: "none" | "low" };
+  profile?(model: string): { reasoningEffort?: ReasoningEffort };
   request(review: AiReview, key: string): AiHttpRequest;
   parse(status: number, raw: string): AiDraft;
 }
@@ -39,6 +40,7 @@ export class AiSession {
   get enabled() { return this.active; }
   get inFlight() { return this.busy || !!this.options.gate?.busy; }
   enableForSession(enabled: boolean): void { this.active = enabled; this.epoch++; }
+  private profile(adapter: AiAdapter, options: AiModelOptions) { return adapter.provider === "openai" ? { reasoningEffort: resolveEffort(options.model, options.effort) } : adapter.profile?.(options.model); }
   private guard(epoch: number) {
     if (!this.active || !this.options.current() || epoch !== this.epoch) throw Error("AI is disabled or this review session changed.");
   }
@@ -52,7 +54,7 @@ export class AiSession {
     if (records.length < 1 || records.length > MAX_RECORDS || !prompt.trim() || encoder.encode(prompt).length > 4000) throw Error("Choose 1-50 records and a prompt of at most 4000 UTF-8 bytes.");
     const input = JSON.stringify({ request: prompt.trim(), calendar_records: records.map(record => ({ kind: record.kind, title: record.title, text: record.text, date: record.date })) });
     if (encoder.encode(input).length > MAX_AI_INPUT_BYTES) throw Error("This selection exceeds the 1 MiB input limit. Choose fewer or smaller records.");
-    const review = Object.freeze({ provider, model: options.model, input, recordCount: records.length, ...adapter.profile?.(options.model) });
+    const review = Object.freeze({ provider, model: options.model, input, recordCount: records.length, ...this.profile(adapter, options) });
     this.reviews.set(review, { epoch: this.epoch, used: false, current }); return review;
   }
   async generate(review: AiReview, confirmed: boolean): Promise<AiDraft> {
@@ -89,7 +91,7 @@ export class AiSession {
     const review = Object.freeze({ provider: "openai" as const, model: options.model, input, digest,
       recordCount: 1 + (calendar?.records.length ?? 0) + (context.documents?.length ?? 0),
       instructions: NOTE_INSTRUCTION + (context.proposeEdits ? " " + NOTE_CHANGE_INSTRUCTION : ""),
-      ...(context.proposeEdits ? { responseFormat: noteAnswerFormat(["N1", ...(context.documents ?? []).map(doc => doc.reference)]) } : {}), ...adapter.profile?.(options.model) });
+      ...(context.proposeEdits ? { responseFormat: noteAnswerFormat(["N1", ...(context.documents ?? []).map(doc => doc.reference)]) } : {}), ...this.profile(adapter, options) });
     this.reviews.set(review, { epoch, used: false, current }); return review;
   }
   /** Query retrieval has a separate compact input and never persists full-snapshot records. */
@@ -102,7 +104,7 @@ export class AiSession {
     if (encoder.encode(input).length > MAX_AI_INPUT_BYTES) throw Error("The question input exceeds its data budget.");
     const digest = await inputDigest(input); this.guard(epoch);
     if (!current()) throw Error("The question or records changed. Find relevant records again.");
-    const review = Object.freeze({ provider: "openai" as const, model: options.model, input, digest, recordCount: delivery.records.length, ...adapter.profile?.(options.model) });
+    const review = Object.freeze({ provider: "openai" as const, model: options.model, input, digest, recordCount: delivery.records.length, ...this.profile(adapter, options) });
     this.reviews.set(review, { epoch, used: false, current }); return review;
   }
 }
