@@ -148,6 +148,15 @@
 .yoofloe-ai.y-ai-compact .y-ai-dock .y-ai-row { margin: 0.15rem 0; }
 .yoofloe-ai.y-ai-compact .y-ai-privacy-full { display: none; }
 .yoofloe-ai.y-ai-compact .y-ai-privacy-short { display: inline; }
+.yoofloe-ai .y-ai-run-tiny { display: none; }
+.yoofloe-ai.y-ai-tiny .y-ai-header, .yoofloe-ai.y-ai-tiny .y-ai-scroll, .yoofloe-ai.y-ai-tiny .y-ai-dock .y-ai-hint { display: none; }
+.yoofloe-ai.y-ai-tiny .y-ai-compose { min-height: 44px; height: 44px; padding: 2px 8px; }
+.yoofloe-ai.y-ai-tiny .y-ai-compose textarea { min-height: 40px; height: 40px; padding: 0.15rem 0.4rem; line-height: 1.2; }
+.yoofloe-ai.y-ai-tiny .y-ai-dock { padding: 2px 8px; }
+.yoofloe-ai.y-ai-tiny .y-ai-dock .y-ai-row { margin: 0; }
+.yoofloe-ai.y-ai-tiny .y-ai-dock button { min-height: 36px; padding: 0.2rem 0.4rem; line-height: 1.15; font-size: var(--font-ui-small); }
+.yoofloe-ai.y-ai-tiny .y-ai-run-full { display: none; }
+.yoofloe-ai.y-ai-tiny .y-ai-run-tiny { display: inline; }
 .yoofloe-ai.y-ai-keyboard .y-ai-heading p { max-height: 1.5em; }
 .yoofloe-ai.y-ai-keyboard .y-ai-header { padding-block: 0.25rem; }
 .yoofloe-ai.y-ai-keyboard .y-ai-compose textarea { height: 3rem; min-height: 3rem; }

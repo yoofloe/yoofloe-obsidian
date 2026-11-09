@@ -142,7 +142,11 @@ export class YoofloeAiView extends ItemView {
     privacy.setAttribute("title", "Data goes directly to OpenAI, including relevant note excerpts within the permitted scope. Local key storage does not make AI local. New notes may be created in the output folder.");
     const controls = dock.createDiv({ cls: "y-ai-row" });
     this.button(controls, "Review data", () => void w.review(), w.busy);
-    const run = this.button(controls, w.busy ? "Stop" : "Send to OpenAI", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, !w.busy && (!w.ready || !w.configured || !w.prompt.trim()), w.busy ? "mod-warning" : "mod-cta");
+    const run = this.button(controls, w.busy ? "Stop" : "", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, !w.busy && (!w.ready || !w.configured || !w.prompt.trim()), w.busy ? "mod-warning" : "mod-cta");
+    if (!w.busy) {
+      run.createEl("span", { text: "Send to OpenAI", cls: "y-ai-run-full" });
+      run.createEl("span", { text: `Send to OpenAI · paid · max ${w.maximum} calls`, cls: "y-ai-run-tiny" });
+    }
     prompt.addEventListener("input", () => { w.setPrompt(prompt.value); run.disabled = !w.ready || !w.configured || !w.prompt.trim(); this.saveSoon(); });
     prompt.addEventListener("keydown", event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !run.disabled && !w.busy) { event.preventDefault(); run.click(); } });
     scroll.scrollTop = oldScroll;
@@ -158,6 +162,8 @@ export class YoofloeAiView extends ItemView {
       const available = Math.max(100, bottom - top - (visual ? 0 : keyboard));
       root.style.maxHeight = `${available}px`;
       root.classList.toggle("y-ai-compact", Math.min(root.parentElement?.clientHeight ?? available, available) < 340);
+      root.classList.toggle("y-ai-tiny", available < 190 && (keyboard > 50 || visual));
+      if (root.classList.contains("y-ai-tiny")) root.scrollTop = 0;
       win.clearTimeout(timer); timer = win.setTimeout(() => { const active = doc.activeElement; if (active instanceof HTMLElement && root.contains(active) && active.matches("textarea,input,select")) active.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }); }, 350);
     };
     const focus = () => { const active = doc.activeElement; root.classList.toggle("y-ai-editing-scope", active instanceof HTMLElement && !!active.closest(".y-ai-scroll") && active.matches("input,textarea")); resize(); };
