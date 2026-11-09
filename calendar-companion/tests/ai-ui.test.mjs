@@ -43,7 +43,7 @@ class Setting {
   addButton(cb) { return this.add(cb); } addText(cb) { return this.add(cb); } addTextArea(cb) { return this.add(cb); } addToggle(cb) { return this.add(cb); } addDropdown(cb) { return this.add(cb); }
 }
 function modals() {
-  const context = { module: { exports: {} }, require: name => { assert.equal(name, 'obsidian'); return { App: class {}, Modal, Setting }; }, crypto, TextEncoder, TextDecoder, Date, Error };
+  const context = { module: { exports: {} }, require: name => { assert.equal(name, 'obsidian'); return { App: class {}, Modal, Setting, Notice: class {} }; }, crypto, TextEncoder, TextDecoder, Date, Error };
   vm.runInNewContext(bundle.outputFiles[0].text, context); return context.module.exports;
 }
 const button = (modal, text) => { const found = modal.contentEl.allSettings().flatMap(row => row.controls).find(control => control.text === text); assert(found, `button ${text}`); return found; };
@@ -69,6 +69,7 @@ test('settings UI loads disabled, stores and removes a synthetic key with zero t
   const input = field(modal, 'No API key saved'); assert.equal(input.inputEl.type, 'password'); assert.equal(input.inputEl.value, '');
   input.inputEl.value = 'sk-offline-fixture-only-never-real'; button(modal, 'Save key locally').fire(); await settle();
   assert.equal(f.calls.length, 0); assert.equal(field(modal, 'API key saved locally').inputEl.value, '');
+  assert(modal.contentEl.allText().includes('Key saved on this device. API access is checked only when you generate.'));
   field(modal, 'Enable OpenAI for this session').fire(true); assert.equal(f.ai.session.enabled, true); assert.equal(f.calls.length, 0);
   button(modal, 'Remove saved key').fire(); await settle(); assert.equal(f.ai.session.enabled, false); assert.equal(f.calls.length, 0);
   modal.close(); assert.equal(closed, true);

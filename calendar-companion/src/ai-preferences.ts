@@ -66,6 +66,8 @@ export class AiPreferences {
     const key = validateOpenAiKey(value), id = await this.secretId(provider); this.guard();
     const storage = this.host.secrets(); if (!storage) throw Error("Obsidian secret storage is unavailable.");
     storage.setSecret(id, key);
+    this.guard();
+    if (storage.getSecret(id) !== key) throw Error("The key could not be confirmed in local secret storage.");
   }
   async clearKey(provider: AiProvider = "openai"): Promise<void> {
     const id = await this.secretId(provider); this.guard();
