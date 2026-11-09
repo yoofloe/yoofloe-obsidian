@@ -136,7 +136,10 @@ export class YoofloeAiView extends ItemView {
     const compose = el.createDiv({ cls: "y-ai-compose" });
     const prompt = compose.createEl("textarea", { text: w.prompt, attr: { rows: "3", "aria-label": "Ask Yoofloe AI", placeholder: w.source ? "What should we do with your notes?" : "Describe a document to create…" } }); prompt.disabled = w.busy; prompt.maxLength = 32000;
     const dock = el.createDiv({ cls: "y-ai-dock" });
-    const privacy = dock.createEl("p", { text: `OpenAI · API charges · max ${w.maximum} request(s). ${w.mode === "ask" ? "Read only" : `Edits: ${SCOPE_LABELS[w.writeScope]}`}.`, cls: "y-ai-hint" }); privacy.setAttribute("title", "Data goes directly to OpenAI, including relevant note excerpts within the permitted scope. Local key storage does not make AI local. New notes may be created in the output folder.");
+    const privacy = dock.createEl("p", { cls: "y-ai-hint" });
+    privacy.createEl("span", { text: `OpenAI · API charges · max ${w.maximum} request(s). ${w.mode === "ask" ? "Read only" : `Edits: ${SCOPE_LABELS[w.writeScope]}`}.`, cls: "y-ai-privacy-full" });
+    privacy.createEl("span", { text: `OpenAI · paid · ${w.mode === "ask" ? "read only" : `${w.mode === "organize" ? "organize" : "edit"} ${w.writeScope === "current" ? "note" : w.writeScope}`} · ${w.maximum} calls max`, cls: "y-ai-privacy-short" });
+    privacy.setAttribute("title", "Data goes directly to OpenAI, including relevant note excerpts within the permitted scope. Local key storage does not make AI local. New notes may be created in the output folder.");
     const controls = dock.createDiv({ cls: "y-ai-row" });
     this.button(controls, "Review data", () => void w.review(), w.busy);
     const run = this.button(controls, w.busy ? "Stop" : "Send to OpenAI", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, !w.busy && (!w.ready || !w.configured || !w.prompt.trim()), w.busy ? "mod-warning" : "mod-cta");
@@ -152,8 +155,9 @@ export class YoofloeAiView extends ItemView {
       const visual = !!viewport && win.innerHeight - viewport.height > 80;
       root.classList.toggle("y-ai-keyboard", keyboard > 50 || visual);
       const top = root.getBoundingClientRect().top, bottom = viewport ? viewport.offsetTop + viewport.height : win.innerHeight;
-      const available = Math.max(160, bottom - top - (visual ? 0 : keyboard));
+      const available = Math.max(100, bottom - top - (visual ? 0 : keyboard));
       root.style.maxHeight = `${available}px`;
+      root.classList.toggle("y-ai-compact", Math.min(root.parentElement?.clientHeight ?? available, available) < 340);
       win.clearTimeout(timer); timer = win.setTimeout(() => { const active = doc.activeElement; if (active instanceof HTMLElement && root.contains(active) && active.matches("textarea,input,select")) active.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }); }, 350);
     };
     const focus = () => { const active = doc.activeElement; root.classList.toggle("y-ai-editing-scope", active instanceof HTMLElement && !!active.closest(".y-ai-scroll") && active.matches("input,textarea")); resize(); };

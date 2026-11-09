@@ -83,7 +83,11 @@ export default class YoofloeAiPlugin extends Plugin {
     }
     const work = this.workspace(); await work.initialize(); if (!this.live) return; work.bind(this.lastSource);
     let leaf = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
-    if (!leaf) { leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true); await leaf.setViewState({ type: AI_VIEW, active: true }); }
+    if (Platform.isPhone && leaf && leaf.getRoot() !== this.app.workspace.rootSplit) {
+      const previous = leaf; leaf = this.app.workspace.getLeaf(true); await leaf.setViewState({ type: AI_VIEW, active: true });
+      if (previous.view.getViewType() === AI_VIEW) previous.detach();
+    }
+    if (!leaf) { leaf = Platform.isPhone ? this.app.workspace.getLeaf(true) : this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true); await leaf.setViewState({ type: AI_VIEW, active: true }); }
     await this.app.workspace.revealLeaf(leaf);
   }
   private async mergeLegacyPanels(): Promise<void> {
