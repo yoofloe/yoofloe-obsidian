@@ -26,3 +26,9 @@ test('future durations and next calendar week use future civil dates without a n
  const dst=planQuestion('calendar next week',{zone},Date.UTC(2026,9,24,22)).query;assert.deepEqual(resolvePeriod(dst,now),{from:'2026-10-26',through:'2026-11-01'});
  const past=planQuestion('calendar last 7 days',{zone},now).query;assert.equal(past.period,'last_7_days');
 });
+import { localSecretBinding } from '../dist/ai-preferences.js';
+test('desktop cache timestamps never change the key binding; the existing Android resource stays identical', () => {
+  const path='C:\\Vaults\\Mine', first=localSecretBinding('app://local/C:/Vaults/Mine?100',path), second=localSecretBinding('app://different/C:/Vaults/Mine?200',path);
+  assert.equal(first,second);assert.notEqual(first,localSecretBinding('ignored','C:\\Vaults\\Other'));
+  const android='http://localhost/_capacitor_file_/storage/emulated/0/Documents/MyVault';assert.equal(localSecretBinding(android),android);
+});

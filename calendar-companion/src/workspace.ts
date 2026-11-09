@@ -64,6 +64,12 @@ export class AiWorkspace {
         if (typeof saved.prompt === "string" && saved.prompt.length <= 32000) this.prompt = saved.prompt;
         if (typeof saved.lastRequest === "string") this.lastRequest = saved.lastRequest.slice(0, 32000);
         if (typeof saved.source === "string" && this.options.host(() => this.current).files().some(file => file.path === saved.source)) this.source = { path: saved.source };
+        if (this.source && saved.selection && typeof saved.selection === "object") {
+          const selection = saved.selection as Record<string, unknown>;
+          if (typeof selection.from === "number" && typeof selection.to === "number" && Number.isSafeInteger(selection.from) && Number.isSafeInteger(selection.to) && selection.from >= 0 && selection.to > selection.from && typeof saved.selectionVersion === "string" && /^[a-f0-9]{64}$/.test(saved.selectionVersion)) {
+            this.source.selection = { from: selection.from, to: selection.to }; this.source.selectionVersion = saved.selectionVersion;
+          }
+        }
         if (["ask", "edit", "organize"].includes(String(saved.mode))) this.mode = saved.mode as WorkMode;
         for (const key of ["readScope", "writeScope"] as const) if (["current", "folder", "vault"].includes(String(saved[key]))) this[key] = saved[key] as WorkScope;
         if (typeof saved.outputFolder === "string") this.outputFolder = saved.outputFolder.slice(0, 500);
@@ -183,7 +189,7 @@ export class AiWorkspace {
   }
   async removeCalendar(): Promise<void> { if (this.busy) return; await this.calendar?.dispose(); this.calendar = null; this.delivery = null; this.preview = ""; this.changed(); }
   persist(): Promise<void> {
-    const value = { prompt: this.prompt, lastRequest: this.lastRequest, source: this.source?.path ?? null, mode: this.mode, readScope: this.readScope, writeScope: this.writeScope,
+    const value = { prompt: this.prompt, lastRequest: this.lastRequest, source: this.source?.path ?? null, selection: this.source?.selection, selectionVersion: this.source?.selectionVersion, mode: this.mode, readScope: this.readScope, writeScope: this.writeScope,
       outputFolder: this.outputFolder, excluded: this.excluded, maximum: this.maximum, result: this.result, previous: this.previous };
     const next = this.saveQueue.then(async () => { if (!this.current) return; await this.options.storage.save(value); }); this.saveQueue = next.catch(() => {}); return next;
   }

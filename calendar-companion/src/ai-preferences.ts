@@ -5,6 +5,8 @@ import type { AiModelOptions, AiProvider } from "./ai-session";
 import { isEffortSetting, resolveEffort } from "./effort";
 
 export const DEFAULT_OPENAI_OPTIONS: AiModelOptions = { model: DEFAULT_OPENAI_MODEL };
+/** Desktop resource URLs contain a changing cache timestamp. Android keeps the existing secret binding byte-for-byte. */
+export function localSecretBinding(resource: string, basePath?: string): string { return basePath ? `file-system:${basePath.replaceAll("\\", "/")}` : resource; }
 export interface AiPreferenceHost {
   current(): boolean; binding(): string; load(): Promise<unknown>; save(value: unknown): Promise<void>;
   secrets(): { getSecret(id: string): string | null; setSecret(id: string, secret: string): void } | null;
