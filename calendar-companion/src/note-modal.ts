@@ -22,7 +22,7 @@ export class NoteModal extends Modal {
     const resize = () => {
       if (!this.alive) return;
       if (viewport) this.modalEl.style.setProperty("--ycc-viewport-height", `${viewport.height}px`);
-      const wide = this.modalEl.getBoundingClientRect().width >= 740;
+      const wide = this.contentEl.getBoundingClientRect().width >= 740;
       if (wide !== this.wide && this.sourceEl) this.sourceEl.open = wide;
       this.wide = wide;
     };
@@ -44,12 +44,14 @@ export class NoteModal extends Modal {
     if (!this.alive || !this.work.current) return;
     const work = this.work, el = this.contentEl; el.empty();
     const header = el.createDiv({ cls: "calendar-note-header" });
-    header.createEl("h2", { text: "Note AI" });
+    const heading = header.createDiv(); heading.createEl("h2", { text: "Note AI" });
+    heading.createEl("p", { text: work.target.title, cls: "calendar-note-title", attr: { title: work.target.title } });
     this.button(header, "Hide", () => this.close());
     const scroll = el.createDiv({ cls: "calendar-note-scroll" });
-    scroll.createEl("p", { text: work.target.title, cls: "calendar-note-title" });
     scroll.createEl("p", { text: `${work.source?.scope === "selection" ? "Selected text" : work.source?.scope === "section" ? "Current section" : "Current note"} · ${work.delivery ? `+ ${work.delivery.records.length} Calendar excerpt(s)` : "Note only"}`, cls: "calendar-note-meta" });
     if (work.message) scroll.createEl("p", { text: work.message, cls: "calendar-note-status", attr: { role: "status", "aria-live": "polite" } });
+    const next = this.options.nextTitle();
+    if (next || work.used) this.button(scroll, next ? `Discard and start for ${next}` : "New request (discard this result)", () => this.options.startNew(), work.busy);
     if (!work.source && !work.busy) this.button(scroll, "Use current section", () => void work.initialize(true));
     const grid = scroll.createDiv({ cls: "calendar-note-grid" });
     const source = grid.createEl("details", { cls: "calendar-note-source" }); this.sourceEl = source; source.open = this.wide;
@@ -116,7 +118,5 @@ export class NoteModal extends Modal {
         void clipboard.writeText(safeNoteMarkdown(work.draft.text)).then(() => work.report("Result copied."), () => work.report("Clipboard unavailable. Select and copy the draft text."));
       }, work.busy);
     }
-    const next = this.options.nextTitle();
-    if (next || work.used) this.button(footer, next ? `Discard and start for ${next}` : "New request (discard this result)", () => this.options.startNew(), work.busy);
   }
 }

@@ -45,6 +45,9 @@
   flex-shrink: 0;
 }
 .calendar-note-header h2 { font-size: var(--font-ui-medium); margin: 0; }
+.calendar-note-header > div:first-child { min-width: 0; }
+.calendar-note-header .calendar-note-title { font-size: var(--font-small); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0.25rem 0 0; }
+.is-mobile .modal-container.calendar-note-container .modal.calendar-note-modal { padding: 0; }
 .modal.calendar-note-modal .calendar-note .setting-item { border: 0; padding: 0; min-width: 0; }
 .calendar-note .calendar-note-button .setting-item-info,
 .calendar-note .calendar-note-input .setting-item-info { display: none; }
@@ -79,6 +82,12 @@
   .calendar-note-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
   .calendar-note-source { min-width: 0; }
   .calendar-note-result { margin-top: 0; }
+}
+@media (max-height: 500px) {
+  .calendar-note-header { padding-block: 0.3rem; }
+  .calendar-note-composer { padding-block: 0.35rem; max-height: 60%; }
+  .calendar-note-composer textarea { min-height: 44px; height: 44px; }
+  .calendar-note-cost { margin-block: 0.2rem; font-size: var(--font-smallest); }
 }
 @media (max-width: 600px) {
   .is-phone .modal-container.calendar-note-container { align-items: flex-end; padding: var(--safe-area-inset-top, 0px) 0 var(--safe-area-inset-bottom, env(safe-area-inset-bottom)); }
