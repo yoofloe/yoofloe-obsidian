@@ -26,7 +26,7 @@ const array = (items: unknown) => ({ type: "array", items });
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 const tool = (name: string, description: string, properties: Record<string, unknown>) => ({ type: "function", name, description, strict: true, parameters: object(properties) });
 export function agentTools(mode: WorkMode) {
-  const read = [tool("search_notes", "Find relevant Markdown notes inside the permitted data scope. Returns references, titles and relative paths, not entire bodies.", { query: str, limit: integer }),
+  const read = [tool("search_notes", "Find relevant Markdown notes inside the permitted data scope. Returns references, titles and relative paths, not entire bodies. Start offset at 0; use next_offset for another bounded search page when coverage is partial.", { query: str, limit: integer, offset: integer }),
     tool("read_notes", "Read permitted notes or line ranges. Use returned versions for edits. Partial notes must be read further before a full replacement.", { notes: array(object({ reference: str, from_line: integer, through_line: integer })) }),
     tool("read_outline", "Inspect headings and line numbers before reading a large note.", { reference: str })];
   if (mode === "ask") return read;
@@ -34,7 +34,7 @@ export function agentTools(mode: WorkMode) {
     tool("create_note", "Create a new Markdown note in the permitted output folder. Existing files are never replaced.", { path: str, markdown: str }),
     tool("update_properties", "Update requested YAML properties, preserving other keys. Each value is a JSON string.", { reference: str, version: str, properties: array(object({ key: str, value: str })) })];
   if (mode !== "organize") return [...read, ...edit];
-  return [...read, ...edit, tool("rename_note", "Rename or move a note. All affected backlinks must stay inside the allowed edit scope.", { reference: str, version: str, path: str }),
+  return [...read, ...edit, tool("rename_note", "Rename or move a note. Links are not changed automatically: read and apply version-checked edits to the returned backlinks separately. All affected backlinks must stay inside the allowed edit scope.", { reference: str, version: str, path: str }),
     tool("create_folder", "Create a folder within the allowed work scope.", { path: str }),
     tool("propose_trash", "Propose moving notes to Trash. This never deletes; the user must select the concrete Trash action.", { references: array(str) })];
 }

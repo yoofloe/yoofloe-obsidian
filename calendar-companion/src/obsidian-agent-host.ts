@@ -1,4 +1,4 @@
-import { App, MarkdownView, TFile, TFolder, normalizePath, type Vault } from "obsidian";
+import { App, MarkdownView, TFile, TFolder, normalizePath, parseYaml, stringifyYaml, type Vault } from "obsidian";
 import { validateJournal, type AgentFile, type AgentHost, type WorkJournal } from "./vault-agent";
 import { vaultPath } from "./agent-policy";
 export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean): AgentHost {
@@ -32,10 +32,14 @@ export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean
     },
     async folder(path) { guard(); vaultPath(path, true); const existing = vault.getAbstractFileByPath(path); if (existing) { if (!(existing instanceof TFolder)) throw Error("A file occupies this folder name."); return false; } await ensure(path); guard(); return true; },
     async properties(file, expected, values) {
-      const item = fileFor(file), editor = editorFor(item);
-      if (await read(file) !== expected || editor && editor.getValue() !== await vault.read(item)) throw Error("Wait for this note's unsaved changes to save before updating properties.");
-      guard(); await app.fileManager.processFrontMatter(item, (frontmatter: Record<string, unknown>) => { fileFor(file); for (const [key, value] of Object.entries(values)) frontmatter[key] = value; });
-      guard();
+      fileFor(file);
+      const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(expected);
+      const raw: unknown = match ? parseYaml(match[1]) : {};
+      if (raw !== null && (typeof raw !== "object" || Array.isArray(raw))) throw Error("This note's properties are not a YAML object.");
+      const frontmatter = { ...(raw as Record<string, unknown> | null), ...values };
+      const after = "---\n" + stringifyYaml(frontmatter).trimEnd() + "\n---\n" + expected.slice(match?.[0].length ?? 0);
+      // A whole-document version check also protects unsaved editor text and body changes during property edits.
+      await this.replace(file, expected, after);
     },
     affected: path => { guard(); return Object.entries(app.metadataCache.resolvedLinks).filter(([, links]) => !!links[path]).map(([source]) => source); },
     async trash(file) { const item = fileFor(file); await app.fileManager.trashFile(item); guard(); if (vault.getAbstractFileByPath(file.path) === item) throw Error("Moving this note to Trash could not be confirmed."); },

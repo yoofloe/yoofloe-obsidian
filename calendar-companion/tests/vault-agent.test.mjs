@@ -48,7 +48,7 @@ test('create collision, excluded secrets, corrupted backups and uncertain journa
   const f = fixture();
   await assert.rejects(f.agent.execute('create_note', { path: 'Notes/Plan.md', markdown: 'Bad' }), /exists/);
   f.policy.readScope = 'vault';
-  const hits = await f.agent.execute('search_notes', { query: 'Key', limit: 4 });
+  const hits = await f.agent.execute('search_notes', { query: 'Key', limit: 4, offset: 0 });
   await assert.rejects(f.agent.execute('read_notes', { notes: [{ reference: hits.notes[0].reference, from_line: 1, through_line: 0 }] }), /possible API key/);
   const original = await f.agent.initialContext();
   await f.agent.execute('apply_changes', { changes: [{ reference: 'N1', version: original.version, action: 'replace', markdown: 'Changed' }] });

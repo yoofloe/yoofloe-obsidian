@@ -6,6 +6,7 @@ import { type RecordSnapshot } from "./protocol";
 import { saveAiDraft, type NoteStore } from "./notes";
 import { keepModalInputsVisible } from "./modal-inputs";
 import { recordLabel } from "./record-types";
+import { EFFORT_LABELS, resolveEffort, supportedEfforts, type EffortSetting } from "./effort";
 
 export interface AiContext { session: AiSession; preferences: AiPreferences; current(): boolean }
 
@@ -25,7 +26,7 @@ export class AiSettingsModal extends Modal {
   private saveModelButton: ButtonComponent | null = null;
   private keyInput: HTMLInputElement | null = null;
   private stopKeyboard: (() => void) | null = null;
-  constructor(app: App, private readonly ai: AiContext, private readonly closed: () => void) { super(app); }
+  constructor(app: App, private readonly ai: AiContext, private readonly closed: () => void, private readonly manualDrafts = true) { super(app); }
   private current = () => this.alive && this.ai.current();
   onOpen(): void { this.alive = true; this.contentEl.classList.add("calendar-companion"); this.stopKeyboard?.(); this.stopKeyboard = keepModalInputsVisible(this.contentEl, this.current); this.render(); void this.load(); }
   onClose(): void { this.alive = false; this.stopKeyboard?.(); this.stopKeyboard = null; if (this.keyInput) this.keyInput.value = ""; this.keyInput = null; this.keyDrafts.clear(); this.modelDrafts.clear(); this.closed(); }
@@ -60,7 +61,7 @@ export class AiSettingsModal extends Modal {
       await action(); if (!this.current()) return;
       if (clearKeyOnSuccess) this.keyDrafts.delete(this.provider);
       this.configured = await this.ai.preferences.hasKey(this.provider);
-      this.message = "Saved locally. No API request was sent. Enable AI only when you want to use it.";
+      this.message = "Saved locally. No API request was sent. Your key is used only when you start an AI task.";
       if (clearKeyOnSuccess) {
         this.keyMessage = this.configured ? "Key saved on this device. API access is checked only when you generate." : "Saved key removed from this device.";
         new Notice(this.configured ? `${providerLabel(this.provider)} key saved locally` : "Saved key removed");
@@ -87,21 +88,28 @@ export class AiSettingsModal extends Modal {
       el.createEl("p", { text: preset.description, cls: "calendar-companion-hint" });
       el.createEl("p", { text: `Model ID: ${preset.id}`, cls: "calendar-companion-hint" });
     }
+    if (this.provider === "openai") new Setting(el).setName("Thinking depth").setDesc("Higher depth may improve difficult reasoning and cost more. This does not change file permissions or output length.").addDropdown(dropdown => {
+      dropdown.addOption("default", EFFORT_LABELS.default);
+      for (const effort of supportedEfforts(this.options.model)) dropdown.addOption(effort, EFFORT_LABELS[effort]);
+      dropdown.setValue(this.options.effort ?? resolveEffort(this.options.model) ?? "default").setDisabled(this.busy);
+      dropdown.selectEl.setAttribute("aria-label", "Thinking depth");
+      dropdown.onChange(value => { this.options.effort = value as EffortSetting; });
+    });
     this.updateModelSave();
   }
   private render(): void {
     if (!this.current()) return;
     if (this.keyInput) this.keyInput.value = "";
     const el = this.contentEl, name = providerLabel(this.provider), catalog = modelCatalog(this.provider);
-    el.empty(); el.createEl("h2", { text: "AI (optional)" });
-    el.createEl("p", { text: "Calendar import is free and works with AI off. Generation sends only your selected records and prompt to your chosen provider and may incur charges on your API account." });
+    el.empty(); el.createEl("h2", { text: "Yoofloe AI settings" });
+    el.createEl("p", { text: "Use your own OpenAI key. Starting a task sends permitted note text, your prompt and context directly to OpenAI. Relevant excerpts may be read and sent during the task. API charges apply; one task may make multiple requests." });
     if (PUBLIC_AI_PROVIDERS.length > 1) new Setting(el).setName("AI provider").setDesc("Your key is stored separately for each provider. Switching providers turns AI off.").addDropdown(dropdown => {
       for (const provider of PUBLIC_AI_PROVIDERS) dropdown.addOption(provider, providerLabel(provider));
       dropdown.setValue(this.provider).setDisabled(this.busy);
       dropdown.selectEl.setAttribute("aria-label", "AI provider");
       dropdown.onChange(value => { if (isAiProviderEnabled(value)) void this.chooseProvider(value); });
     });
-    el.createEl("p", { text: "AI starts off after each plugin load. Settings, key storage and the enable switch make no API calls. There are no automatic requests, key checks or retries." });
+    el.createEl("p", { text: "Settings and local key storage make no API calls. Yoofloe AI sends nothing until you start a task. Local storage does not make AI local. Requests use store: false; this does not mean zero retention at OpenAI." });
     if (this.message) el.createEl("p", { text: this.message, cls: "calendar-companion-status", attr: { role: "status" } });
     const modelSetting = new Setting(el).setName("Model").setDesc("Not sure? Start with economy (recommended). Selecting a model sends no API request.");
     const details = el.createDiv({ cls: "calendar-companion-model-details" });
@@ -111,7 +119,7 @@ export class AiSettingsModal extends Modal {
       dropdown.selectEl.setAttribute("aria-label", `${name} model`);
       dropdown.onChange(value => {
         if (value !== CUSTOM_MODEL_CHOICE && !findAiModel(this.provider, value)) return;
-        this.modelChoice = value; this.options.model = value === CUSTOM_MODEL_CHOICE ? this.customModel.trim() : value; this.modelDetails(details);
+        this.modelChoice = value; this.options.model = value === CUSTOM_MODEL_CHOICE ? this.customModel.trim() : value; delete this.options.effort; this.modelDetails(details);
       });
     });
     this.modelDetails(details);
@@ -127,7 +135,7 @@ export class AiSettingsModal extends Modal {
     new Setting(el)
       .addButton(button => button.setButtonText("Save key locally").setDisabled(this.busy).onClick(() => { const value = this.keyInput?.value ?? ""; void this.change(() => this.ai.preferences.saveKey(value, this.provider), true); }))
       .addButton(button => button.setButtonText("Remove saved key").setDisabled(this.busy || !this.configured).onClick(() => void this.change(() => this.ai.preferences.clearKey(this.provider), true)));
-    new Setting(el).setName(`Enable ${name} for this session`).setDesc("Still requires reviewing and confirming each request. Disabling cannot recall an already-sent request.")
+    if (this.manualDrafts) new Setting(el).setName(`Enable ${name} for this session`).setDesc("For advanced manual-import drafts only. The Yoofloe AI workspace starts with its send button. Disabling cannot recall an already-sent request.")
       .addToggle(toggle => toggle.setValue(this.ai.session.enabled).setDisabled(this.busy || !this.configured).onChange(value => this.ai.session.enableForSession(value)));
   }
 }

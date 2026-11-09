@@ -1,6 +1,6 @@
 export type WorkScope = "current" | "folder" | "vault";
 export type WorkMode = "ask" | "edit" | "organize";
-export interface TaskPolicy { sourcePath: string | null; folder: string; readScope: WorkScope; writeScope: WorkScope; mode: WorkMode; configDir: string; excluded: readonly string[]; selection?: { from: number; to: number } }
+export interface TaskPolicy { sourcePath: string | null; folder: string; readScope: WorkScope; writeScope: WorkScope; mode: WorkMode; configDir: string; excluded: readonly string[]; selection?: { from: number; to: number }; selectionVersion?: string }
 export const SCOPE_LABELS: Record<WorkScope, string> = { current: "Current note", folder: "Note folder", vault: "Vault" };
 export const MODE_LABELS: Record<WorkMode, string> = { ask: "Ask only", edit: "Write and edit", organize: "Organize notes" };
 export function vaultPath(raw: string, folder = false): string {

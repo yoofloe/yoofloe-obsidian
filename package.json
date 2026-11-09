@@ -1,7 +1,7 @@
 {
   "name": "obsidian-yoofloe",
-  "version": "0.6.2",
-  "description": "Question-first local Yoofloe Calendar retrieval and optional OpenAI drafts for Android Obsidian.",
+  "version": "0.7.0",
+  "description": "Write, edit and organize Obsidian Markdown with your own OpenAI key. Optional local Yoofloe Calendar context.",
   "private": true,
   "type": "module",
   "scripts": {

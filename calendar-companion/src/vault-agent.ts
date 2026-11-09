@@ -56,7 +56,11 @@ export class VaultAgent {
   private async excerpt(ref: Ref, fromLine = 1, throughLine = 0) {
     const original = await this.read(ref), version = await inputDigest(original); this.guard();
     let from = 0, to = original.length;
-    if (ref.allowedRange) ({ from, to } = ref.allowedRange);
+    if (ref.allowedRange) {
+      if (this.policy.selectionVersion && version !== this.policy.selectionVersion) throw Error("The selected note changed. Select the text again before starting this task.");
+      ({ from, to } = ref.allowedRange);
+      if (from < 0 || to <= from || to > original.length) throw Error("The original selection is no longer available.");
+    }
     else {
       if (!Number.isInteger(fromLine) || !Number.isInteger(throughLine) || fromLine < 1 || throughLine < 0) throw Error("Use positive line numbers, or zero through_line for a bounded first excerpt.");
       const lines = original.split("\n"), start = Math.min(fromLine - 1, lines.length), end = throughLine ? Math.min(throughLine, lines.length) : lines.length;
@@ -82,10 +86,11 @@ export class VaultAgent {
   async execute(name: string, args: unknown): Promise<unknown> {
     this.guard(); if (!agentTools(this.policy.mode).some(tool => tool.name === name)) throw Error("That action is not enabled in this task's mode.");
     if (name === "search_notes") {
-      closedObject(args, ["query", "limit"]); const terms = noteTerms(textField(args.query, 4000)); const count = Number(args.limit);
+      closedObject(args, ["query", "limit", "offset"]); const terms = noteTerms(textField(args.query, 4000)); const count = Number(args.limit), offset = Number(args.offset);
       if (!Number.isInteger(count) || count < 1 || count > 32) throw Error("Search returns 1–32 note references.");
+      if (!Number.isInteger(offset) || offset < 0 || offset > 2000) throw Error("Use the returned bounded search offset.");
       const allowed = this.host.files().filter(file => allowedPath(this.policy, file.path, "read"));
-      const candidates = allowed.slice(0, 2000).map(file => ({ file, score: rankNote(file.title, terms) * 10 })).sort((a, b) => b.score - a.score).slice(0, 32);
+      const candidates = allowed.slice(0, 2000).map(file => ({ file, score: rankNote(file.title, terms) * 10 })).sort((a, b) => b.score - a.score).slice(offset, offset + 32);
       const hits = []; let scanned = 0;
       for (const item of candidates) {
         this.guard(); if (!terms.length && !item.score && item.file.path !== this.policy.sourcePath) continue;
@@ -94,7 +99,7 @@ export class VaultAgent {
         if (!score && item.file.path !== this.policy.sourcePath) continue;
         safeOutbound(item.file.title + "\n" + item.file.path); hits.push({ reference: this.reference(item.file), title: item.file.title, path: item.file.path, score });
       }
-      return { notes: hits.sort((a, b) => b.score - a.score).slice(0, count), inspected: candidates.length, content_scanned: scanned, permitted_total: allowed.length, partial: allowed.length > candidates.length };
+      return { notes: hits.sort((a, b) => b.score - a.score).slice(0, count), inspected: candidates.length, content_scanned: scanned, permitted_total: allowed.length, partial: allowed.length > offset + candidates.length, next_offset: offset + candidates.length < Math.min(allowed.length, 2000) ? offset + candidates.length : null, metadata_limit: 2000 };
     }
     if (name === "read_notes") {
       closedObject(args, ["notes"]); const output = [];
