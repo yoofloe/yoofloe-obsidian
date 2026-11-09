@@ -10,7 +10,7 @@ export function buildQuestionInput(delivery: DeliveryV3, question: string): stri
     workspaces: context.scope.areas, period: { from: context.from, through: context.through, zone: context.zone },
     as_of: new Date(delivery.exportedAt).toISOString(), coverage: context.partial ? "partial: totals describe only observed matching records" : "bounded search of the requested workspaces and dates",
     scanned: context.scanned, matched: context.matched, totals: context.metrics,
-    meaning: "Study totals are recorded study seconds. Garden totals are measured focus seconds. Neither is a planned duration. Excerpts and totals may cover different record counts. Cite source references; do not infer missing details.",
+    meaning: "Study totals are recorded study seconds. Garden totals are measured focus seconds. Neither is a planned duration. Study and Garden can overlap; do not add them as independent time. Excerpts and totals may cover different record counts. Cite source references; do not infer missing details.",
   }, calendar_records: delivery.records.map((record, i) => ({ reference: `C${i + 1}`, kind: record.kind, title: record.title, text: record.text, date: record.date })) });
 }
 

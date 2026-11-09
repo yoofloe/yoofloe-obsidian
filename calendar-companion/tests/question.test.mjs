@@ -63,7 +63,7 @@ test('query filters are closed and bounded; dates, metrics, Flow and financial r
 test('question excerpts never overwrite complete v2 snapshots and outbound content excludes local identities',async()=>{
   const r=request(),d=delivery(r),input=buildQuestionInput(d,'How did my study go?');
   assert(!input.includes(d.datasetId));assert(!input.includes(d.records[0].id));assert(!input.includes('private-native-id'));assert(!input.includes(vaultId));
-  assert(input.includes('C1'));assert(input.includes('recorded study seconds'));assert(input.includes('garden_measured_seconds'));
+  assert(input.includes('C1'));assert(input.includes('recorded study seconds'));assert(input.includes('garden_measured_seconds'));assert(input.includes('can overlap; do not add'));
   assert.equal((await inputDigest(input)).length,64);assert.notEqual(await inputDigest(input),await inputDigest(input+' '));
   await assert.rejects(saveDelivery(d,new Proxy({}, {get(){throw Error('unexpected write');}}),()=>{}),/full snapshots/);
   assert.throws(()=>buildQuestionInput({...d,records:[]},'Summarize'),/Find relevant/);
