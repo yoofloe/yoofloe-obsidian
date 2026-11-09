@@ -49,6 +49,7 @@ export class AgentTask {
         this.usage.input += reply.usage.input; this.usage.output += reply.usage.output; this.usage.reasoning += reply.usage.reasoning;
         this.items.push(...reply.output);
         if (reply.text) this.text = reply.text;
+        if (!reply.text && reply.calls.length && (this.stopped || !this.options.current() || reply.incomplete)) this.text = "## Unapplied AI proposals\n\nThese returned tool proposals were kept for review and were not executed.\n\n" + reply.calls.map(call => `### ${call.name}\n\n\`\`\`json\n${call.arguments}\n\`\`\``).join("\n\n");
         // Always collect paid text; authority to execute tools is checked separately after the response.
         if (this.stopped || !this.options.current()) { this.update("status", "Stopped. The returned answer and completed work are kept; no further file action was run."); break; }
         if (reply.incomplete) { this.update("status", "A partial answer was returned. It is kept; no retry was made."); break; }

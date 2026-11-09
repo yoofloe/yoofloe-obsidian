@@ -5,7 +5,8 @@ export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean
   const guard = () => { if (!current() || app.vault !== vault) throw Error("The task stopped or the vault changed."); };
   const fileFor = (file: AgentFile): TFile => { guard(); const item = vault.getAbstractFileByPath(file.path); if (!(item instanceof TFile) || item !== file.identity) throw Error("The note was renamed or replaced."); return item; };
   const record = (file: TFile): AgentFile => ({ identity: file, path: file.path, title: file.basename, size: file.stat.size });
-  const editorFor = (file: TFile) => app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).find((view): view is MarkdownView => view instanceof MarkdownView && view.file === file && view.getMode() === "source")?.editor;
+  const viewFor = (file: TFile) => app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).find((view): view is MarkdownView => view instanceof MarkdownView && view.file === file && view.getMode() === "source");
+  const editorFor = (file: TFile) => viewFor(file)?.editor;
   const ensure = async (path: string) => {
     for (const name of path.split("/").reduce<string[]>((parts, segment) => [...parts, parts.length ? parts[parts.length - 1] + "/" + segment : segment], [])) {
       guard(); const item = vault.getAbstractFileByPath(name); if (item && !(item instanceof TFolder)) throw Error("A folder name conflicts with a file."); if (!item) await vault.createFolder(name);
@@ -16,8 +17,8 @@ export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean
     files: () => { guard(); return vault.getMarkdownFiles().map(record); },
     read: async file => { try { return await read(file); } catch { return null; } },
     async replace(file, expected, text) {
-      const item = fileFor(file), editor = editorFor(item);
-      if (editor) { if (editor.getValue() !== expected) throw Error("The note has newer unsaved edits."); editor.transaction({ changes: [{ from: { line: 0, ch: 0 }, to: editor.offsetToPos(expected.length), text }] }, "yoofloe-ai-task"); }
+      const item = fileFor(file), view = viewFor(item), editor = view?.editor;
+      if (editor && view) { if (editor.getValue() !== expected) throw Error("The note has newer unsaved edits."); editor.transaction({ changes: [{ from: { line: 0, ch: 0 }, to: editor.offsetToPos(expected.length), text }] }, "yoofloe-ai-task"); guard(); await view.save(); }
       else await vault.process(item, original => { fileFor(file); if (editorFor(item) || original !== expected) throw Error("The note changed during this task."); return text; });
       guard(); if (await read(file) !== text) throw Error("The saved edit could not be confirmed. The backup is kept; no retry was made.");
     },

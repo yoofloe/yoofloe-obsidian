@@ -34,3 +34,8 @@ test('duplicate tool IDs execute once, budgets stop loops and network errors nev
  const fail=new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},executor:{execute:async()=>{}},transport:async()=>{throw Error('provider secret details');}});await fail.run('Read',{model:'gpt-6-luna'},'ask',4);assert.equal(fail.requests,1);assert(!fail.message.includes('provider secret'));
  assert.throws(()=>parseAgentReply(200,'{"status":"completed","output":[]}'));
 });
+test('stopping an in-flight tool-only answer retains the unapplied document proposal',async()=>{
+ let finish,tools=0;const task=new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},executor:{execute:async()=>{tools++;}},transport:async()=>await new Promise(r=>{finish=r;})});
+ const pending=task.run('Create a note',{model:'gpt-6-luna'},'edit',2);while(!finish)await new Promise(r=>setTimeout(r,1));task.stop();finish(reply([{type:'function_call',call_id:'new',name:'create_note',arguments:JSON.stringify({path:'Draft.md',markdown:'# Retained proposal'})}]));await pending;
+ assert.equal(tools,0);assert.match(task.text,/Retained proposal/);assert.match(task.text,/not executed/);
+});

@@ -140,6 +140,7 @@ export class AiWorkspace {
       finally { unsubscribe(); }
       if (!this.current) return;
       this.message = task.message;
+      if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
       if (task.text || agent.journal.operations.some(op => op.status === "done")) this.prompt = "";
       if (agent.journal.operations.length) {
         agent.journal.status = task.stopped || task.events.some(e => e.kind === "blocked") ? "interrupted" : "complete";

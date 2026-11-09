@@ -64,13 +64,15 @@ export class YoofloeAiView extends ItemView {
     const models = scroll.createDiv({ cls: "y-ai-models" }), choices: Record<string, string> = {};
     for (const model of modelCatalog("openai").models) choices[model.id] = model.label.replace(/^GPT-[\d.]+ /, "");
     if (w.model.model && !choices[w.model.model]) choices[w.model.model] = `Custom · ${w.model.model}`;
-    this.select(models, "Model", choices, w.model.model, value => { void w.setModel({ model: value }); });
+    choices.__custom__ = "Custom model…";
+    this.select(models, "Model", choices, w.model.model, value => { if (value === "__custom__") this.options.settings(); else void w.setModel({ model: value }); });
     const efforts: Record<string, string> = { default: EFFORT_LABELS.default };
     for (const effort of supportedEfforts(w.model.model)) efforts[effort] = EFFORT_LABELS[effort];
     this.select(models, "Thinking depth", efforts, w.model.effort ?? resolveEffort(w.model.model) ?? "default", value => { void w.setModel({ ...w.model, effort: value }); });
     const scope = this.details(scroll, "scope", `${MODE_LABELS[w.mode]} · data: ${w.readScope === "current" && !w.source ? "No attached note" : SCOPE_LABELS[w.readScope]}${w.source?.selection && w.readScope === "current" ? " selection" : ""}`);
     this.select(scope, "Allowed actions", MODE_LABELS, w.mode, value => { w.mode = value; this.render(); });
     this.select(scope, "Data sent to OpenAI", SCOPE_LABELS, w.readScope, value => { w.readScope = value; this.render(); });
+    if (w.source?.selection) this.button(scope, "Use whole attached note", () => { if (!w.source) return; delete w.source.selection; delete w.source.selectionVersion; w.preview = ""; this.saveSoon(); this.render(); }, w.busy);
     if (w.mode !== "ask") this.select(scope, "Notes AI can change", SCOPE_LABELS, w.writeScope, value => { w.writeScope = value; });
     const folderLabel = scope.createEl("label", { cls: "y-ai-field" }); folderLabel.createEl("span", { text: "Working / output folder" });
     const folder = folderLabel.createEl("input", { value: w.outputFolder, attr: { placeholder: "Vault root (leave empty)", "aria-label": "Working and output folder" } }); folder.disabled = w.busy;
