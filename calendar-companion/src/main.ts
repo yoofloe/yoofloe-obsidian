@@ -1,284 +1,163 @@
-import { App, MarkdownView, Modal, Notice, Platform, Plugin, PluginSettingTab, Setting, TFolder, requestUrl, requireApiVersion, type Editor, type Vault } from "obsidian";
+import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, requestUrl, requireApiVersion } from "obsidian";
 import { ACTION, INBOX } from "./protocol";
-import { CalendarSession, type TransferStore } from "./session";
-import { saveDelivery, type NoteStore } from "./notes";
-import { AiPreferences } from "./ai-preferences";
+import { CalendarSession } from "./session";
+import { AiPreferences, localSecretBinding } from "./ai-preferences";
 import { OPENAI_ADAPTER } from "./openai";
 import { AiSession } from "./ai-session";
-import { AiDraftModal, AiSettingsModal, type AiContext } from "./ai-modals";
-import { recordLabel } from "./record-types";
-import { QuestionModal } from "./question-modal";
-import { NoteWork } from "./note-work";
-import { NoteModal } from "./note-modal";
-import type { NoteTarget } from "./note-context";
-import { createNoteWorkspace } from "./note-vault";
+import { AiSettingsModal, type AiContext } from "./ai-modals";
+import { AiWorkspace, type WorkspaceSource } from "./workspace";
+import { AI_VIEW, LegacyYoofloeView, YoofloeAiView } from "./workspace-view";
+import { loadWorkRecords, obsidianAgentHost } from "./obsidian-agent-host";
+import { CompanionModal } from "./manual-import";
+import { inputDigest } from "./question-input";
 
-const REQUIREMENTS = "Android phones and tablets only. Requires Yoofloe Calendar 1.8.5 or later and Obsidian 1.11.5 or later on the same device and Android user profile. Direct connection is unavailable on desktop, iPhone, and iPad.";
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
-const NOTE_REQUIREMENTS = "Note AI works in Obsidian on Android phones and tablets. It uses your own OpenAI key; Yoofloe Calendar is needed only when you add Calendar context.";
-
-/** All writes are create-only and bound to the vault captured by the calling modal. */
-function noteStore(vault: Vault): NoteStore {
-  return { exists: path => Promise.resolve(vault.getAbstractFileByPath(path) !== null), read: path => vault.adapter.read(path),
-    mkdir: async path => { const item = vault.getAbstractFileByPath(path); if (item && !(item instanceof TFolder)) throw Error("Folder conflict"); if (!item) await vault.createFolder(path); },
-    create: async (path, text) => { await vault.create(path, text); } };
-}
-
-/** Standalone Calendar companion. Loading the plugin never reads a transfer or contacts a server. */
-export default class CalendarCompanionPlugin extends Plugin {
-  private modal: CompanionModal | null = null;
-  private question: QuestionModal | null = null;
-  private aiSettings: AiSettingsModal | null = null;
-  private ai: AiContext | null = null;
-  private noteAi: AiSession | null = null;
-  private noteWork: NoteWork | null = null;
-  private noteView: NoteModal | null = null;
-  private nextNote: { target: NoteTarget; selection: { from: number; to: number } } | null = null;
-  private aiGate = { busy: false };
-  private actions = new Map<MarkdownView, HTMLElement>();
+/** Plugin ID, local secret binding and the Calendar v2/v3 callback stay stable. No startup network requests. */
+export default class YoofloeAiPlugin extends Plugin {
   private live = true;
+  private ai: AiContext | null = null;
+  private work: AiWorkspace | null = null;
+  private aiSettings: AiSettingsModal | null = null;
+  private manual: CompanionModal | null = null;
+  private gate = { busy: false };
+  private lastSource: WorkspaceSource | null = null;
+  private actions = new Map<MarkdownView, HTMLElement>();
   onload(): void {
-    this.addSettingTab(new CompanionSettings(this.app, this));
-    this.addCommand({ id: "open-calendar-companion", name: "Ask Calendar", callback: () => this.openQuestion() });
-    this.addCommand({ id: "import-calendar-snapshots", name: "Import complete Calendar records manually", callback: () => this.openCompanion() });
-    this.addRibbonIcon("calendar", "Ask Yoofloe Calendar", () => this.openQuestion());
-    this.addCommand({ id: "note-ai", name: "Note AI", icon: "sparkles", mobileOnly: true,
-      editorCallback: (editor, info) => { if (info instanceof MarkdownView) this.openNote(editor, info); else new Notice("Open this Markdown note in the editor first."); } });
-    if (Platform.isAndroidApp && this.app.workspace) {
-      this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, info) => {
-        if (info instanceof MarkdownView) menu.addItem(item => item.setTitle("Note AI").setIcon("sparkles").onClick(() => this.openNote(editor, info)));
+    this.addSettingTab(new YoofloeSettings(this.app, this));
+    this.registerView(AI_VIEW, leaf => new YoofloeAiView(leaf, this.workspace(), { settings: () => this.openAiSettings(), hide: () => { leaf.detach(); } }));
+    for (const type of ["yoofloe-ai-writer", "yoofloe-capture"]) this.registerView(type, leaf => new LegacyYoofloeView(leaf, type, () => this.openWorkspace()));
+    this.addCommand({ id: "note-ai", name: "Open", icon: "sparkles", callback: () => this.openWorkspace() });
+    this.addRibbonIcon("sparkles", "Yoofloe AI", () => this.openWorkspace());
+    if (this.app.workspace) {
+      this.registerEvent(this.app.workspace.on("editor-menu", (menu, _editor, info) => {
+        if (info instanceof MarkdownView) menu.addItem(item => item.setTitle("Yoofloe AI").setIcon("sparkles").onClick(() => this.openWorkspace(info)));
       }));
       this.registerEvent(this.app.workspace.on("file-menu", (menu, file, _source, leaf) => {
-        const view = leaf?.view ?? this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (view instanceof MarkdownView && view.file === file) menu.addItem(item => item.setTitle("Note AI").setIcon("sparkles").onClick(() => this.openNote(view.editor, view)));
+        const view = leaf?.view; if (view instanceof MarkdownView && view.file === file) menu.addItem(item => item.setTitle("Yoofloe AI").setIcon("sparkles").onClick(() => this.openWorkspace(view)));
       }));
-      const update = () => this.updateNoteActions();
+      const update = () => this.updateActions();
       this.registerEvent(this.app.workspace.on("layout-change", update));
       this.registerEvent(this.app.workspace.on("active-leaf-change", update));
-      this.app.workspace.onLayoutReady(update);
+      this.app.workspace.onLayoutReady(() => { update(); void this.mergeLegacyPanels(); });
       this.register(() => { for (const action of this.actions.values()) action.remove(); this.actions.clear(); });
     }
     this.registerObsidianProtocolHandler(ACTION, params => {
-      if (!Platform.isAndroidApp || !this.live) { new Notice(REQUIREMENTS); return; }
-      if (!params.requestId) { this.openQuestion(); return; }
-      if (params.vault === this.app.vault.getName() && this.noteWork?.requestId === params.requestId) { void this.noteWork.receive(params.requestId); this.showNote(); return; }
-      if (params.vault === this.app.vault.getName() && this.question?.requestId === params.requestId) { void this.question.receive(params.requestId); return; }
-      if (!this.modal || params.vault !== this.app.vault.getName()) { new Notice("No matching connection in this vault. Start a new Calendar request."); return; }
-      void this.modal.receive(params.requestId ?? "");
+      if (!this.live || !Platform.isAndroidApp) { new Notice("Direct Calendar lookup requires both apps on the same Android phone or tablet. Yoofloe AI itself works without Calendar."); return; }
+      if (!params.requestId) { this.openWorkspace(); return; }
+      if (params.vault !== this.app.vault.getName()) { new Notice("This Calendar request belongs to another vault."); return; }
+      if (this.work?.requestId === params.requestId) { void this.work.receiveCalendar(params.requestId); this.openWorkspace(); return; }
+      if (this.manual) { void this.manual.receive(params.requestId); return; }
+      new Notice("No matching local request. Start a new Calendar lookup in Yoofloe AI.");
     });
   }
-  private updateNoteActions(): void {
-    if (!this.live) return;
-    const views = this.app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).filter((view): view is MarkdownView => view instanceof MarkdownView);
-    for (const [view, element] of this.actions) if (!views.includes(view)) { element.remove(); this.actions.delete(view); }
-    for (const view of views) if (!this.actions.has(view)) this.actions.set(view, view.addAction("sparkles", "Note AI", () => this.openNote(view.editor, view)));
-  }
-  openActiveNote(): void {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (view) this.openNote(view.editor, view); else new Notice("Open a Markdown note in the editor first.");
-  }
-  private openNote(editor: Editor, view: MarkdownView): void {
-    if (!this.live || !Platform.isAndroidApp) { new Notice(NOTE_REQUIREMENTS); return; }
-    const file = view.file, owner = this.app.vault, path = file?.path;
-    if (!file || !path || view.getMode() !== "source") { new Notice("Switch this Markdown note to editing mode first."); return; }
-    const selections = editor.listSelections();
-    if (selections.length !== 1) { new Notice("Choose one text selection, or place the cursor in your note."); return; }
-    const positions = [editor.posToOffset(selections[0].anchor), editor.posToOffset(selections[0].head)].sort((a, b) => a - b);
-    const current = () => this.live && this.app.vault === owner && owner.getAbstractFileByPath(path) === file && file.path === path && view.file === file && view.editor === editor &&
-      view.getMode() === "source" && this.app.workspace.getLeavesOfType("markdown").some(leaf => leaf.view === view);
-    const target: NoteTarget = { identity: file, path, title: file.basename, read: () => current() ? editor.getValue() : null,
-      change: (from, to, text) => { if (!current()) throw Error("The original note is no longer open."); editor.transaction({ changes: [{ from: editor.offsetToPos(from), to: editor.offsetToPos(to), text }] }, "yoofloe-note-ai"); } };
-    this.nextNote = { target, selection: { from: positions[0], to: positions[1] } };
-    if (this.noteWork?.target.identity === file && this.noteWork.target.path === path) {
-      // Rebind a reopened leaf, keeping the original reviewed text and conflict digest.
-      this.noteWork.target.read = target.read; this.noteWork.target.change = target.change;
+  private capture(view: MarkdownView): WorkspaceSource | null {
+    if (!view.file) return null;
+    const source: WorkspaceSource = { path: view.file.path };
+    if (view.getMode() === "source") {
+      const selections = view.editor.listSelections();
+      if (selections.length === 1) {
+        const positions = [view.editor.posToOffset(selections[0].anchor), view.editor.posToOffset(selections[0].head)].sort((a, b) => a - b);
+        if (positions[1] > positions[0]) source.selection = { from: positions[0], to: positions[1] };
+      }
     }
-    if (!this.noteWork) this.startNote(); else this.showNote();
+    return source;
   }
-  private startNote(): void {
-    if (this.noteWork?.busy || !this.nextNote) return;
-    const next = this.nextNote; this.nextNote = null;
-    this.noteView?.close(); this.noteWork?.dispose();
-    const context = this.aiContext(), owner = this.app.vault;
-    if (!this.noteAi) this.noteAi = this.createAiSession(() => context.current(), context.preferences);
-    const adapter = owner.adapter;
-    this.noteWork = new NoteWork(next.target, next.selection, { current: () => context.current(), ai: this.noteAi, preferences: context.preferences,
-      workspace: createNoteWorkspace(this.app, owner, () => context.current(), next.target.path),
-      inboxHint: () => adapter.getResourcePath(`${INBOX}/`), calendar: () => new CalendarSession({ vaultName: () => this.app.vault.getName(), allowed: () => context.current(),
-        store: { exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path), write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
-          size: async path => { const stat = await adapter.stat(path); return stat?.type === "file" ? stat.size : null; }, remove: path => adapter.remove(path) } }),
-      save: async (path, text) => {
-        if (!context.current()) throw Error("Vault changed"); const file = await owner.create(path, text);
-        if (!context.current() || owner.getAbstractFileByPath(path) !== file || await owner.read(file) !== text) throw Error("The new note could not be confirmed. The result is kept.");
-      } });
-    this.showNote(); void this.noteWork.initialize();
-  }
-  private showNote(): void {
-    if (!this.noteWork?.current) return;
-    if (this.noteView) { this.noteView.open(); return; }
-    this.question?.close(); this.modal?.close();
-    this.noteView = new NoteModal(this.app, this.noteWork, { closed: () => { this.noteView = null; }, settings: () => this.openAiSettings(),
-      startNew: () => {
-        if (!this.nextNote && this.noteWork) { const view = this.app.workspace.getActiveViewOfType(MarkdownView); if (view) this.openNote(view.editor, view); }
-        this.startNote();
-      }, nextTitle: () => this.nextNote?.target.title ?? null });
-    this.noteView.open();
-  }
-  openQuestion(): void {
+  private updateActions(): void {
     if (!this.live) return;
-    this.noteView?.close();
-    if (this.question) { this.question.open(); return; }
-    this.modal?.close();
-    this.question = new QuestionModal(this.app, { live: () => this.live, closed: () => { this.question = null; },
-      ai: () => this.aiContext(), openAiSettings: () => this.openAiSettings(), manualImport: () => this.openCompanion(), notes: noteStore(this.app.vault), requirements: REQUIREMENTS });
-    this.question.open();
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView); if (active?.file) this.lastSource = { path: active.file.path };
+    const views = this.app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).filter((view): view is MarkdownView => view instanceof MarkdownView);
+    for (const [view, action] of this.actions) if (!views.includes(view)) { action.remove(); this.actions.delete(view); }
+    for (const view of views) if (!this.actions.has(view)) this.actions.set(view, view.addAction("sparkles", "Yoofloe AI", () => this.openWorkspace(view)));
   }
-  openCompanion(): void {
+  openWorkspace(sourceView?: MarkdownView): void {
+    void this.showWorkspace(sourceView).catch(() => new Notice("Yoofloe AI could not open. Existing notes and saved work are kept."));
+  }
+  private async showWorkspace(sourceView?: MarkdownView): Promise<void> {
     if (!this.live) return;
-    this.noteView?.close();
-    if (this.modal) { this.modal.open(); return; }
-    this.question?.close();
-    this.modal = new CompanionModal(this.app, () => this.live, () => { this.modal = null; }, () => this.aiContext(), () => this.openAiSettings());
-    this.modal.open();
+    const file = this.app.workspace.getActiveFile();
+    const active = sourceView ?? this.app.workspace.getActiveViewOfType(MarkdownView) ?? this.app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).find((view): view is MarkdownView => view instanceof MarkdownView && view.file === file);
+    if (active) {
+      const source = this.capture(active);
+      if (source?.selection) source.selectionVersion = await inputDigest(active.editor.getValue());
+      this.lastSource = source;
+    }
+    const work = this.workspace(); await work.initialize(); if (!this.live) return; work.bind(this.lastSource);
+    let leaf = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
+    if (Platform.isPhone && leaf && leaf.getRoot() !== this.app.workspace.rootSplit) {
+      const previous = leaf; leaf = this.app.workspace.getLeaf(true); await leaf.setViewState({ type: AI_VIEW, active: true });
+      if (previous.view.getViewType() === AI_VIEW) previous.detach();
+    }
+    if (!leaf) { leaf = Platform.isPhone ? this.app.workspace.getLeaf(true) : this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true); await leaf.setViewState({ type: AI_VIEW, active: true }); }
+    await this.app.workspace.revealLeaf(leaf);
   }
-  private aiContext(): AiContext {
+  private async mergeLegacyPanels(): Promise<void> {
+    const types = ["yoofloe-ai-writer", "yoofloe-capture"], leaves = types.flatMap(type => this.app.workspace.getLeavesOfType(type));
+    if (!leaves.length || !this.live) return;
+    try {
+      const owner = this.app.vault, root = `${owner.configDir}/plugins/yoofloe`, path = `${root}/legacy-layout-${crypto.randomUUID()}.json`;
+      const text = JSON.stringify({ savedAt: Date.now(), panels: leaves.map(leaf => leaf.getViewState()) });
+      await owner.adapter.write(path, text); if (!this.live || this.app.vault !== owner || await owner.adapter.read(path) !== text) return;
+      let current = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
+      for (const leaf of leaves) {
+        if (!this.live || !types.includes(leaf.view.getViewType())) continue;
+        if (!current) { await leaf.setViewState({ type: AI_VIEW, active: false }); current = leaf; }
+        else leaf.detach();
+      }
+    } catch { new Notice("The old panel state could not be backed up. It was kept; open Yoofloe AI from the sparkle icon."); }
+  }
+  private context(): AiContext {
     if (!this.ai) {
-      const owner = this.app.vault, name = owner.getName();
-      const current = () => this.live && Platform.isAndroidApp && this.app.vault === owner && owner.getName() === name;
-      const preferences = new AiPreferences({ current, binding: () => owner.adapter.getResourcePath(""), load: () => this.loadData(), save: value => this.saveData(value),
+      const owner = this.app.vault, name = owner.getName(), current = () => this.live && this.app.vault === owner && owner.getName() === name;
+      const preferences = new AiPreferences({ current, binding: () => localSecretBinding(owner.adapter.getResourcePath(""), !Platform.isAndroidApp && typeof FileSystemAdapter === "function" && owner.adapter instanceof FileSystemAdapter ? owner.adapter.getBasePath() : undefined), load: () => this.loadData(), save: value => this.saveData(value),
         secrets: () => requireApiVersion("1.11.5") && typeof this.app.secretStorage?.getSecret === "function" && typeof this.app.secretStorage?.setSecret === "function" ? this.app.secretStorage : null });
-      const session = this.createAiSession(current, preferences);
+      const session = new AiSession({ adapters: [OPENAI_ADAPTER], current, gate: this.gate, key: provider => preferences.key(provider), transport: async request => {
+        if (!current()) throw Error("Vault changed"); const response = await requestUrl(request); return { status: response.status, text: response.text };
+      } });
       this.ai = { current, preferences, session };
     }
     return this.ai;
   }
-  private createAiSession(current: () => boolean, preferences: AiPreferences): AiSession {
-    return new AiSession({ adapters: [OPENAI_ADAPTER], current, gate: this.aiGate, key: provider => preferences.key(provider), transport: async request => {
-      if (!current()) throw Error("Vault changed");
-      // Optional BYOK feature: this is the only network call. See README, Optional AI.
-      const response = await requestUrl(request); return { status: response.status, text: response.text };
-    } });
+  private workspace(): AiWorkspace {
+    if (this.work) return this.work;
+    const ai = this.context(), owner = this.app.vault, adapter = owner.adapter, root = `${owner.configDir}/plugins/yoofloe`;
+    this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
+      host: current => obsidianAgentHost(this.app, owner, current), inboxHint: () => adapter.getResourcePath(`${INBOX}/`),
+      transport: async request => { if (!ai.current()) throw Error("Vault changed"); const response = await requestUrl(request); return { status: response.status, text: response.text }; },
+      storage: {
+        load: async () => { const path = `${root}/workspace.json`; if (!await adapter.exists(path)) return null; const stat = await adapter.stat(path); if (!stat || stat.size > 8 * 1024 * 1024) throw Error("Saved work exceeds its local size limit."); return JSON.parse(await adapter.read(path)) as unknown; },
+        save: async value => { if (!ai.current()) throw Error("Vault changed"); const text = JSON.stringify(value); if (text.length > 8 * 1024 * 1024) throw Error("Saved work exceeds its local size limit."); const path = `${root}/workspace.json`; await adapter.write(path, text); if (await adapter.read(path) !== text) throw Error("The local work record could not be confirmed."); },
+        history: () => loadWorkRecords(owner),
+      },
+      ...(Platform.isAndroidApp ? { calendar: () => new CalendarSession({ vaultName: () => owner.getName(), allowed: () => ai.current() && Platform.isAndroidApp,
+        store: { exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path), write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
+          size: async path => { const stat = await adapter.stat(path); return stat?.type === "file" ? stat.size : null; }, remove: path => adapter.remove(path) } }) } : {}),
+    });
+    return this.work;
   }
-  openAiSettings(): void {
-    if (!this.live || !Platform.isAndroidApp) return;
-    if (this.aiSettings) { this.aiSettings.open(); return; }
-    this.aiSettings = new AiSettingsModal(this.app, this.aiContext(), () => { this.aiSettings = null; void this.noteWork?.refreshSettings(); }); this.aiSettings.open();
+  openAiSettings(manualDrafts = false): void {
+    if (!this.live) return; if (this.aiSettings) { this.aiSettings.open(); return; }
+    this.aiSettings = new AiSettingsModal(this.app, this.context(), () => { this.aiSettings = null; void this.work?.refreshSettings(); }, manualDrafts); this.aiSettings.open();
   }
-  onunload(): void { this.live = false; this.noteView?.close(); this.noteWork?.dispose(); this.noteWork = null; this.nextNote = null; this.noteAi = null; this.ai?.session.enableForSession(false); this.aiSettings?.close(); this.aiSettings = null; this.question?.close(); this.question = null; this.modal?.close(); this.modal = null; this.ai = null; }
+  openManual(): void {
+    if (!this.live || !Platform.isAndroidApp) return; if (this.manual) { this.manual.open(); return; }
+    this.manual = new CompanionModal(this.app, () => this.live, () => { this.manual = null; }, () => this.context(), () => this.openAiSettings(true)); this.manual.open();
+  }
+  onunload(): void { this.live = false; this.work?.dispose(); this.work = null; this.ai?.session.enableForSession(false); this.aiSettings?.close(); this.manual?.close(); this.aiSettings = null; this.manual = null; this.ai = null; }
 }
-
-class CompanionSettings extends PluginSettingTab {
-  constructor(app: App, private readonly companion: CalendarCompanionPlugin) { super(app, companion); }
+class YoofloeSettings extends PluginSettingTab {
+  constructor(app: App, private readonly yoofloe: YoofloeAiPlugin) { super(app, yoofloe); }
   display(): void {
-    this.containerEl.empty(); new Setting(this.containerEl).setName("Connect your records").setHeading();
-    this.containerEl.createEl("p", { text: NOTE_REQUIREMENTS });
-    if (Platform.isAndroidApp) new Setting(this.containerEl).setName("Note AI").setDesc("Ask, summarize, refine or extract tasks from the note you have open. You can also use the note’s sparkle action, menu or mobile toolbar command.")
-      .addButton(button => button.setButtonText("Open note AI").onClick(() => this.companion.openActiveNote()));
-    this.containerEl.createEl("p", { text: REQUIREMENTS });
-    new Setting(this.containerEl).setName("Yoofloe Calendar")
-      .setDesc("Keep your plans, notes, study and project progress together, with a quiet place to focus. Install the Android app on this device to connect your records.")
-      .addButton(button => button.setButtonText("Get Yoofloe Calendar").onClick(() => this.containerEl.ownerDocument.defaultView?.open(STORE_URL, "_blank")));
-    new Setting(this.containerEl).setName(Platform.isAndroidApp ? "Local Calendar connection" : "Direct connection is not supported on this platform")
-      .setDesc("Ask a question to find only relevant records on your phone. Calendar remembers the approved inbox. Local search requires no AI provider or Yoofloe account.")
-      .addButton(button => button.setButtonText(Platform.isAndroidApp ? "Ask Calendar" : "View requirements").onClick(() => this.companion.openQuestion()));
-    if (Platform.isAndroidApp) new Setting(this.containerEl).setName("Manual import (advanced)").setDesc("Choose complete records and save Markdown snapshots without AI.")
-      .addButton(button => button.setButtonText("Import complete records").onClick(() => this.companion.openCompanion()));
-    if (Platform.isAndroidApp) new Setting(this.containerEl).setName("AI drafts (optional; off by default)").setDesc("Use your own OpenAI API key for approved drafts. API charges apply only if you choose to generate.")
-      .addButton(button => button.setButtonText("AI settings").onClick(() => this.companion.openAiSettings()));
+    const el = this.containerEl; el.empty(); new Setting(el).setName("Workspace").setHeading();
+    el.createEl("p", { text: "Write, edit, organize and explore your Obsidian Markdown with your own OpenAI key. Works independently on desktop and mobile. Yoofloe Calendar is optional." });
+    new Setting(el).setName("One workspace").setDesc("Use the sparkle ribbon, note header, note menu, or Yoofloe AI: Open command. Closing the panel keeps your draft and result.")
+      .addButton(b => b.setButtonText("Open Yoofloe AI").onClick(() => this.yoofloe.openWorkspace()));
+    new Setting(el).setName("OpenAI key, model and thinking depth").setDesc("Settings make no API requests. Starting a task sends permitted note text and context directly to OpenAI; API charges apply. A task may make multiple requests.")
+      .addButton(b => b.setButtonText("AI settings").onClick(() => this.yoofloe.openAiSettings()));
+    el.createEl("p", { text: "Review the data scope and allowed changes before starting. Write and organize modes may change multiple notes within the scope. Original backups and recovery records are local; sync services may copy them. AI can make mistakes. Local storage of a key does not make AI local." });
+    const links = el.createEl("p"); links.createEl("a", { text: "Privacy and data flow", href: "https://github.com/yoofloe/yoofloe-obsidian/blob/main/PRIVACY.md", attr: { target: "_blank", rel: "noopener noreferrer" } });
+    new Setting(el).setName("Yoofloe Calendar · optional Android app").setDesc("Plans, tasks, notes, study, projects and focus. Direct local lookup requires both apps on the same Android phone or tablet and profile, Calendar 1.8.5+, Obsidian 1.11.5+, and a vault in shared device storage. Yoofloe AI works independently on other platforms.")
+      .addButton(b => b.setButtonText("Discover Calendar").onClick(() => el.ownerDocument.defaultView?.open(STORE_URL, "_blank")));
+    if (Platform.isAndroidApp) new Setting(el).setName("Manual Calendar import (advanced)").setDesc("Save complete Markdown snapshots without AI. Calendar records remain unchanged.")
+      .addButton(b => b.setButtonText("Import records").onClick(() => this.yoofloe.openManual()));
   }
-}
-
-class CompanionModal extends Modal {
-  private session: CalendarSession | null = null;
-  private busy = false;
-  private alive = false;
-  private message = "";
-  private saved = false;
-  private draft: AiDraftModal | null = null;
-  private owner = this.app.vault;
-  constructor(app: App, private readonly pluginLive: () => boolean, private readonly closed: () => void,
-    private readonly getAi: () => AiContext, private readonly openAiSettings: () => void) { super(app); }
-  private current = () => this.alive && this.pluginLive() && this.app.vault === this.owner;
-  onOpen(): void {
-    this.alive = true; this.contentEl.classList.add("calendar-companion");
-    if (Platform.isAndroidApp && this.current() && !this.session) {
-      const adapter = this.owner.adapter;
-      const store: TransferStore = { exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path),
-        write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
-        size: async path => { const info = await adapter.stat(path); return info?.type === "file" ? info.size : null; },
-        remove: path => adapter.remove(path) };
-      this.session = new CalendarSession({ store, vaultName: () => this.app.vault.getName(), allowed: () => Platform.isAndroidApp && this.current() });
-    }
-    this.render();
-  }
-  onClose(): void { this.alive = false; this.draft?.close(); this.draft = null; void this.session?.dispose(); this.session = null; this.closed(); }
-  private render(): void {
-    if (!this.current()) return;
-    const el = this.contentEl; el.empty(); el.createEl("h2", { text: "Yoofloe Calendar Companion" });
-    el.createEl("p", { text: REQUIREMENTS });
-    if (!Platform.isAndroidApp) { el.createEl("p", { text: "Notes created on Android remain ordinary Markdown and can be read or edited here after transfer." }); return; }
-    el.createEl("p", { text: "Use a vault in shared device storage. Android cannot grant Calendar access to an app-private vault. Calendar 1.8.5 or later is required." });
-    if (this.message) el.createEl("p", { text: this.message, cls: "calendar-companion-status", attr: { role: "status" } });
-    const session = this.session;
-    if (!session) return;
-    if (!session.requestId) {
-      el.createEl("p", { text: "Start a request, then in Calendar choose this vault's 'Yoofloe Calendar Inbox' folder. Select the records you want to share and approve the transfer." });
-      el.createEl("p", { text: "The transfer uses temporary files in this vault. Your configured vault sync tools may copy those files. The companion itself does not upload them." });
-      new Setting(el).addButton(button => button.setButtonText(this.saved ? "Start another request" : "Connect Calendar").setCta().setDisabled(this.busy).onClick(() => void this.start()));
-      new Setting(el).addButton(button => button.setButtonText("Get Yoofloe Calendar").onClick(() => this.contentEl.ownerDocument.defaultView?.open(STORE_URL, "_blank")));
-      return;
-    }
-    const preview = session.preview;
-    if (preview) {
-      el.createEl("p", { text: `${preview.records.length} text snapshot(s). Saving creates new notes. It does not complete tasks, change Calendar records, or award Flow points.` });
-      const list = el.createDiv({ cls: "calendar-companion-records" });
-      for (const record of preview.records) {
-        const row = list.createEl("section");
-        row.createEl("h3", { text: record.title || "Untitled" });
-        row.createEl("p", { text: `${recordLabel(record.kind)}${record.date ? ` · ${record.date}` : ""} · revision ${record.revision}` });
-        row.createEl("pre", { text: record.text });
-      }
-      new Setting(el).addButton(button => button.setButtonText("Save Markdown notes").setCta().setDisabled(this.busy).onClick(() => void this.save()));
-      new Setting(el).setName("AI draft (optional)").setDesc("Local import above remains free. AI generation requires your own API key and approval of possible API charges.")
-        .addButton(button => button.setButtonText("AI settings").setDisabled(this.busy).onClick(this.openAiSettings))
-        .addButton(button => button.setButtonText("Draft from selected records").setDisabled(this.busy).onClick(() => {
-          if (!this.current()) return;
-          if (this.draft) { this.draft.open(); return; }
-          const sourceCurrent = () => { try { if (!this.current() || this.busy || session.preview !== preview) return false; session.assertCanSave(preview); return true; } catch { return false; } };
-          this.draft = new AiDraftModal(this.app, this.getAi(), preview.records, noteStore(this.owner), sourceCurrent, () => { this.draft = null; }); this.draft.open();
-        }));
-    } else {
-      el.createEl("p", { text: `Waiting for Calendar. Choose the '${INBOX}' folder in vault '${this.owner.getName()}'. Requests expire after 10 minutes.` });
-      el.createEl("p", { text: "No response does not prove Calendar is missing. It may need an update, or the transfer may have been canceled. Return from Calendar, then check for a reply." });
-      new Setting(el).addButton(button => button.setButtonText("Check reply").setDisabled(this.busy).onClick(() => void this.receive(session.requestId ?? "")));
-    }
-    new Setting(el).addButton(button => button.setButtonText("Cancel request").setDisabled(this.busy).onClick(() => void this.cancel()));
-  }
-  private async start(): Promise<void> {
-    if (!this.session || this.busy || !this.current() || !Platform.isAndroidApp) return;
-    this.busy = true; this.message = "";
-    try { const url = await this.session.start(); if (!this.current()) return; this.render(); this.contentEl.ownerDocument.defaultView?.open(url, "_blank"); }
-    catch { this.message = "Calendar could not be opened. Install or update the matching companion build, then try again."; }
-    finally { this.busy = false; this.render(); }
-  }
-  async receive(id: string): Promise<void> {
-    if (!this.session || this.busy || !this.current() || !Platform.isAndroidApp || this.session.preview) return;
-    this.busy = true;
-    try { await this.session.receive(id); this.message = "Review these snapshots before saving."; }
-    catch { this.message = "A matching current reply could not be verified. Check the selected inbox, update Calendar if needed, or cancel and start a new request."; }
-    finally { this.busy = false; this.render(); }
-  }
-  private async save(): Promise<void> {
-    const session = this.session, delivery = session?.preview;
-    if (!session || !delivery || this.busy || !this.current()) return;
-    this.busy = true;
-    try {
-      const store = noteStore(this.owner);
-      const result = await saveDelivery(delivery, store, () => { if (!this.current()) throw Error("Vault changed"); session.assertCanSave(delivery); });
-      await session.cancel(); this.saved = true;
-      this.message = `Saved ${result.created} new note(s); skipped ${result.skipped} identical snapshot(s).`;
-    } catch { this.message = "Some notes could not be saved. Existing notes were kept. Check for edited-name conflicts and retry; identical saved snapshots are skipped."; }
-    finally { this.busy = false; this.render(); }
-  }
-  private async cancel(): Promise<void> { if (this.busy) return; await this.session?.cancel(); this.message = "Request canceled. Existing notes were kept."; this.render(); }
 }

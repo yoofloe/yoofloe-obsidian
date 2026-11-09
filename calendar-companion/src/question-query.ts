@@ -96,7 +96,7 @@ export function queryEqual(a: QuestionQuery, b: QuestionQuery): boolean {
 }
 
 /** Local intent/date routing; no model, embedding service or record body is used to plan a search. */
-export function planQuestion(question: string, overrides: { areas?: readonly QueryArea[]; period?: QueryPeriod; terms?: readonly string[] } = {}): { query: QuestionQuery | null; needsArea: boolean; terms: string[] } {
+export function planQuestion(question: string, overrides: { areas?: readonly QueryArea[]; period?: QueryPeriod; terms?: readonly string[]; zone?: string } = {}, now = Date.now()): { query: QuestionQuery | null; needsArea: boolean; terms: string[] } {
   const text = question.trim().normalize("NFC").toLowerCase();
   if (!text || encoder.encode(question).length > 4000) throw Error("Enter a question of at most 4000 UTF-8 bytes.");
   const areas: QueryArea[] = [];
@@ -114,6 +114,15 @@ export function planQuestion(question: string, overrides: { areas?: readonly Que
   if (profile === "budget" && !selected.includes("project")) profile = "summary";
   let period: QueryPeriod = /tomorrow|내일|jutro/.test(text) ? "tomorrow" : /today|오늘|dzisiaj|dziś/.test(text) ? "today" : /last\s*week|지난\s*주|zeszł/.test(text) ? "last_week" : /this\s*week|이번\s*주|tym tygodniu/.test(text) ? "this_week" : /next\s*week|다음\s*주/.test(text) ? "next_7_days" : /30\s*days|30일|30 dni/.test(text) ? "last_30_days" : /7\s*days|7일|7 dni/.test(text) ? "last_7_days" : profile === "next_steps" || profile === "flow" ? "any" : profile === "schedule" ? "next_7_days" : profile === "notes" || profile === "budget" ? "last_30_days" : "last_7_days";
   const dates = text.match(/\d{4}-\d{2}-\d{2}/g)?.filter(civilDate) ?? [];
+  let zone = "UTC"; try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* UTC fallback. */ }
+  if (overrides.zone && validZone(overrides.zone)) zone = overrides.zone;
+  const nextWeek = !dates.length && !overrides.period && /next\s*week|다음\s*주|przyszł[^ ]*\s+tygod/.test(text);
+  if (!dates.length && !overrides.period && /(?:next|coming|upcoming)\s*7\s*days|(?:앞으로|향후|다음)\s*7\s*일|następn[^ ]*\s*7\s*dni/.test(text)) period = "next_7_days";
+  if (nextWeek) {
+    const week = resolvePeriod({ period: "this_week", zone } as QuestionQuery, now);
+    const add = (date: string, days: number) => new Date(Date.parse(date) + days * 86400000).toISOString().slice(0, 10);
+    dates.push(add(week.from!, 7), add(week.through!, 7));
+  }
   if (dates.length) period = "custom";
   if (overrides.period) period = overrides.period;
   const topic = text.replace(/\d{4}-\d{2}-\d{2}/g, " ").replace(/지난\s*주|이번\s*주|다음\s*주|오늘|내일|최근|학습|공부|강의|수업|일정|캘린더|할\s?일|노트|메모|일기|프로젝트|단계|예산|비용|수입|지출|집중|포모도로|아바타|캐릭터|반려|성장|정리해\s?줘|정리|요약해\s?줘|요약|알려\s?줘|알려|보여\s?줘|보여|다음|우선|계획|시간|기록|현황/g, " ");
@@ -121,6 +130,5 @@ export function planQuestion(question: string, overrides: { areas?: readonly Que
   const generic = /^(should|would|could|can|is|are|was|were|need|needs|attention|help|prepare|create|write|give|list|status|overview|remaining|upcoming|spent|logged|recorded|completed|pending|across|so|far|doing|done|analy[sz]e|compare|between|much|many|about|어떻게|얼마나|어땠어|했어|했는지|관련|전체|모두|내용)$/;
   const terms = overrides.terms ? [...overrides.terms] : [...new Set((topic.match(/[\p{L}\p{N}][\p{L}\p{N}_-]*/gu) ?? []).map(term => term.replace(/(에서|으로|에게|들은|들을|을|를|의|은|는)$/u, "")).filter(term => term.length > 1 && !/^\d+$/.test(term) && !stop.test(term) && !generic.test(term) && encoder.encode(term).length <= 80))].slice(0, 8);
   if (!selected.length) return { query: null, needsArea: true, terms };
-  let zone = "UTC"; try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { /* UTC is an explicit fallback. */ }
   return { query: validateQuestionQuery({ areas: selected, period, from: period === "custom" ? dates[0] ?? null : null, through: period === "custom" ? dates[dates.length - 1] ?? null : null, zone, terms, profile, includeLinkedNotes: !selected.includes("flow"), maxRecords: 20, maxTextBytes: 32768 }), needsArea: false, terms };
 }

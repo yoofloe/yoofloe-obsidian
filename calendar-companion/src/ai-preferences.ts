@@ -2,8 +2,11 @@ import { validateOpenAiKey } from "./openai";
 import { DEFAULT_OPENAI_MODEL } from "./openai-models";
 import { isAiModelId, isAiProviderEnabled, modelCatalog, providerLabel } from "./ai-models";
 import type { AiModelOptions, AiProvider } from "./ai-session";
+import { isEffortSetting, resolveEffort } from "./effort";
 
 export const DEFAULT_OPENAI_OPTIONS: AiModelOptions = { model: DEFAULT_OPENAI_MODEL };
+/** Desktop resource URLs contain a changing cache timestamp. Android keeps the existing secret binding byte-for-byte. */
+export function localSecretBinding(resource: string, basePath?: string): string { return basePath ? `file-system:${basePath.replaceAll("\\", "/")}` : resource; }
 export interface AiPreferenceHost {
   current(): boolean; binding(): string; load(): Promise<unknown>; save(value: unknown): Promise<void>;
   secrets(): { getSecret(id: string): string | null; setSecret(id: string, secret: string): void } | null;
@@ -40,12 +43,15 @@ export class AiPreferences {
     this.guard(); if (!isAiProviderEnabled(provider)) throw Error("Unsupported provider.");
     const raw = settings(await this.host.load()); this.guard();
     const saved = settings(raw[provider]);
-    return { model: typeof saved.model === "string" && saved.model.length <= 128 && saved.model.trim() ? saved.model : modelCatalog(provider).defaultModel };
+    const model = typeof saved.model === "string" && saved.model.length <= 128 && saved.model.trim() ? saved.model : modelCatalog(provider).defaultModel;
+    try { if (isEffortSetting(saved.effort)) { resolveEffort(model, saved.effort); return { model, effort: saved.effort }; } } catch { /* A changed model cannot inherit an unsupported value. */ }
+    return { model };
   }
   async save(options: AiModelOptions, provider: AiProvider = "openai"): Promise<void> {
     this.guard();
     if (!isAiProviderEnabled(provider) || !isAiModelId(provider, options.model)) throw Error("Choose a valid API model ID.");
-    await this.update(previous => { const providerSettings: Record<string, unknown> = { ...settings(previous[provider]), model: options.model }; delete providerSettings.maxOutputTokens; return { ...previous, [provider]: providerSettings }; });
+    resolveEffort(options.model, options.effort);
+    await this.update(previous => { const providerSettings: Record<string, unknown> = { ...settings(previous[provider]), model: options.model }; delete providerSettings.maxOutputTokens; delete providerSettings.effort; if (options.effort !== undefined) providerSettings.effort = options.effort; return { ...previous, [provider]: providerSettings }; });
   }
   private async secretId(provider: AiProvider): Promise<string> {
     this.guard(); if (!isAiProviderEnabled(provider)) throw Error("Unsupported provider.");
