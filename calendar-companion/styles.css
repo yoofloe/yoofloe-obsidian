@@ -47,6 +47,8 @@
 .calendar-note-header h2 { font-size: var(--font-ui-medium); margin: 0; }
 .calendar-note-header > div:first-child { min-width: 0; }
 .calendar-note-header .calendar-note-title { font-size: var(--font-small); color: var(--text-muted); white-space: normal; max-height: 4.5em; overflow: auto; overflow-wrap: anywhere; margin: 0.25rem 0 0; }
+.calendar-note-keyboard .calendar-note-title { max-height: 1.5em; }
+.calendar-note-keyboard.calendar-note-editing-context .calendar-note-composer { display: none; }
 .is-mobile .modal-container.calendar-note-container .modal.calendar-note-modal { padding: 0; }
 .modal.calendar-note-modal .calendar-note .setting-item { border: 0; padding: 0; min-width: 0; }
 .calendar-note .calendar-note-button .setting-item-info,
@@ -67,7 +69,7 @@
 .calendar-note textarea, .calendar-note select { width: 100%; max-width: 100%; }
 .calendar-note-composer {
   border-top: 1px solid var(--background-modifier-border); background: var(--background-primary);
-  padding: 0.65rem 1rem; flex-shrink: 0;
+  padding: 0.65rem 1rem; flex-shrink: 1; min-height: 0;
   max-height: 50%; overflow: auto; overscroll-behavior: contain;
 }
 .calendar-note-composer:empty, .calendar-note-submit:empty { display: none; }

@@ -16,20 +16,42 @@ export class NoteModal extends Modal {
     closed(): void; settings(): void; startNew(): void; nextTitle(): string | null;
   }) { super(app); }
   onOpen(): void {
+    this.unsubscribe?.(); this.stopViewport?.();
     this.alive = true; this.modalEl.classList.add("calendar-note-modal");
     this.modalEl.parentElement?.classList.add("calendar-note-container");
     this.contentEl.classList.add("calendar-note");
     this.unsubscribe = this.work.subscribe(() => this.render());
-    const viewport = this.contentEl.ownerDocument.defaultView?.visualViewport;
+    const view = this.contentEl.ownerDocument.defaultView, viewport = view?.visualViewport;
+    let focusTimer: number | null = null;
+    const keepFocusVisible = () => {
+      if (focusTimer !== null) { view?.clearTimeout(focusTimer); focusTimer = null; }
+      const focused = this.contentEl.ownerDocument.activeElement;
+      if (!focused || !this.contentEl.contains(focused) || !focused.matches("input,textarea")) return;
+      focusTimer = view?.setTimeout(() => {
+        const active = this.contentEl.ownerDocument.activeElement;
+        if (this.alive && active instanceof HTMLElement && this.contentEl.contains(active) && active.matches("input,textarea")) active.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }, 400) ?? null;
+    };
+    const focus = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.matches("input,textarea")) {
+        this.contentEl.classList.toggle("calendar-note-editing-context", !!target.closest(".calendar-note-scroll")); keepFocusVisible();
+      }
+    };
     const resize = () => {
       if (!this.alive) return;
       if (viewport) this.modalEl.style.setProperty("--ycc-viewport-height", `${viewport.height}px`);
+      const nativeKeyboard = view?.getComputedStyle ? parseFloat(view.getComputedStyle(this.contentEl.ownerDocument.body).getPropertyValue("--keyboard-height")) || 0 : 0;
+      this.contentEl.classList.toggle("calendar-note-keyboard", nativeKeyboard > 50 || !!(view && viewport && view.innerHeight - viewport.height > 80));
       const wide = this.contentEl.getBoundingClientRect().width >= 740;
       if (wide !== this.wide && this.sourceEl) this.sourceEl.open = wide;
-      this.wide = wide;
+      this.wide = wide; keepFocusVisible();
     };
     viewport?.addEventListener("resize", resize); resize();
-    this.stopViewport = () => viewport?.removeEventListener("resize", resize);
+    this.contentEl.addEventListener("focusin", focus);
+    const Observer = view?.MutationObserver, observer = Observer ? new Observer(resize) : null;
+    observer?.observe(this.contentEl.ownerDocument.body, { attributes: true, attributeFilter: ["style"] });
+    this.stopViewport = () => { viewport?.removeEventListener("resize", resize); this.contentEl.removeEventListener("focusin", focus); observer?.disconnect(); if (focusTimer !== null) view?.clearTimeout(focusTimer); };
     this.render(); void this.work.refreshSettings();
   }
   onClose(): void {
@@ -153,7 +175,7 @@ export class NoteModal extends Modal {
         input.setPlaceholder("Write, rewrite, diagram or ask about these notes…").setValue(work.prompt).setDisabled(work.locked).onChange(value => { work.setPrompt(value); generate?.setDisabled(!updatePreview() || work.locked || !work.source || !work.configured || !work.model); });
       });
       submit.createEl("p", { text: "Uses your OpenAI key · API charges apply · one request", cls: "calendar-note-cost" });
-      generate = this.button(submit, "Generate once", () => void work.generate(), !validInput || work.locked || !work.source || !work.configured || !work.model, true);
+      generate = this.button(submit, "Generate once", () => void work.generate(), !validInput || work.locked || !work.source || !work.configured || !work.model || !!(work.requestId && !work.delivery), true);
     } else if (work.draft) {
       const buttons = submit.createDiv({ cls: "calendar-note-output-actions" });
       const proposal = work.proposal;

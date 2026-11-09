@@ -35,6 +35,7 @@ test('Calendar is explicitly optional and ambiguous context does not read all wo
   const f=fixture();await f.work.initialize();f.work.choose('refine');assert(!('calendar_records'in JSON.parse(f.work.input)));
   f.work.calendarQuestion='Help me';assert.equal(await f.work.findCalendar(),null);assert.equal(f.starts,0);
   f.work.calendarQuestion='My study this week';assert.equal(await f.work.findCalendar(),'local-scheme://safe');assert.equal(f.starts,1);assert.equal(f.calls,0);
+  await f.work.generate();assert.equal(f.calls,0,'A pending Calendar review cannot silently generate from the note alone');
   await f.work.receive('matching');assert.equal(f.work.delivery,null);assert.equal(f.calls,0);
   await f.work.removeCalendar();assert.equal(f.work.requestId,null);assert(f.work.prompt.includes('Refine'));
 });

@@ -150,7 +150,7 @@ export class NoteWork {
     finally { this.busy = false; this.changed(); }
   }
   async generate(): Promise<void> {
-    if (!this.current || this.locked || !this.source || !this.configured || !this.model || !this.prompt.trim()) return;
+    if (!this.current || this.locked || !this.source || !this.configured || !this.model || !this.prompt.trim() || (this.requestId && !this.delivery)) return;
     this.busy = true; this.message = "Generating once. You can hide this sheet; the result will remain here."; this.changed();
     const revision = this.revision, source = this.source;
     try {

@@ -10,8 +10,9 @@ const {build}=createRequire(new URL('../../package.json',import.meta.url))('esbu
 const bundle=await build({absWorkingDir:fileURLToPath(new URL('../',import.meta.url)),entryPoints:['src/note-modal.ts'],write:false,bundle:true,format:'cjs',platform:'browser',external:['obsidian'],target:'es2022'});
 const documentFixture={defaultView:{visualViewport:{height:800,addEventListener(){},removeEventListener(){}},navigator:{clipboard:{writeText:async()=>{}}}}};
 class Element {
-  children=[];settings=[];style={setProperty(){}};classList={add(){},remove(){}};ownerDocument=documentFixture;
+  children=[];settings=[];style={setProperty(){}};classList={add(){},remove(){},toggle(){}};ownerDocument=documentFixture;
   empty(){this.children=[];this.settings=[];}setAttribute(){}addEventListener(type,cb){this[type]=cb;}
+  removeEventListener(){}
   getBoundingClientRect(){return {width:360,height:750};}
   createEl(tag,options={}){const e=new Element();e.tag=tag;e.text=options.text;e.cls=options.cls;this.children.push(e);return e;}
   createDiv(options){return this.createEl('div',options);}all(){return [this,...this.children.flatMap(e=>e.all())];}
