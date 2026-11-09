@@ -27,7 +27,7 @@ class Setting {
  add(cb){const c=new Control();this.controls.push(c);cb(c);return this;}addButton(cb){return this.add(cb);}addTextArea(cb){return this.add(cb);}addDropdown(cb){return this.add(cb);}
 }
 class Modal {constructor(app){this.app=app;this.contentEl=new Element();this.modalEl=new Element();this.modalEl.parentElement=new Element();}open(){this.onOpen();}close(){this.onClose();}}
-const context={module:{exports:{}},require:()=>({App:class{},Modal,Setting,Notice:class{}}),crypto,TextEncoder,TextDecoder,Date,Intl,Error,URL,btoa,atob};
+const context={module:{exports:{}},require:()=>({App:class{},Modal,Setting,Notice:class{},Component:class{load(){}unload(){}},MarkdownRenderer:{render:async(_app,md,el)=>{el.createEl('div',{text:md});}}}),crypto,TextEncoder,TextDecoder,Date,Intl,Error,URL,btoa,atob};
 vm.runInNewContext(bundle.outputFiles[0].text,context);const {NoteModal}=context.module.exports;
 const until=async f=>{for(let i=0;i<50&&!f();i++)await new Promise(r=>setTimeout(r,2));assert(f());};
 const button=(m,text)=>{const c=m.contentEl.controls().find(c=>c.text===text);assert(c,`Expected ${text}`);return c;};

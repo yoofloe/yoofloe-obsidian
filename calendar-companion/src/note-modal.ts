@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting, type ButtonComponent } from "obsidian";
+import { App, Component, MarkdownRenderer, Modal, Notice, Setting, type ButtonComponent } from "obsidian";
 import { NOTE_ACTIONS, NoteWork, type NoteAction } from "./note-work";
 import { safeNoteMarkdown } from "./note-context";
 import { AREA_LABELS, PERIOD_LABELS, QUERY_AREAS, type QueryArea, type QueryPeriod } from "./question-query";
@@ -10,6 +10,7 @@ export class NoteModal extends Modal {
   private alive = false;
   private sourceEl: HTMLDetailsElement | null = null;
   private wide = false;
+  private rendering: Component | null = null;
   constructor(app: App, readonly work: NoteWork, private readonly options: {
     closed(): void; settings(): void; startNew(): void; nextTitle(): string | null;
   }) { super(app); }
@@ -32,6 +33,7 @@ export class NoteModal extends Modal {
   }
   onClose(): void {
     this.alive = false; this.unsubscribe?.(); this.unsubscribe = null; this.stopViewport?.(); this.stopViewport = null;
+    this.rendering?.unload(); this.rendering = null;
     this.modalEl.parentElement?.classList.remove("calendar-note-container"); this.options.closed();
   }
   private button(el: HTMLElement, text: string, action: () => void, disabled = false, primary = false): ButtonComponent {
@@ -42,6 +44,7 @@ export class NoteModal extends Modal {
   }
   private render(): void {
     if (!this.alive || !this.work.current) return;
+    this.rendering?.unload(); this.rendering = new Component(); this.rendering.load();
     const work = this.work, el = this.contentEl; el.empty();
     const header = el.createDiv({ cls: "calendar-note-header" });
     const heading = header.createDiv(); heading.createEl("h2", { text: "Note AI" });
@@ -57,7 +60,13 @@ export class NoteModal extends Modal {
     const source = grid.createEl("details", { cls: "calendar-note-source" }); this.sourceEl = source; source.open = this.wide;
     source.createEl("summary", { text: "Source text" }); source.createEl("pre", { text: work.source?.text ?? "No text selected yet." });
     const result = grid.createEl("section", { cls: "calendar-note-result" });
-    if (work.draft) { result.createEl("h3", { text: "Your draft" }); result.createEl("pre", { text: safeNoteMarkdown(work.draft.text) }); }
+    if (work.draft) {
+      result.createEl("h3", { text: "Your draft" });
+      const markdown = safeNoteMarkdown(work.draft.text), preview = result.createDiv({ cls: "calendar-note-markdown" });
+      if (new TextEncoder().encode(markdown).length <= 131072) {
+        void MarkdownRenderer.render(this.app, markdown, preview, work.target.path, this.rendering).catch(() => { preview.empty(); preview.createEl("pre", { text: markdown }); });
+      } else { preview.createEl("p", { text: "Large draft shown as Markdown source. The full result is kept." }); preview.createEl("pre", { text: markdown }); }
+    }
     else result.createEl("p", { text: work.busy ? "Working… You can hide this sheet and return from the note’s AI action." : "Ask about this text, or choose an action below. Nothing is sent until you generate.", cls: "calendar-note-meta" });
 
     if (!work.used) {

@@ -40,8 +40,17 @@ test('long notes require an explicit complete section or selection; no silent tr
 test('Markdown keeps headings and tasks but deactivates executable blocks, images, links and HTML',()=>{
   const safe=safeNoteMarkdown('# Heading\n- [ ] Task\n- [x] Done\n<script>x</script>\n![pic](https://x)\n![[secret]]\n[go](obsidian://open)\n\\\\![x](https://x)\n```dataviewjs\nalert(1)\n```');
   assert(safe.startsWith('# Heading\n- [ ] Task\n- [x] Done'));
-  assert(!safe.includes('<script>'));assert(!safe.includes('!['));assert(!safe.includes('[[secret]]'));
+  assert(!safe.includes('<script>'));assert(safe.includes('\\![pic]'));assert(safe.includes('\\![[secret]]'));
   assert(safe.includes('```text'));assert(!safe.includes('```dataviewjs'));assert(safe.includes('obsidian\\:'));
+});
+test('native Mermaid, tables, links, math and blockquotes survive; diagram callbacks/config remain inert',()=>{
+  const graph='```mermaid\nflowchart TD\n  A[Read note] --> B[Write draft]\n```';
+  const chart='```mermaid\nxychart-beta\n  x-axis [Mon, Tue]\n  y-axis "Minutes" 0 --> 60\n  bar [20, 40]\n```';
+  const doc=`${graph}\n${chart}\n| Day | Time |\n| --- | --- |\n| Mon | 20 |\n\n$$x^2 + y^2 = z^2$$\n> [!note] Reminder\n[[Study plan]]`;
+  assert.equal(safeNoteMarkdown(doc),doc);
+  for(const body of ['%%{init: {securityLevel:"loose"}}%%\nflowchart TD\nA-->B','flowchart TD\nclick A "https://x"','flowchart TD\nA[<img src=x>]']) {
+    const inert=safeNoteMarkdown('```mermaid\n'+body+'\n```');assert(inert.startsWith('```text'));
+  }
 });
 test('one note call survives sheet closure and source edits; a review cannot be resent',async()=>{
   const f=fixture(),capture=await captureNote(f.target,{from:0,to:0});let resolve,calls=0;
