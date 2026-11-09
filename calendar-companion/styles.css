@@ -76,6 +76,7 @@
 .calendar-note-markdown { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .calendar-note-markdown .mermaid, .calendar-note-markdown .table-wrapper,
 .calendar-note-markdown .calendar-note-table, .calendar-note-markdown .math-block { max-width: 100%; overflow: auto; overscroll-behavior: contain; }
+.calendar-note-table table { width: max-content; min-width: 100%; max-width: none; }
 .calendar-note-markdown svg { max-width: 100%; height: auto; }
 .calendar-note-more { margin-bottom: 0.45rem; }
 .calendar-note-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
