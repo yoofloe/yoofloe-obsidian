@@ -36,7 +36,8 @@ export class NoteModal extends Modal {
   }
   private button(el: HTMLElement, text: string, action: () => void, disabled = false, primary = false): ButtonComponent {
     let control!: ButtonComponent;
-    new Setting(el).addButton(button => { control = button; button.setButtonText(text).setDisabled(disabled).onClick(action); if (primary) button.setCta(); });
+    const setting = new Setting(el); setting.settingEl.classList.add("calendar-note-button");
+    setting.addButton(button => { control = button; button.setButtonText(text).setDisabled(disabled).onClick(action); if (primary) button.setCta(); });
     return control;
   }
   private render(): void {
@@ -96,7 +97,8 @@ export class NoteModal extends Modal {
         button.disabled = work.locked; button.addEventListener("click", () => work.choose(action as NoteAction));
       }
       let generate: ButtonComponent | null = null;
-      new Setting(footer).addTextArea(input => {
+      const field = new Setting(footer); field.settingEl.classList.add("calendar-note-input");
+      field.addTextArea(input => {
         input.inputEl.rows = 2; input.inputEl.maxLength = 4000; input.inputEl.setAttribute("aria-label", "Request for this note");
         input.setPlaceholder("Ask about this note…").setValue(work.prompt).setDisabled(work.locked).onChange(value => { work.setPrompt(value); generate?.setDisabled(!updatePreview() || work.locked || !work.source || !work.configured || !work.model); });
       });

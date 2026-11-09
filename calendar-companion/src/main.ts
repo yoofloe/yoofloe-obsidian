@@ -121,6 +121,7 @@ export default class CalendarCompanionPlugin extends Plugin {
   }
   openQuestion(): void {
     if (!this.live) return;
+    this.noteView?.close();
     if (this.question) { this.question.open(); return; }
     this.modal?.close();
     this.question = new QuestionModal(this.app, { live: () => this.live, closed: () => { this.question = null; },
@@ -129,6 +130,7 @@ export default class CalendarCompanionPlugin extends Plugin {
   }
   openCompanion(): void {
     if (!this.live) return;
+    this.noteView?.close();
     if (this.modal) { this.modal.open(); return; }
     this.question?.close();
     this.modal = new CompanionModal(this.app, () => this.live, () => { this.modal = null; }, () => this.aiContext(), () => this.openAiSettings());
