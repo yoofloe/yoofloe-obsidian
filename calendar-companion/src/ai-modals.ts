@@ -1,4 +1,4 @@
-import { App, Modal, Setting, type ButtonComponent } from "obsidian";
+import { App, Modal, Notice, Setting, type ButtonComponent } from "obsidian";
 import { AiPreferences, DEFAULT_OPENAI_OPTIONS } from "./ai-preferences";
 import { AiSession, type AiDraft, type AiModelOptions, type AiOptions, type AiProvider, type AiReview } from "./ai-session";
 import { CUSTOM_MODEL_CHOICE, findAiModel, isAiModelId, isAiProviderEnabled, modelCatalog, providerLabel, PUBLIC_AI_PROVIDERS } from "./ai-models";
@@ -14,6 +14,7 @@ export class AiSettingsModal extends Modal {
   private alive = false;
   private busy = true;
   private message = "";
+  private keyMessage = "";
   private configured = false;
   private provider: AiProvider = "openai";
   private options: AiModelOptions = { ...DEFAULT_OPENAI_OPTIONS };
@@ -46,7 +47,7 @@ export class AiSettingsModal extends Modal {
     this.modelDrafts.set(this.provider, { options: { ...this.options }, modelChoice: this.modelChoice, customModel: this.customModel });
     if (this.keyInput) this.keyInput.value = "";
     this.busy = true; this.ai.session.enableForSession(false); this.provider = provider;
-    this.configured = false; this.message = ""; this.options = { model: modelCatalog(provider).defaultModel }; this.modelChoice = this.options.model; this.customModel = ""; this.render();
+    this.configured = false; this.message = ""; this.keyMessage = ""; this.options = { model: modelCatalog(provider).defaultModel }; this.modelChoice = this.options.model; this.customModel = ""; this.render();
     try { await this.ai.preferences.selectProvider(provider); if (!this.current()) return; await this.loadModel(); }
     catch { this.message = "Provider settings could not be read or saved locally. No API request was sent."; }
     finally { this.busy = false; if (this.current()) this.render(); }
@@ -60,6 +61,10 @@ export class AiSettingsModal extends Modal {
       if (clearKeyOnSuccess) this.keyDrafts.delete(this.provider);
       this.configured = await this.ai.preferences.hasKey(this.provider);
       this.message = "Saved locally. No API request was sent. Enable AI only when you want to use it.";
+      if (clearKeyOnSuccess) {
+        this.keyMessage = this.configured ? "Key saved on this device. API access is checked only when you generate." : "Saved key removed from this device.";
+        new Notice(this.configured ? `${providerLabel(this.provider)} key saved locally` : "Saved key removed");
+      }
     } catch { if (this.current()) this.message = "Could not save locally. Check the model, provider key format and secret storage. No API request was sent."; }
     finally { this.busy = false; if (this.current()) this.render(); }
   }
@@ -118,6 +123,7 @@ export class AiSettingsModal extends Modal {
     new Setting(el).addButton(button => { this.saveModelButton = button; button.setButtonText("Save model settings").onClick(() => void this.change(() => this.ai.preferences.save({ ...this.options }, this.provider))); }); this.updateModelSave();
     new Setting(el).setName(this.configured ? "API key saved locally" : "No API key saved").setDesc(`${name} only. Stored through Obsidian secret storage, outside this plugin's vault files. Other trusted plugins share Obsidian's trust boundary.`)
       .addText(input => { this.keyInput = input.inputEl; input.inputEl.type = "password"; input.inputEl.autocomplete = "off"; input.inputEl.setAttribute("aria-label", `${name} API key`); input.setPlaceholder("Your own API key").setValue(this.keyDrafts.get(this.provider) ?? "").setDisabled(this.busy); });
+    if (this.keyMessage || this.configured) el.createEl("p", { text: this.keyMessage || "A key is stored on this device. API access is checked only when you generate.", cls: "calendar-companion-status", attr: { role: "status", "aria-live": "polite" } });
     new Setting(el)
       .addButton(button => button.setButtonText("Save key locally").setDisabled(this.busy).onClick(() => { const value = this.keyInput?.value ?? ""; void this.change(() => this.ai.preferences.saveKey(value, this.provider), true); }))
       .addButton(button => button.setButtonText("Remove saved key").setDisabled(this.busy || !this.configured).onClick(() => void this.change(() => this.ai.preferences.clearKey(this.provider), true)));

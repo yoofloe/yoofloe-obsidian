@@ -1,5 +1,43 @@
 # Yoofloe Calendar Companion - implementation notes
 
+## Open-note AI (0.6.0)
+
+`note-context.ts` captures a single selection, complete note or explicit heading
+section from the editor buffer. It excludes local paths/identities from provider
+input. A full-document SHA-256 and the original file/view identity guard one
+editor transaction, with no disk overwrite, automatic rebasing or auto-apply.
+The Markdown sanitizer keeps headings/lists/tasks, tables, math, ordinary links
+and bounded Mermaid diagrams while making active HTML, embeds, diagram
+directives/callbacks and fenced plugin code inert; v2 snapshot escaping is unchanged.
+
+`note-workspace.ts` defines strict structured proposals bound to local source
+references. Responses use `text.format` JSON schema, not tool calls. Every
+proposal is validated again locally; unknown/duplicate targets and non-write
+actions are refused. `note-vault.ts` searches a bounded local set and reads live
+editor buffers before disk. Closed notes use compare-and-set `vault.process`;
+open notes use one editor transaction. Whole-note updates first create an exact
+original Markdown backup, then recheck the source. Conditional Undo refuses to
+overwrite newer edits. Create-only new notes never overwrite a name collision.
+Follow-up requests retain prior answers locally and send only bounded history.
+
+`NoteWork` owns source, request, optional v3 Calendar session and paid result.
+`NoteModal` only subscribes to it. Closing the sheet does not dispose the work;
+vault/plugin unload does. Source conflicts never discard a returned result.
+The note session shares a network concurrency gate and existing key/preferences
+with Calendar, but has its own one-use epoch, so hiding views or opening settings
+cannot invalidate a paid note response. No background request, paid planner,
+retry, model discovery call, new dependency or persistence of private drafts.
+
+The mobile command, editor/file menu and MarkdownView action use public Obsidian
+APIs. The phone sheet has one content scroller and a keyboard-aware composer;
+container width controls two-column source/result previews on wider layouts.
+Tests cover buffer capture, input scope, explicit writes, conflicts, one-use
+requests, hidden-view completion, shared concurrency and create-only saving.
+Physical phone evidence is separate from responsive tablet layout checks.
+
+The Calendar app is optional for Note AI alone. The connection requirements
+below apply to Calendar retrieval/import, not to the open-note feature.
+
 Android phones and tablets only. Obsidian and Yoofloe Calendar 1.8.5 or later with
 Obsidian Companion support must be installed in the same Android user profile
 on the same device. Direct connection is unavailable on desktop, iPhone and
