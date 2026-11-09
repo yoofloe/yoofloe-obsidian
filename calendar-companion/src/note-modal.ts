@@ -72,7 +72,7 @@ export class NoteModal extends Modal {
       const markdown = safeNoteMarkdown(work.draft.text), preview = result.createDiv({ cls: "calendar-note-markdown" });
       if (new TextEncoder().encode(markdown).length <= 131072) {
         void MarkdownRenderer.render(this.app, markdown, preview, work.target.path, this.rendering).then(() => {
-          for (const table of preview.querySelectorAll("table")) {
+          for (const table of Array.from(preview.querySelectorAll("table"))) {
             const wrapper = preview.ownerDocument.createElement("div"); wrapper.className = "calendar-note-table";
             table.parentElement?.insertBefore(wrapper, table); wrapper.appendChild(table);
           }
