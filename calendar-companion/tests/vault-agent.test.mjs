@@ -66,3 +66,11 @@ test('Trash requires a separate user action; a new file with the same name survi
   assert.deepEqual(await f.agent.undo(), { restored: 0, kept: 1 });
   assert.equal(f.files.get('Notes/Plan.md').text, 'New user note');
 });
+test('repeated selection edits retain the authorized range, including deletion, while external changes still invalidate it',async()=>{
+ const f=fixture();f.policy.selection={from:7,to:15};f.policy.readScope='current';const a=new VaultAgent(f.host,f.policy,()=>true);let current=await a.initialContext();
+ await a.execute('apply_changes',{changes:[{reference:'N1',version:current.version,action:'replace_selection',markdown:'A longer revision'}]});
+ current=(await a.execute('read_notes',{notes:[{reference:'N1',from_line:1,through_line:0}]})).notes[0];assert.equal(current.text,'A longer revision');assert.equal(f.policy.selection.to,7+current.text.length);
+ await a.execute('apply_changes',{changes:[{reference:'N1',version:current.version,action:'replace_selection',markdown:''}]});
+ current=(await a.execute('read_notes',{notes:[{reference:'N1',from_line:1,through_line:0}]})).notes[0];assert.equal(current.text,'');assert.equal(f.policy.selection.to,7);assert.equal(f.files.get('Notes/Plan.md').text,'# Plan\n');
+ f.files.get('Notes/Plan.md').text+='Human edit';await assert.rejects(a.execute('read_notes',{notes:[{reference:'N1',from_line:1,through_line:0}]}),/selected note changed/);
+});

@@ -103,7 +103,7 @@ export class YoofloeAiView extends ItemView {
       }
     }
     calendar.createEl("a", { text: "Discover Yoofloe Calendar ↗", href: STORE, attr: { target: "_blank", rel: "noopener noreferrer" } });
-    if (w.message || w.task?.message) scroll.createEl("p", { text: w.busy ? w.task?.message || "Preparing this task locally…" : w.message, cls: "y-ai-status", attr: { role: "status", "aria-live": "polite" } });
+    if (w.message || w.task?.message) scroll.createEl("p", { text: w.busy && w.task?.busy ? w.task.message : w.message, cls: "y-ai-status", attr: { role: "status", "aria-live": "polite" } });
     if (w.result) {
       const result = scroll.createDiv({ cls: "y-ai-result markdown-rendered" }); result.inert = true;
       void MarkdownRenderer.render(this.app, safeNoteMarkdown(w.result), result, w.source?.path ?? "", this.rendering).then(() => {
@@ -142,7 +142,7 @@ export class YoofloeAiView extends ItemView {
     privacy.setAttribute("title", "Data goes directly to OpenAI, including relevant note excerpts within the permitted scope. Local key storage does not make AI local. New notes may be created in the output folder.");
     const controls = dock.createDiv({ cls: "y-ai-row" });
     this.button(controls, "Review data", () => { prompt.blur(); void w.review(); }, w.busy);
-    const run = this.button(controls, w.busy ? "Stop" : "", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, !w.busy && (!w.ready || !w.configured || !w.prompt.trim()), w.busy ? "mod-warning" : "mod-cta");
+    const run = this.button(controls, w.busy ? w.canStop ? "Stop" : "Working…" : "", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, w.busy ? !w.canStop : !w.ready || !w.configured || !w.prompt.trim(), w.busy ? "mod-warning" : "mod-cta");
     if (!w.busy) {
       run.createEl("span", { text: "Send to OpenAI", cls: "y-ai-run-full" });
       run.createEl("span", { text: `Send to OpenAI · paid · max ${w.maximum} calls`, cls: "y-ai-run-tiny" });

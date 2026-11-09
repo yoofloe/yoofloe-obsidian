@@ -59,7 +59,7 @@ export class VaultAgent {
     if (ref.allowedRange) {
       if (this.policy.selectionVersion && version !== this.policy.selectionVersion) throw Error("The selected note changed. Select the text again before starting this task.");
       ({ from, to } = ref.allowedRange);
-      if (from < 0 || to <= from || to > original.length) throw Error("The original selection is no longer available.");
+      if (from < 0 || to < from || to > original.length) throw Error("The original selection is no longer available.");
     }
     else {
       if (!Number.isInteger(fromLine) || !Number.isInteger(throughLine) || fromLine < 1 || throughLine < 0) throw Error("Use positive line numbers, or zero through_line for a bounded first excerpt.");
@@ -127,7 +127,14 @@ export class VaultAgent {
         plans.push({ ref, before, after, hash: await inputDigest(after) });
       }
       const ops = []; for (const plan of plans) ops.push(await this.prepareEdit(plan.ref.file, plan.before, plan.hash));
-      for (const [index, plan] of plans.entries()) { this.guard(); await this.host.replace(plan.ref.file, plan.before, plan.after); plan.ref.version = plan.hash; plan.ref.complete = false; plan.ref.range = undefined; ops[index].status = "done"; await this.host.persist(this.journal); }
+      for (const [index, plan] of plans.entries()) {
+        this.guard(); await this.host.replace(plan.ref.file, plan.before, plan.after);
+        if (plan.ref.allowedRange) {
+          plan.ref.allowedRange = { from: plan.ref.allowedRange.from, to: plan.ref.allowedRange.to + plan.after.length - plan.before.length };
+          this.policy.selection = { ...plan.ref.allowedRange }; this.policy.selectionVersion = plan.hash;
+        }
+        plan.ref.version = plan.hash; plan.ref.complete = false; plan.ref.range = undefined; ops[index].status = "done"; await this.host.persist(this.journal);
+      }
       return { status: "applied", notes: plans.map(plan => ({ reference: this.reference(plan.ref.file), path: plan.ref.file.path, version: plan.hash })), undo_available: true };
     }
     if (name === "create_note") {
@@ -172,8 +179,7 @@ export class VaultAgent {
   }
   async confirmTrash(): Promise<void> {
     this.guard();
-    for (const item of this.pendingTrash) { const ref = this.ref(item.reference), before = await this.read(ref); if (await inputDigest(before) !== item.version) throw Error("A proposed note changed. Review it again before moving it to Trash."); const backup = await this.host.backup(ref.file.path, before); const op: JournalOp = { kind: "trash", path: ref.file.path, backup, beforeHash: item.version, afterHash: "", previousHash: item.version, status: "pending" }; this.journal.operations.push(op); await this.host.persist(this.journal); this.guard(); await this.host.trash(ref.file); op.status = "done"; await this.host.persist(this.journal); }
-    this.pendingTrash.length = 0;
+    while (this.pendingTrash.length) { const item = this.pendingTrash[0], ref = this.ref(item.reference), before = await this.read(ref); if (await inputDigest(before) !== item.version) throw Error("A proposed note changed. Review it again before moving it to Trash."); const backup = await this.host.backup(ref.file.path, before); const op: JournalOp = { kind: "trash", path: ref.file.path, backup, beforeHash: item.version, afterHash: "", previousHash: item.version, status: "pending" }; this.journal.operations.push(op); await this.host.persist(this.journal); this.guard(); await this.host.trash(ref.file); op.status = "done"; this.pendingTrash.shift(); await this.host.persist(this.journal); }
   }
   async undo(journal: WorkJournal = this.journal): Promise<{ restored: number; kept: number }> {
     this.guard(); validateJournal(journal); let restored = 0, kept = 0;
