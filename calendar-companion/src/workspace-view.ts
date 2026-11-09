@@ -47,7 +47,7 @@ export class YoofloeAiView extends ItemView {
     select.addEventListener("change", () => { change(select.value as T); this.work.preview = ""; this.saveSoon(); }); return select;
   }
   private render(): void {
-    if (!this.contentEl.isConnected || !this.work.current) return;
+    if (!this.work.current) return;
     const w = this.work, el = this.contentEl, oldScroll = el.querySelector(".y-ai-scroll")?.scrollTop ?? 0;
     this.rendering?.unload(); this.rendering = new Component(); this.rendering.load(); el.empty();
     const header = el.createDiv({ cls: "y-ai-header" }), title = header.createDiv({ cls: "y-ai-heading" });
