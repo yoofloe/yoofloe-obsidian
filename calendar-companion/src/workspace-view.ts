@@ -153,13 +153,19 @@ export class YoofloeAiView extends ItemView {
   }
   private watchViewport(): () => void {
     const root = this.contentEl, doc = root.ownerDocument, win = doc.defaultView; if (!win) return () => {};
-    const viewport = win.visualViewport; let timer = 0;
+    const viewport = win.visualViewport; let timer = 0, settleTimer = 0;
+    const navigation = doc.querySelector<HTMLElement>(".mobile-navbar");
     const resize = () => {
       const keyboard = parseFloat(win.getComputedStyle(doc.body).getPropertyValue("--keyboard-height")) || 0;
       const visual = !!viewport && win.innerHeight - viewport.height > 80;
       root.classList.toggle("y-ai-keyboard", keyboard > 50 || visual);
       const top = root.getBoundingClientRect().top, bottom = viewport ? viewport.offsetTop + viewport.height : win.innerHeight;
-      const available = Math.max(100, bottom - top - (visual ? 0 : keyboard));
+      let visibleBottom = bottom - (visual ? 0 : keyboard);
+      if (navigation) {
+        const bounds = navigation.getBoundingClientRect(), style = win.getComputedStyle(navigation);
+        if (bounds.height > 0 && bounds.top > top && bounds.top < visibleBottom && bounds.right > root.getBoundingClientRect().left && style.visibility !== "hidden" && Number(style.opacity) > 0) visibleBottom = bounds.top - 8;
+      }
+      const available = Math.max(80, visibleBottom - top);
       root.style.maxHeight = `${available}px`;
       root.classList.toggle("y-ai-compact", Math.min(root.parentElement?.clientHeight ?? available, available) < 340);
       root.classList.toggle("y-ai-tiny", available < 190 && (keyboard > 50 || visual));
@@ -167,9 +173,11 @@ export class YoofloeAiView extends ItemView {
       win.clearTimeout(timer); timer = win.setTimeout(() => { const active = doc.activeElement; if (active instanceof HTMLElement && root.contains(active) && active.matches("textarea,input,select")) active.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }); }, 350);
     };
     const focus = () => { const active = doc.activeElement; root.classList.toggle("y-ai-editing-scope", active instanceof HTMLElement && !!active.closest(".y-ai-scroll") && active.matches("input,textarea")); resize(); };
-    const observer = new win.MutationObserver(resize); observer.observe(doc.body, { attributes: true, attributeFilter: ["style"] }); observer.observe(doc.documentElement, { attributes: true, attributeFilter: ["style"] });
-    viewport?.addEventListener("resize", resize); win.addEventListener("resize", resize); root.addEventListener("focusin", focus); root.addEventListener("focusout", focus); resize();
-    return () => { observer.disconnect(); viewport?.removeEventListener("resize", resize); win.removeEventListener("resize", resize); root.removeEventListener("focusin", focus); root.removeEventListener("focusout", focus); win.clearTimeout(timer); };
+    const settledResize = () => { resize(); win.clearTimeout(settleTimer); settleTimer = win.setTimeout(resize, 350); };
+    const observer = new win.MutationObserver(settledResize); observer.observe(doc.body, { attributes: true, attributeFilter: ["style"] }); observer.observe(doc.documentElement, { attributes: true, attributeFilter: ["style"] });
+    if (navigation) observer.observe(navigation, { attributes: true, attributeFilter: ["class", "style"] });
+    viewport?.addEventListener("resize", settledResize); win.addEventListener("resize", settledResize); root.addEventListener("focusin", focus); root.addEventListener("focusout", focus); settledResize();
+    return () => { observer.disconnect(); viewport?.removeEventListener("resize", settledResize); win.removeEventListener("resize", settledResize); root.removeEventListener("focusin", focus); root.removeEventListener("focusout", focus); win.clearTimeout(timer); win.clearTimeout(settleTimer); };
   }
 }
 
