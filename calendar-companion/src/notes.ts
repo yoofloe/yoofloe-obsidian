@@ -1,4 +1,4 @@
-import { type Delivery, type RecordSnapshot } from "./protocol";
+import { type Delivery, type DeliveryV3, type RecordSnapshot } from "./protocol";
 import { type AiDraft, type AiProvider } from "./ai-session";
 import { recordLabel } from "./record-types";
 const encoder = new TextEncoder();
@@ -45,10 +45,12 @@ export async function saveDelivery(delivery: Delivery, store: NoteStore, guard: 
 }
 
 /** Save an explicitly accepted AI draft as a new literal note; never update source records. */
-export async function saveAiDraft(draft: AiDraft, store: NoteStore, guard: () => void, provider: AiProvider = "openai"): Promise<string> {
+export async function saveAiDraft(draft: AiDraft, store: NoteStore, guard: () => void, provider: AiProvider = "openai", source?: { question: string; delivery: DeliveryV3 }): Promise<string> {
   guard();
   const path = `Yoofloe Calendar/AI drafts/${crypto.randomUUID()}.md`;
-  const text = `---\nyoofloe_calendar_ai_draft: 1\nincomplete: ${draft.incomplete}\n---\n\n# ${provider === "gemini" ? "Gemini" : "OpenAI"} draft\n\nAI-generated text. Review for accuracy. This note does not change Calendar or Flow rewards.\n\n${literal(draft.text)}\n`;
+  const provenance = source ? `\n## Calendar sources\n\nQuestion: ${literal(source.question)}\n\nAs of ${new Date(source.delivery.exportedAt).toISOString()} (${literal(source.delivery.context.zone)}). ${source.delivery.context.partial ? "Partial results; totals cover observed matches only." : "Bounded search of the requested workspaces and dates."}\n\n`
+    + source.delivery.records.map((record, i) => `- C${i + 1}: ${literal(record.title || "Untitled")} · ${literal(recordLabel(record.kind))}${record.date ? ` · ${record.date}` : ""}`).join("\n") + "\n" : "";
+  const text = `---\nyoofloe_calendar_ai_draft: 1\nincomplete: ${draft.incomplete}\n---\n\n# ${provider === "gemini" ? "Gemini" : "OpenAI"} draft\n\nAI-generated text. Review for accuracy. This note does not change Calendar or Flow rewards.\n\n${literal(draft.text)}\n${provenance}`;
   await store.mkdir("Yoofloe Calendar"); guard();
   await store.mkdir("Yoofloe Calendar/AI drafts"); guard();
   await store.create(path, text);

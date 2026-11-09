@@ -125,6 +125,7 @@ export class QuestionModal extends Modal {
       }
       if (this.draft) {
         const result = el.createEl("section"); result.createEl("h3", { text: "Draft" }); result.createEl("pre", { text: this.draft.text });
+        if (this.draft.inputTokens !== null && this.draft.outputTokens !== null) result.createEl("p", { text: `OpenAI usage: ${this.draft.inputTokens} input · ${this.draft.outputTokens} output tokens`, cls: "calendar-companion-hint" });
         if (this.draft.incomplete) result.createEl("p", { text: "The provider returned a partial draft. No retry was made." });
         new Setting(el).addButton(button => button.setButtonText(this.saved ? "Draft saved" : "Save draft as new note").setDisabled(this.busy || this.saved).onClick(() => void this.save()));
       }
@@ -178,7 +179,7 @@ export class QuestionModal extends Modal {
   }
   private async save(): Promise<void> {
     if (!this.draft || this.busy || this.saved || !this.current()) return; this.busy = true;
-    try { await saveAiDraft(this.draft, this.options.notes, () => { if (!this.current()) throw Error("Vault changed"); }); this.saved = true; this.message = "Saved a new draft note. Your Calendar records are unchanged."; }
+    try { await saveAiDraft(this.draft, this.options.notes, () => { if (!this.current()) throw Error("Vault changed"); }, "openai", this.delivery ? { question: this.question, delivery: this.delivery } : undefined); this.saved = true; this.message = "Saved a new draft note. Your Calendar records are unchanged."; }
     catch { this.message = "The draft could not be saved. Existing notes were kept."; }
     finally { this.busy = false; this.render(); }
   }

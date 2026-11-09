@@ -66,6 +66,7 @@ test('question UI searches locally, shows exact input and sends once only after 
   button(f.modal,'Generate once with OpenAI').fire();await settle();assert.equal(f.calls.length,1);assert.equal(f.ai.session.enabled,false);
   assert(!controls(f.modal).some(c=>c.text==='Generate once with OpenAI'));assert(![...f.files.keys()].some(p=>p.includes('AI drafts')));
   button(f.modal,'Save draft as new note').fire();await settle();assert.equal([...f.files.keys()].filter(p=>p.includes('AI drafts')).length,1);
+  const saved=[...f.files].find(([path])=>path.includes('AI drafts'))[1];assert(saved.includes('## Calendar sources'));assert(saved.includes('C1: Polish'));assert(saved.includes('Summarize my study this week'));
   assert.equal([...f.files.keys()].filter(p=>p.includes('Snapshots v2')).length,0);f.modal.close();
 });
 test('changed model invalidates approval; a local refresh is required before a one-use generation',async()=>{
