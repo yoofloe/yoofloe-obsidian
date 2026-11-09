@@ -57,6 +57,17 @@ test('native Mermaid, tables, links, math and blockquotes survive; diagram callb
     const inert=safeNoteMarkdown('```mermaid\n'+body+'\n```');assert(inert.startsWith('```text'));
   }
 });
+test('quoted, list and indented plugin fences cannot bypass normalization; inline plugin queries are inert',()=>{
+ for(const prefix of ['> ','> > ','- ','  1. ','    ','> - ']) {
+  const input=prefix+'```dataviewjs\n'+prefix+'example()\n'+prefix+'```';
+  const safe=safeNoteMarkdown(input);assert(!safe.includes('```dataviewjs'));assert(safe.includes('```text'));
+ }
+ const nested='```markdown\n> ```\n```dataviewjs\nexample()\n```\n```';
+ assert(!safeNoteMarkdown(nested).includes('```dataviewjs'));
+ const inline=safeNoteMarkdown('Result: `$= example()` and `= query`');
+ assert(!inline.includes('`$='));assert(!inline.includes('`= query'));assert.equal(safeNoteMarkdown(inline),inline);
+ const graph='```mermaid\nflowchart TD\nA[Read] --> B[Write]\n```';assert.equal(safeNoteMarkdown(graph),graph);
+});
 test('one note call survives sheet closure and source edits; a review cannot be resent',async()=>{
   const f=fixture(),capture=await captureNote(f.target,{from:0,to:0});let resolve,calls=0;
   const session=new AiSession({current:()=>true,key:async()=> 'sk-test-not-a-real-key',adapters:[OPENAI_ADAPTER],
