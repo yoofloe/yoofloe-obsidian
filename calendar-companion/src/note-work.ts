@@ -172,7 +172,7 @@ export class NoteWork {
   }
   async apply(mode: NoteApply): Promise<void> {
     if (!this.current || this.busy || !this.draft || !this.source || this.applied || this.invalidProposals) return;
-    this.busy = true;
+    this.busy = true; this.message = "Checking the original note before applying this edit…"; this.changed();
     try {
       const before = this.target.read();
       await applyNote(this.source, this.draft.text, mode, () => this.current);
@@ -195,7 +195,7 @@ export class NoteWork {
     if (change.target === "N1" && (change.action !== "replace" || source.scope !== "note")) {
       await this.apply(change.action === "replace" ? "replace" : source.scope === "selection" ? "below" : "append"); return;
     }
-    this.busy = true;
+    this.busy = true; this.message = "Verifying the original backup and saving this change…"; this.changed();
     try {
       const doc = this.related.find(doc => doc.reference === change.target);
       const before = change.target === "N1" ? this.target.read() : await doc?.read();
@@ -218,14 +218,14 @@ export class NoteWork {
   }
   async undo(): Promise<void> {
     if (!this.current || this.busy || !this.lastEdit) return;
-    this.busy = true;
+    this.busy = true; this.message = "Checking for newer edits before restoring the original…"; this.changed();
     try { await this.lastEdit.restore(); this.lastEdit = null; this.message = "Restored the original note. Your AI answer is still available."; }
     catch (error) { this.message = error instanceof Error ? error.message : "Could not undo. The backup is kept."; }
     finally { this.busy = false; this.changed(); }
   }
   async saveNew(): Promise<void> {
     if (!this.current || this.busy || !this.draft || this.saved || this.invalidProposals) return;
-    this.busy = true;
+    this.busy = true; this.message = "Creating and verifying the new note…"; this.changed();
     try {
       const folder = this.target.path.includes("/") ? this.target.path.slice(0, this.target.path.lastIndexOf("/") + 1) : "";
       const title = (this.proposal?.title || this.target.title).replace(/\.md$/i, "").replace(/[\\/:*?"<>|#^[\]]/g, " ").replace(/^\.+/, "").trim().slice(0, 70) || "Note";
