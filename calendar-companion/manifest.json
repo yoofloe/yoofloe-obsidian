@@ -1,0 +1,10 @@
+{
+  "id": "yoofloe",
+  "name": "Yoofloe Calendar Companion",
+  "version": "0.4.0",
+  "minAppVersion": "1.11.5",
+  "description": "Connect selected Yoofloe Calendar records to Markdown on the same Android phone or tablet, with optional OpenAI drafts.",
+  "author": "Yoofloe",
+  "isDesktopOnly": false,
+  "authorUrl": "https://yoofloe.com"
+}

@@ -1,26 +1,7 @@
-import esbuild from "esbuild";
-import process from "node:process";
+import { copyFile } from "node:fs/promises";
 
-const production = process.argv.includes("production");
-const watch = process.argv.includes("--watch");
-
-const context = await esbuild.context({
-  entryPoints: ["src/main.ts"],
-  bundle: true,
-  outfile: "main.js",
-  platform: "browser",
-  format: "cjs",
-  external: ["obsidian", "electron", "node:http"],
-  target: "es2020",
-  sourcemap: production ? false : "inline",
-  minify: production,
-  treeShaking: true,
-  logLevel: "info"
-});
-
-if (watch) {
-  await context.watch();
-} else {
-  await context.rebuild();
-  await context.dispose();
+// A single browser build is authoritative for development and public release assets.
+await import("./calendar-companion/build.mjs");
+for (const name of ["main.js", "manifest.json", "styles.css"]) {
+  await copyFile(new URL(`./calendar-companion/dist/${name}`, import.meta.url), new URL(`./${name}`, import.meta.url));
 }

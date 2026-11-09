@@ -8,13 +8,12 @@ This repository follows the shared Yoofloe environment and release policy from t
 
 Plugin-specific rules:
 
-- The Obsidian plugin and the MCP wrapper are one release family in this repo.
-- Release verification must check both deliverables:
-  - community plugin payload
-  - `yoofloe-obsidian-mcp-wrapper.zip`
-- Runtime verification stays split:
-  - plugin mode
-  - wrapper mode
+- The owner requested a complete Calendar Companion pivot for 0.4.0. The public plugin keeps registry ID `yoofloe`.
+- Gemini remains dormant: retain its source/catalog and stored data, but do not register it in the public UI/session or include its endpoint in the browser bundle until the owner authorizes revival.
+- Current releases contain the Android Calendar Companion plugin only. The earlier cloud plugin and MCP wrapper remain available in historical tags/releases through 0.3.31; do not silently include or reactivate them in the new payload.
+- Public root builds must package the single `calendar-companion/src/main.ts` implementation and match the committed root manifest/styles. `src/main.ts` re-exports the same implementation for tooling.
+- Verify local import, create-only vault writes, explicit optional-provider approvals and startup without I/O. No live Gemini test is authorized in this run.
+- Actual AI test calls are tracked externally under the owner cumulative limit of 10; call 11 needs fresh prior approval.
 - Use clean worktrees for release and reconciliation work.
 - External access and PAT-related changes are environment-backed and must be classified before implementation.
 

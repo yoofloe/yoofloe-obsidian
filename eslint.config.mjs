@@ -13,7 +13,7 @@ export default [
   },
   ...obsidianmd.configs.recommended,
   {
-    files: ["src/**/*.ts"],
+    files: ["src/main.ts", "calendar-companion/src/**/*.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -34,7 +34,7 @@ export default [
     rules: {
       "obsidianmd/ui/sentence-case": ["error", {
         enforceCamelCaseLower: true,
-        brands: ["Yoofloe", "Obsidian", "Gemini", "Google", "Vertex", "BYOK", "MCP", "Markdown", "Claude Code", "Supabase"],
+        brands: ["Yoofloe Calendar Companion", "Yoofloe Calendar Inbox", "Android", "MiB", "OpenAI", "ChatGPT", "Calendar", "GPT", "Luna", "Terra", "Sol", "Astra", "Flash", "Flash-Lite", "Argon", "Yoofloe", "Obsidian", "Gemini", "Google", "Vertex", "BYOK", "MCP", "Markdown", "Claude Code", "Supabase"],
         acronyms: ["AI", "PAT", "ID", "URL", "JSON", "API", "YYYY-MM-DD"]
       }],
       "@typescript-eslint/no-floating-promises": "error",
