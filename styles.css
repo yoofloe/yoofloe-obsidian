@@ -129,6 +129,10 @@
 .yoofloe-ai summary { cursor: pointer; font-size: var(--font-ui-small); line-height: 1.5; overflow-wrap: anywhere; }
 .yoofloe-ai .y-ai-card { border: 1px solid var(--background-modifier-border); border-radius: 10px; padding: 0.7rem; margin-bottom: 0.65rem; overflow-wrap: anywhere; }
 .yoofloe-ai .y-ai-card p { margin-block: 0.5rem; }
+.yoofloe-ai .y-ai-setup { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.65rem; margin-bottom: 0.5rem; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); }
+.yoofloe-ai .y-ai-setup-copy { flex: 1; min-width: 0; font-size: var(--font-ui-small); overflow-wrap: anywhere; }
+.yoofloe-ai .y-ai-setup-copy p { margin: 0.15rem 0 0; color: var(--text-muted); font-size: var(--font-ui-smaller); line-height: 1.3; }
+.yoofloe-ai .y-ai-setup button { flex-shrink: 0; min-height: 36px; }
 .yoofloe-ai .y-ai-hint { font-size: var(--font-ui-smaller); color: var(--text-muted); line-height: 1.5; margin-block: 0.4rem; overflow-wrap: anywhere; }
 .yoofloe-ai .y-ai-status { border-left: 2px solid var(--interactive-accent); padding-left: 0.65rem; font-size: var(--font-ui-small); line-height: 1.5; overflow-wrap: anywhere; }
 .yoofloe-ai .y-ai-result { font-size: var(--font-text-size); line-height: var(--line-height-normal); min-width: 0; overflow-wrap: anywhere; }
@@ -142,7 +146,7 @@
 .yoofloe-ai .y-ai-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-block: 0.35rem; }
 .yoofloe-ai button { min-height: 36px; height: auto; padding: 0.45rem 0.65rem; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .yoofloe-ai .y-ai-dock .mod-cta, .yoofloe-ai .y-ai-dock .mod-warning { flex: 1; }
-.yoofloe-ai .y-ai-privacy-short { display: none; }
+.yoofloe-ai .y-ai-privacy-short, .yoofloe-ai .y-ai-privacy-tiny { display: none; }
 .yoofloe-ai.y-ai-compact .y-ai-header { padding: 0.15rem 0.6rem; }
 .yoofloe-ai.y-ai-compact .y-ai-header button { min-height: 32px; min-width: 32px; padding: 4px; }
 .yoofloe-ai.y-ai-compact .y-ai-heading h2 { display: none; }
@@ -155,24 +159,66 @@
 .yoofloe-ai.y-ai-compact .y-ai-dock button { min-height: 36px; padding: 4px 8px; line-height: 1.15; font-size: var(--font-ui-small); }
 .yoofloe-ai.y-ai-compact .y-ai-privacy-full { display: none; }
 .yoofloe-ai.y-ai-compact .y-ai-privacy-short { display: inline; }
-.yoofloe-ai .y-ai-run-tiny { display: none; }
 .yoofloe-ai.y-ai-short .y-ai-scroll { flex: 0 0 auto; overflow: visible; }
 .yoofloe-ai.y-ai-short .y-ai-compose { flex: 0 0 auto; max-height: none; }
-.yoofloe-ai.y-ai-tiny .y-ai-header, .yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-scroll, .yoofloe-ai.y-ai-tiny .y-ai-dock .y-ai-hint { display: none; }
-.yoofloe-ai.y-ai-tiny .y-ai-compose { min-height: 44px; height: 44px; padding: 2px 8px; }
+.yoofloe-ai.y-ai-tiny .y-ai-header, .yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-scroll { display: none; }
+.yoofloe-ai.y-ai-tiny .y-ai-compose { min-height: 44px; height: auto; max-height: none; padding: 2px 8px; }
 .yoofloe-ai.y-ai-tiny .y-ai-compose textarea { min-height: 40px; height: 40px; padding: 0.15rem 0.4rem; line-height: 1.2; }
-.yoofloe-ai.y-ai-tiny .y-ai-dock { padding: 2px 8px; }
-.yoofloe-ai.y-ai-tiny .y-ai-dock .y-ai-row { margin: 0; }
+.yoofloe-ai.y-ai-tiny .y-ai-dock { display: flex; align-items: center; gap: 0.5rem; padding: 2px 8px; }
+.yoofloe-ai.y-ai-tiny .y-ai-dock .y-ai-row { flex: 0 0 max(128px, calc(5.2em + 1rem)); margin: 0; font-size: var(--font-ui-small); }
+.yoofloe-ai.y-ai-tiny .y-ai-dock .y-ai-hint { flex: 1; min-width: 0; margin: 0; line-height: 1.2; }
+.yoofloe-ai.y-ai-tiny .y-ai-privacy-short { display: none; }
+.yoofloe-ai.y-ai-tiny .y-ai-privacy-tiny { display: inline; }
 .yoofloe-ai.y-ai-tiny .y-ai-dock button { min-height: 36px; padding: 0.2rem 0.4rem; line-height: 1.15; font-size: var(--font-ui-small); }
-.yoofloe-ai.y-ai-tiny .y-ai-run-full { display: none; }
-.yoofloe-ai.y-ai-tiny .y-ai-run-tiny { display: inline; }
 .yoofloe-ai.y-ai-keyboard .y-ai-heading p { max-height: 1.5em; }
 .yoofloe-ai.y-ai-keyboard .y-ai-header { padding-block: 0.25rem; }
 .yoofloe-ai.y-ai-keyboard .y-ai-compose textarea { height: 3rem; min-height: 3rem; }
-.yoofloe-ai.y-ai-keyboard.y-ai-tiny .y-ai-compose textarea { height: 40px; min-height: 40px; }
+.yoofloe-ai.y-ai-keyboard.y-ai-tiny .y-ai-compose textarea { height: max(40px, calc(1.2em + 0.5rem)); min-height: max(40px, calc(1.2em + 0.5rem)); }
 .yoofloe-ai.y-ai-keyboard.y-ai-editing-scope .y-ai-compose { display: none; }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) { display: grid; grid-template-columns: minmax(0, 1fr) max-content; grid-template-rows: auto auto; align-content: start; }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-compose { grid-column: 1; grid-row: 2; align-self: start; }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-dock { display: contents; }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-dock .y-ai-hint { grid-column: 1 / -1; grid-row: 1; padding: 1px 8px; line-height: 1.05; border-top: 1px solid var(--background-modifier-border); }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-dock .y-ai-row { grid-column: 2; grid-row: 2; width: max(128px, calc(5.2em + 1rem)); max-width: 100%; margin: 1px 8px 1px 0; align-self: start; }
 @container (max-width: 380px) { .yoofloe-ai .y-ai-models { grid-template-columns: minmax(0, 1fr); } }
 @media (max-height: 500px) { .yoofloe-ai .y-ai-header { padding-block: 0.2rem; } .yoofloe-ai .y-ai-compose textarea { min-height: 2.7rem; height: 2.7rem; } }
 
 /* Match the host view with enough specificity without overriding user styles globally. */
 .workspace-leaf-content .view-content.yoofloe-ai { padding: 0; }
+
+/* One primary action keeps its dimensions through Send, Stop and Stopping. */
+.yoofloe-ai .y-ai-dock button.y-ai-send { --y-ai-action-height: max(44px, calc(1.35em + 1.05rem)); width: 100%; min-width: 0; height: var(--y-ai-action-height); min-height: var(--y-ai-action-height); max-height: var(--y-ai-action-height); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Folder browsing mirrors the host explorer: expand branches, then confirm a folder. */
+.modal-container.y-ai-folder-container { box-sizing: border-box; bottom: auto; padding: max(12px, var(--safe-area-inset-top, 0px)) max(12px, var(--safe-area-inset-right, 0px)) max(12px, var(--safe-area-inset-bottom, 0px)) max(12px, var(--safe-area-inset-left, 0px)); }
+.modal.y-ai-folder-modal { box-sizing: border-box; display: flex; flex-direction: column; width: min(640px, 100%); height: min(600px, calc(var(--y-ai-folder-height, 100dvh) - max(12px, var(--safe-area-inset-top, 0px)) - max(12px, var(--safe-area-inset-bottom, 0px)))); max-height: 100%; padding: 1rem; overflow: hidden; }
+.y-ai-folder-modal .modal-title { flex-shrink: 0; padding-inline-end: 2rem; font-size: var(--font-ui-medium); white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+.modal.y-ai-folder-modal .modal-content { display: flex; flex: 1; flex-direction: column; gap: 0.5rem; min-height: 0; margin: 0.5rem 0 0; padding: 0; overflow: hidden; }
+.y-ai-folder-content > .search-input-container { flex-shrink: 0; width: 100%; }
+.y-ai-folder-content .search-input-container input { width: 100%; height: max(40px, calc(1.35em + 1rem)); min-height: max(40px, calc(1.35em + 1rem)); }
+.y-ai-folder-tree { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 0.25rem; }
+.y-ai-folder-row { display: flex; align-items: stretch; padding-inline-start: min(5rem, calc(var(--y-ai-folder-depth, 0) * 1rem)); }
+.y-ai-folder-row button { height: auto; min-height: 36px; border: 0; box-shadow: none; background: transparent; color: var(--text-normal); font: inherit; }
+.y-ai-folder-row .y-ai-folder-toggle, .y-ai-folder-spacer { display: flex; flex: 0 0 28px; align-items: center; justify-content: center; width: 28px; padding: 4px; }
+.y-ai-folder-toggle svg { width: 14px; height: 14px; }
+.y-ai-folder-toggle.is-expanded svg { transform: rotate(90deg); }
+.y-ai-folder-row .y-ai-folder-name { display: flex; flex: 1; align-items: center; gap: 0.5rem; min-width: 0; padding: 0.35rem 0.4rem; text-align: start; white-space: normal; line-height: 1.35; }
+.y-ai-folder-name:hover, .y-ai-folder-toggle:hover { background: var(--background-modifier-hover); }
+.y-ai-folder-name.is-selected { background: var(--background-modifier-active-hover, var(--background-secondary)); }
+.y-ai-folder-name:focus-visible, .y-ai-folder-toggle:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: -2px; }
+.y-ai-folder-name .y-ai-folder-path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.y-ai-folder-name .y-ai-folder-icon, .y-ai-folder-name .y-ai-folder-check { display: flex; flex: 0 0 16px; width: 16px; color: var(--text-muted); }
+.y-ai-folder-name svg { width: 16px; height: 16px; }
+.y-ai-folder-check { opacity: 0; }
+.y-ai-folder-name.is-selected .y-ai-folder-check { opacity: 1; }
+.y-ai-folder-footer { flex-shrink: 0; border-top: 1px solid var(--background-modifier-border); }
+.y-ai-folder-selection { max-height: 3.5em; margin: 0.45rem 0; overflow: auto; overflow-wrap: anywhere; color: var(--text-muted); font-size: var(--font-ui-small); }
+.y-ai-folder-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 0.5rem; }
+.y-ai-folder-actions button { height: max(40px, calc(1.35em + 1.05rem)); min-height: max(40px, calc(1.35em + 1.05rem)); }
+.y-ai-folder-more { margin: 0.5rem; max-width: calc(100% - 1rem); white-space: normal; height: auto; min-height: 36px; }
+.y-ai-folder-modal.is-compact { padding: 0.5rem; }
+.y-ai-folder-modal.is-compact .modal-title, .y-ai-folder-modal.is-compact .y-ai-folder-selection { display: none; }
+.modal.y-ai-folder-modal.is-compact > .modal-close-button { display: none; }
+.modal.y-ai-folder-modal.is-compact .modal-content { gap: 0.25rem; margin: 0; overflow: auto; }
+.y-ai-folder-modal.is-compact .y-ai-folder-tree { min-height: 36px; }
+.y-ai-folder-modal.is-compact .search-input-container input { height: max(36px, calc(1.35em + 0.5rem)); min-height: max(36px, calc(1.35em + 0.5rem)); }

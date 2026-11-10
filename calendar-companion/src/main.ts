@@ -10,6 +10,7 @@ import { AI_VIEW, LegacyYoofloeView, YoofloeAiView } from "./workspace-view";
 import { loadWorkRecords, obsidianAgentHost } from "./obsidian-agent-host";
 import { CompanionModal } from "./manual-import";
 import { inputDigest } from "./question-input";
+import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, PRIVACY_URL } from "./privacy-copy";
 
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
 /** Plugin ID, local secret binding and the Calendar v2/v3 callback stay stable. No startup network requests. */
@@ -168,8 +169,8 @@ class YoofloeSettings extends PluginSettingTab {
         render: setting => { setting.addButton(b => b.setButtonText("Open Yoofloe AI").onClick(() => this.yoofloe.openWorkspace())); } },
       { name: "OpenAI key, model and thinking depth", desc: "Settings make no API requests. Starting a task sends permitted note text and context directly to OpenAI; API charges apply. A task may make multiple requests.", aliases: ["API key", "effort", "custom model", "AI settings", "cost"],
         render: setting => { setting.addButton(b => b.setButtonText("AI settings").onClick(() => this.yoofloe.openAiSettings())); } },
-      { name: "Data and recovery", desc: "Review the data scope and allowed changes before starting. Write and organize modes may change multiple notes within the scope. Original backups and recovery records are local; sync services may copy them. AI can make mistakes. Local storage of a key does not make AI local.", aliases: ["privacy", "backups", "Undo", "data sharing"],
-        render: setting => { setting.descEl.appendText(" "); setting.descEl.createEl("a", { text: "Privacy and data flow", href: "https://github.com/yoofloe/yoofloe-obsidian/blob/main/PRIVACY.md", attr: { target: "_blank", rel: "noopener noreferrer" } }); } },
+      { name: "Privacy and local data", desc: `${DATA_FLOW_NOTICE} ${LOCAL_DATA_NOTICE}`, aliases: ["privacy", "backups", "Undo", "data sharing", "servers", "OpenAI retention"],
+        render: setting => { setting.descEl.appendText(" "); setting.descEl.createEl("a", { text: "Privacy and data controls", href: PRIVACY_URL, attr: { target: "_blank", rel: "noopener noreferrer" } }); } },
       { name: "Yoofloe Calendar · optional Android app", desc: "Plans, tasks, notes, study, projects and focus. Direct local lookup requires both apps on the same Android phone or tablet and profile, Calendar 1.8.5+, Obsidian 1.11.5+, and a vault in shared device storage. Yoofloe AI works independently on other platforms.", aliases: ["Calendar", "Android", "local records"],
         render: setting => { setting.addButton(b => b.setButtonText("Discover Calendar").onClick(() => this.containerEl.ownerDocument.defaultView?.open(STORE_URL, "_blank"))); } },
     ];

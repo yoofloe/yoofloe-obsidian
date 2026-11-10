@@ -9,8 +9,8 @@ test('folder picker is lazy, offers vault folders only and rechecks authority on
   let enumerations = 0, current = true, excluded = ['Private']; const selected = [], notices = [];
   const folders = ['/', 'Study/폴란드어 어휘', 'Other', 'Private', '.obsidian', 'Yoofloe AI/Backups', 'Yoofloe Calendar/Inbox', 'A/../B', 'C:/outside'].map(path => ({ path }));
   const app = { vault: { configDir: '.obsidian', getAllFolders: includeRoot => { assert.equal(includeRoot, true); enumerations++; return folders; }, getRoot: () => folders[0], getAbstractFileByPath: path => folders.find(folder => folder.path === path) } };
-  class Modal { constructor(app) { this.app = app; } setPlaceholder() {} setInstructions() {} }
-  const context = { module: { exports: {} }, exports: {}, require: () => ({ FuzzySuggestModal: Modal, Notice: class { constructor(message) { notices.push(message); } } }) };
+  class Modal { constructor(app) { this.app = app; } close() {} }
+  const context = { module: { exports: {} }, exports: {}, require: () => ({ Modal, Notice: class { constructor(message) { notices.push(message); } } }) };
   vm.runInNewContext(bundle.outputFiles[0].text, context);
   const picker = new context.module.exports.VaultFolderPicker(app, () => current, () => excluded, path => selected.push(path));
   assert.equal(enumerations, 0); assert.deepEqual([...picker.getItems()].map(folder => folder.path).sort(), ['/', 'Other', 'Study/폴란드어 어휘']);

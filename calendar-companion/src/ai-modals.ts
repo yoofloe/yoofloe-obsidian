@@ -7,6 +7,7 @@ import { saveAiDraft, type NoteStore } from "./notes";
 import { keepModalInputsVisible } from "./modal-inputs";
 import { recordLabel } from "./record-types";
 import { EFFORT_LABELS, resolveEffort, supportedEfforts, type EffortSetting } from "./effort";
+import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, PRIVACY_URL, OPENAI_DATA_URL } from "./privacy-copy";
 
 export interface AiContext { session: AiSession; preferences: AiPreferences; current(): boolean }
 
@@ -102,14 +103,18 @@ export class AiSettingsModal extends Modal {
     if (this.keyInput) this.keyInput.value = "";
     const el = this.contentEl, name = providerLabel(this.provider), catalog = modelCatalog(this.provider);
     el.empty(); el.createEl("h2", { text: "Yoofloe AI settings" });
-    el.createEl("p", { text: "Use your own OpenAI key. Starting a task sends permitted note text, your prompt and context directly to OpenAI. Relevant excerpts may be read and sent during the task. API charges apply; one task may make multiple requests." });
+    el.createEl("p", { text: DATA_FLOW_NOTICE });
     if (PUBLIC_AI_PROVIDERS.length > 1) new Setting(el).setName("AI provider").setDesc("Your key is stored separately for each provider. Switching providers turns AI off.").addDropdown(dropdown => {
       for (const provider of PUBLIC_AI_PROVIDERS) dropdown.addOption(provider, providerLabel(provider));
       dropdown.setValue(this.provider).setDisabled(this.busy);
       dropdown.selectEl.setAttribute("aria-label", "AI provider");
       dropdown.onChange(value => { if (isAiProviderEnabled(value)) void this.chooseProvider(value); });
     });
-    el.createEl("p", { text: "Settings and local key storage make no API calls. Yoofloe AI sends nothing until you start a task. Local storage does not make AI local. Requests use store: false; this does not mean zero retention at OpenAI." });
+    const privacy = el.createEl("details"); privacy.createEl("summary", { text: "Privacy, local data and OpenAI" });
+    privacy.createEl("p", { text: LOCAL_DATA_NOTICE }); privacy.createEl("p", { text: OPENAI_DATA_NOTICE });
+    privacy.createEl("a", { text: "Privacy and data controls ↗", href: PRIVACY_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
+    privacy.createEl("p").createEl("a", { text: "OpenAI data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
+    el.createEl("p", { text: "Settings, saving a key and previewing data make no API requests.", cls: "calendar-companion-hint" });
     if (this.message) el.createEl("p", { text: this.message, cls: "calendar-companion-status", attr: { role: "status" } });
     const modelSetting = new Setting(el).setName("Model").setDesc("Not sure? Start with economy (recommended). Selecting a model sends no API request.");
     const details = el.createDiv({ cls: "calendar-companion-model-details" });

@@ -43,6 +43,7 @@ export class AiWorkspace {
   private initialization: Promise<void> | null = null;
   private runEpoch = 0;
   private running = false;
+  private stopRequested = false;
   constructor(private readonly options: {
     current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport;
     gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; calendar?: () => CalendarSession; inboxHint(): string;
@@ -51,7 +52,8 @@ export class AiWorkspace {
   get requestId() { return this.calendar?.requestId ?? null; }
   get title() { return this.source?.path.split("/").at(-1)?.replace(/\.md$/i, "") ?? "New document"; }
   get result() { return this.task?.text ?? ""; }
-  get canStop() { return this.busy && this.running; }
+  get canStop() { return this.busy && this.running && !this.stopRequested; }
+  get stopping() { return this.busy && this.stopRequested; }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   changed(): void { if (this.current) for (const listener of this.listeners) listener(); }
   async initialize(): Promise<void> {
@@ -73,7 +75,7 @@ export class AiWorkspace {
             this.source.selection = { from: selection.from, to: selection.to }; this.source.selectionVersion = saved.selectionVersion;
           }
         }
-        if (["ask", "edit", "organize"].includes(String(saved.mode))) this.mode = saved.mode as WorkMode;
+        if (["ask", "edit", "organize", "all"].includes(String(saved.mode))) this.mode = saved.mode as WorkMode;
         for (const key of ["readScope", "writeScope"] as const) if (["current", "folder", "vault"].includes(String(saved[key]))) this[key] = saved[key] as WorkScope;
         if (typeof saved.outputFolder === "string") this.outputFolder = saved.outputFolder.slice(0, 500);
         if (typeof saved.excluded === "string") this.excluded = saved.excluded.slice(0, 4000);
@@ -132,7 +134,7 @@ export class AiWorkspace {
   async run(): Promise<void> {
     if (!this.current || this.busy || !this.prompt.trim()) return;
     const epoch = ++this.runEpoch;
-    this.busy = true; this.running = true; this.preview = ""; this.message = "Preparing this task locally. Stop prevents it from starting."; this.changed();
+    this.stopRequested = false; this.busy = true; this.running = true; this.preview = ""; this.message = "Preparing this task locally. Stop prevents it from starting."; this.changed();
     let task: AgentTask | null = null;
     const current = () => this.current && epoch === this.runEpoch && !task?.stopped;
     try {
@@ -156,9 +158,13 @@ export class AiWorkspace {
         this.rememberJournal(agent.journal);
       }
     } catch (error) { this.message = epoch !== this.runEpoch ? "Stopped. No further request or file action was started." : error instanceof Error ? error.message : "The task could not finish. No automatic retry was made."; }
-    finally { this.busy = false; this.running = false; if (this.current) { await this.persist().catch(() => { this.message += " Local draft saving could not be confirmed."; }); this.changed(); } }
+    finally {
+      this.busy = false; this.running = false;
+      if (this.stopRequested) this.message = "Stopped. Completed work and any returned answer are kept; no further request or file action was started.";
+      if (this.current) { await this.persist().catch(() => { this.message += " Local draft saving could not be confirmed."; }); this.changed(); }
+    }
   }
-  stop(): void { if (!this.canStop) return; this.runEpoch++; if (this.task?.busy) this.task.stop(); this.message = "Stopped. No further request or file action will start; any already-sent response is kept."; this.changed(); }
+  stop(): void { if (!this.canStop) return; this.stopRequested = true; this.runEpoch++; if (this.task?.busy) this.task.stop(); this.message = "Stopping. Completed work is kept. An already-sent request may still finish and incur charges; no further request or file action will start."; this.changed(); }
   async newTask(source: WorkspaceSource | null = this.nextSource ?? this.source): Promise<void> {
     if (this.busy) return;
     this.rememberLast();

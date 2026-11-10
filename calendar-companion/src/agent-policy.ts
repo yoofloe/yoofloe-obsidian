@@ -1,8 +1,8 @@
 export type WorkScope = "current" | "folder" | "vault";
-export type WorkMode = "ask" | "edit" | "organize";
+export type WorkMode = "ask" | "edit" | "organize" | "all";
 export interface TaskPolicy { sourcePath: string | null; folder: string; readScope: WorkScope; writeScope: WorkScope; mode: WorkMode; configDir: string; excluded: readonly string[]; selection?: { from: number; to: number }; selectionVersion?: string }
 export const SCOPE_LABELS: Record<WorkScope, string> = { current: "Current note", folder: "Note folder", vault: "Vault" };
-export const MODE_LABELS: Record<WorkMode, string> = { ask: "Ask only", edit: "Write and edit", organize: "Organize notes" };
+export const MODE_LABELS: Record<WorkMode, string> = { ask: "Ask only", edit: "Write and edit", organize: "Organize notes", all: "All actions" };
 export function vaultPath(raw: string, folder = false): string {
   if (typeof raw !== "string" || raw.length > 500 || raw.startsWith("/") || raw.includes("\\") || raw.includes(":") || [...raw].some(c => c.charCodeAt(0) < 32)) throw Error("Choose a path inside this vault.");
   const parts = raw.split("/");
@@ -13,8 +13,10 @@ export function vaultPath(raw: string, folder = false): string {
 const inside = (path: string, root: string) => path === root || path.startsWith(root + "/");
 export function allowedPath(policy: TaskPolicy, path: string, action: "read" | "edit" | "create" | "organize"): boolean {
   try { vaultPath(path, action === "organize" && !path.endsWith(".md")); } catch { return false; }
-  if (inside(path, policy.configDir) || /^(?:Yoofloe AI\/(?:Backups|History)|Yoofloe Calendar\/(?:AI backups|AI drafts|Inbox))(?:\/|$)/i.test(path) || policy.excluded.some(root => inside(path, root))) return false;
-  if (action !== "read" && policy.mode === "ask" || action === "organize" && policy.mode !== "organize") return false;
+  // Block case aliases conservatively; permission scopes below still require exact paths.
+  const blockedPath = path.toLowerCase();
+  if (inside(blockedPath, policy.configDir.toLowerCase()) || /^(?:Yoofloe AI\/(?:Backups|History)|Yoofloe Calendar\/(?:AI backups|AI drafts|Inbox))(?:\/|$)/i.test(path) || policy.excluded.some(root => inside(blockedPath, root.toLowerCase()))) return false;
+  if (action !== "read" && policy.mode === "ask" || action === "organize" && policy.mode !== "organize" && policy.mode !== "all") return false;
   const scope = action === "read" ? policy.readScope : policy.writeScope;
   if (scope === "vault") return true;
   if (scope === "folder" || action === "create" || action === "organize" && !policy.sourcePath) return !policy.folder || inside(path, policy.folder);
