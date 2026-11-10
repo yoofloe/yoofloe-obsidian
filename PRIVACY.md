@@ -1,11 +1,15 @@
 # Yoofloe AI — privacy and data flow
 
-Updated 9 November 2026. Applies to the standalone plugin beginning with 0.7.0.
+Updated 10 November 2026. Applies to the standalone plugin beginning with 0.7.0.
 The plugin ID is `yoofloe`; historical cloud/MCP releases have different behavior.
 
 ## What leaves the device
 
-AI is optional and starts only when you choose **Send to OpenAI**. With your OpenAI API key,
+**Yoofloe AI has no Yoofloe-operated server, relay or cloud database. Yoofloe does not receive or store your notes, prompts or answers through this plugin.**
+The plugin keeps working data on your device, and optional AI sends selected material directly to OpenAI.
+Local storage and OpenAI processing are separate from Yoofloe receiving that content.
+
+AI is optional and starts only when you choose **Send**. With your OpenAI API key,
 the plugin sends requests directly to `https://api.openai.com/v1/responses`:
 
 - Your task prompt, attached note or selected text, and bounded prior task context.
@@ -14,11 +18,11 @@ the plugin sends requests directly to `https://api.openai.com/v1/responses`:
 - Requested file operations, their results, model/effort settings and conversation/reasoning state needed to continue the task.
 
 One task may make multiple requests up to its displayed maximum. Additional excerpts can be sent during that task,
-within the data scope you selected. **Review data** previews the initial input; it cannot predict every later tool read.
+within the data scope you selected. **Preview data**, inside the data/permissions section, previews the initial input locally without an API call; it cannot predict every later tool read.
 Activity shows requested tools and source reads. Changing the data/edit scope requires your action in the workspace.
 The API key goes in the authorization header, never in a prompt or URL. Do not put credentials in notes or prompts.
 
-No request is made by opening the plugin, selecting a model, saving a key or looking up Calendar records locally.
+No OpenAI request is made by opening the plugin, selecting a model, saving a key or looking up Calendar records locally.
 There are no background AI jobs, automatic retries, paid search planners, embedding uploads or Yoofloe telemetry.
 Yoofloe operates no relay or database for this plugin. External store/help links open only when you choose them;
 Obsidian's own updates and other plugins have their own network behavior.
@@ -51,9 +55,18 @@ You control local removal; verify your work first, then remove unneeded backups,
 Removing the plugin alone may leave vault notes, backups, sync copies and Obsidian secrets behind.
 Use **Remove saved key** to remove that plugin's current vault-bound key from local secret storage.
 
+To remove local conversation state, first finish or stop the task, use **Remove saved key** if you also want to remove
+the key, and disable Yoofloe AI. You can then remove `.obsidian/plugins/yoofloe/workspace.json` to clear the saved
+draft, latest answer and recent context. For a custom configuration directory, substitute that directory for `.obsidian`.
+Task journals are under `plugins/yoofloe/tasks/` in that same configuration directory; original backups are ordinary
+vault files under `Yoofloe AI/Backups/`. Delete those only when you no longer need recovery. Removing a backup can make
+Undo unavailable. Other sync/backup copies and provider-side retention are managed separately.
+
 ## Scope, safety and your choices
 
 Read and edit permissions are separate. Configuration/hidden files, excluded folders and recovery files are blocked.
+**All actions** enables every supported action, including creation, editing, properties, renaming, moving and folder
+organization, within the read and change scopes you choose. It does not silently change those scopes.
 Credential-pattern detection blocks recognized keys in outgoing material but cannot identify every secret or personal detail.
 Write/edit modes can make real changes in their selected scope, including several files. Version checks,
 original backups, task records and conflict-aware Undo reduce mistakes; they cannot guarantee perfect model behavior.

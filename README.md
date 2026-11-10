@@ -15,15 +15,23 @@ iOS and physical tablet verification are not included in that evidence.
    The UI confirms local storage; it does not make a paid key-validation call.
 3. Describe the task. Attach the current note or a text selection, or create a new document from scratch.
 4. Check **Allowed actions**, **Data sent to OpenAI**, **Notes AI can change**, the working/output folder,
-   model, thinking depth and maximum requests. **Review data** previews the initial input locally.
-5. **Send to OpenAI** starts the task and authorizes its permitted reads and changes.
+   model, thinking depth and maximum requests. **Preview data** previews the initial input locally.
+5. **Send** starts the task and authorizes its permitted reads and changes. The same fixed-size button becomes **Stop** during work.
    A task can make several paid API requests, up to the displayed limit. There are no automatic retries.
 
 The task reads relevant excerpts as needed within your chosen data scope; it does not upload the whole vault upfront.
 The model control shows the full GPT version/name and the exact selected API model ID.
-Choose **Working / output folder** to search existing folders inside the current vault, including the vault root.
+Choose **Working / output folder** to browse a collapsible folder tree like the file explorer, including the vault root.
+Search reaches every existing subfolder; larger search results have an explicit **Show more** control.
 This picker uses local folder names only. It cannot choose an external computer/device folder, and cancelling keeps your previous choice.
 Folder scope includes subfolders while exclusions continue to apply. Selecting an output folder does not expand Current note scope.
+**All actions** offers every supported action while retaining the separate data and change scopes you choose.
+**Preview data** is inside the data/permissions section and makes no API request. It previews initial input, rather than predicting every later tool read.
+
+Yoofloe AI has no server or cloud database. Yoofloe does not receive your notes, prompts or answers.
+When you choose Send, task data goes directly to OpenAI using your API key; API charges apply.
+Drafts, answers, recent context and recovery records remain on your device and may be copied by vault sync.
+See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local removal and scope details.
 Note titles and vault-relative paths returned by search can also go to OpenAI. Selection scope sends the selected passage,
 not the whole note. Open editor text, including unsaved changes, is used. A changed selection must be selected again.
 

@@ -13,6 +13,16 @@ test('data scope and write scope are independent, paths/secrets/configuration ne
  assert.throws(()=>vaultPath('Work\\A.md'));assert.throws(()=>safeOutbound('sk-proj-'+ 'a'.repeat(40)));
  assert(!agentTools('ask').some(t=>t.name==='apply_changes'));assert(!agentTools('edit').some(t=>t.name==='rename_note'));
 });
+test('All actions exposes every supported tool while keeping independently chosen note scopes',()=>{
+ const all={...policy,mode:'all'};
+ assert.deepEqual(agentTools('all').map(t=>t.name),agentTools('organize').map(t=>t.name));
+ for(const name of ['apply_changes','create_note','update_properties','rename_note','create_folder','propose_trash'])assert(agentTools('all').some(t=>t.name===name));
+ assert(allowedPath(all,'Work/A.md','organize'));assert(!allowedPath(all,'Other/B.md','organize'));assert(allowedPath(all,'Other/B.md','read'));
+ for(const path of ['.obsidian/settings.md','Private/A.md','Yoofloe AI/Backups/a.md','../outside.md'])assert(!allowedPath({...all,writeScope:'vault'},path,'organize'));
+ for(const path of ['private/New.md','PRIVATE/New.md','yoofloe ai/backups/New.md'])assert(!allowedPath({...all,writeScope:'vault'},path,'create'));
+ assert(!allowedPath({...all,writeScope:'folder',folder:'Work'},'work/New.md','edit'),'case folding must never broaden a permission scope');
+ assert.equal(all.readScope,'vault');assert.equal(all.writeScope,'current');
+});
 test('a paid step can request a local tool, then continue with encrypted reasoning and one explicit budget',async()=>{
  let calls=0,tools=0;const gate={busy:false};
  const task=new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate,executor:{execute:async(name)=>{tools++;assert.equal(name,'read_notes');return {text:'Reviewed note',version:'v1'};}},transport:async req=>{

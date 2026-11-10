@@ -7,6 +7,7 @@ import { AREA_LABELS, PERIOD_LABELS } from "./question-query";
 import { safeNoteMarkdown } from "./note-context";
 import { VaultFolderPicker } from "./folder-picker";
 import { availableViewHeight } from "./view-bounds";
+import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, CONTROL_NOTICE, PRIVACY_URL, OPENAI_DATA_URL } from "./privacy-copy";
 
 export const AI_VIEW = "yoofloe-ai";
 const STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -58,9 +59,9 @@ export class YoofloeAiView extends ItemView {
     const hide = this.button(header, "", () => this.options.hide(), false, "clickable-icon"); hide.setAttribute("aria-label", "Hide Yoofloe AI"); setIcon(hide, "panel-right-close");
     const scroll = el.createDiv({ cls: "y-ai-scroll" });
     if (!w.configured && w.ready) {
-      const intro = scroll.createDiv({ cls: "y-ai-card" }); intro.createEl("strong", { text: "Your notes. Your AI workspace." });
-      intro.createEl("p", { text: "Write, edit, organize, or ask about Markdown. Yoofloe Calendar is optional. Add your OpenAI API key to start; API charges apply." });
-      this.button(intro, "Set up OpenAI", () => this.options.settings());
+      const intro = scroll.createDiv({ cls: "y-ai-setup" }), copy = intro.createDiv({ cls: "y-ai-setup-copy" });
+      copy.createEl("strong", { text: "Connect OpenAI" }); copy.createEl("p", { text: "Your key · API charges apply" });
+      this.button(intro, "Set up", () => this.options.settings(), false, "mod-cta");
     }
     if (w.nextSource) this.button(scroll, `New task for ${w.nextSource.path.split("/").at(-1)}`, () => void w.newTask(w.nextSource), w.busy, "y-ai-next");
     const models = scroll.createDiv({ cls: "y-ai-models" }), choices: Record<string, string> = {};
@@ -75,6 +76,7 @@ export class YoofloeAiView extends ItemView {
     models.createEl("p", { text: w.model.model, cls: "y-ai-model-id", attr: { "aria-label": "Selected model ID" } });
     const scope = this.details(scroll, "scope", `${MODE_LABELS[w.mode]} · data: ${w.readScope === "current" && !w.source ? "No attached note" : SCOPE_LABELS[w.readScope]}${w.source?.selection && w.readScope === "current" ? " selection" : ""}`);
     this.select(scope, "Allowed actions", MODE_LABELS, w.mode, value => { w.mode = value; this.render(); });
+    if (w.mode === "all") scope.createEl("p", { text: "All supported actions: write, edit, update properties, create folders, rename, move and propose trash. Choose the data and change scopes below.", cls: "y-ai-hint" });
     this.select(scope, "Data sent to OpenAI", SCOPE_LABELS, w.readScope, value => { w.readScope = value; this.render(); });
     if (w.source?.selection) this.button(scope, "Use whole attached note", () => { if (!w.source) return; delete w.source.selection; delete w.source.selectionVersion; w.preview = ""; this.saveSoon(); this.render(); }, w.busy);
     if (w.mode !== "ask") this.select(scope, "Notes AI can change", SCOPE_LABELS, w.writeScope, value => { w.writeScope = value; });
@@ -83,7 +85,7 @@ export class YoofloeAiView extends ItemView {
       if (w.busy || !w.current) return;
       new VaultFolderPicker(this.app, () => w.current && !w.busy && folder.isConnected,
         () => w.excluded.split("\n").map(path => path.trim()).filter(Boolean),
-        path => { w.outputFolder = path; w.preview = ""; this.saveSoon(); this.render(); }).open();
+        path => { w.outputFolder = path; w.preview = ""; this.saveSoon(); this.render(); }, w.outputFolder).open();
     }, w.busy, "y-ai-folder");
     folder.setAttribute("aria-label", `Choose working and output folder: ${w.outputFolder || "Vault root"}`);
     folder.title = "Choose a folder inside this vault";
@@ -96,6 +98,12 @@ export class YoofloeAiView extends ItemView {
     const excluded = exclusions.createEl("textarea", { text: w.excluded, attr: { rows: "2", "aria-label": "Excluded folders" } }); excluded.disabled = w.busy;
     excluded.addEventListener("input", () => { w.excluded = excluded.value; this.saveSoon(); });
     scope.createEl("p", { text: "Thinking depth changes model reasoning cost, not file permissions or response length. Settings, hidden folders, recovery files and detected API keys are excluded. Key detection is not a complete secret scanner.", cls: "y-ai-hint" });
+    this.button(scope, "Preview data", () => { el.querySelector<HTMLTextAreaElement>(".y-ai-compose textarea")?.blur(); void w.review(); }, w.busy);
+    scope.createEl("p", { text: "Local initial preview · no API request. Later relevant excerpts may also be sent within your chosen data scope.", cls: "y-ai-hint" });
+    const data = this.details(scroll, "privacy", "Privacy and data use");
+    for (const text of [DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, CONTROL_NOTICE]) data.createEl("p", { text, cls: "y-ai-hint" });
+    data.createEl("a", { text: "Privacy and local data controls ↗", href: PRIVACY_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
+    data.createEl("p").createEl("a", { text: "OpenAI data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
     const calendar = this.details(scroll, "calendar", w.delivery ? `Calendar · ${w.delivery.records.length} excerpt(s)` : "Add Yoofloe Calendar context (optional)");
     if (!Platform.isAndroidApp) {
       calendar.createEl("p", { text: "Yoofloe AI works here without Calendar. Direct Calendar lookup requires both apps on the same Android phone or tablet and user profile. Existing Markdown snapshots can be used as notes." });
@@ -145,21 +153,18 @@ export class YoofloeAiView extends ItemView {
         this.button(item, "Undo this task", () => void w.undo(journal), w.busy || journal.status === "undone");
       }
     }
-    if (w.preview) { const preview = this.details(scroll, "preview", "Initial data sent to OpenAI"); preview.open = true; preview.createEl("pre", { text: w.preview }); }
+    if (w.preview) { const preview = this.details(scroll, "preview", "Data to be sent · initial preview"); preview.open = true; preview.createEl("pre", { text: w.preview }); }
     const compose = el.createDiv({ cls: "y-ai-compose" });
     const prompt = compose.createEl("textarea", { text: w.prompt, attr: { rows: "3", "aria-label": "Ask Yoofloe AI", placeholder: w.source ? "What should we do with your notes?" : "Describe a document to create…" } }); prompt.disabled = w.busy; prompt.maxLength = 32000;
     const dock = el.createDiv({ cls: "y-ai-dock" });
     const privacy = dock.createEl("p", { cls: "y-ai-hint" });
     privacy.createSpan({ text: `OpenAI · API charges · max ${w.maximum} request(s). ${w.mode === "ask" ? "Read only" : `Edits: ${SCOPE_LABELS[w.writeScope]}`}.`, cls: "y-ai-privacy-full" });
     privacy.createSpan({ text: `OpenAI · paid · ${w.mode === "ask" ? "read only" : `${w.mode === "organize" ? "organize" : "edit"} ${w.writeScope === "current" ? "note" : w.writeScope}`} · ${w.maximum} calls max`, cls: "y-ai-privacy-short" });
+    privacy.createSpan({ text: "OpenAI · paid", cls: "y-ai-privacy-tiny" });
     privacy.setAttribute("title", "Data goes directly to OpenAI, including relevant note excerpts within the permitted scope. Local key storage does not make AI local. New notes may be created in the output folder.");
     const controls = dock.createDiv({ cls: "y-ai-row" });
-    this.button(controls, "Review data", () => { prompt.blur(); void w.review(); }, w.busy);
-    const run = this.button(controls, w.busy ? w.canStop ? "Stop" : "Working…" : "", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, w.busy ? !w.canStop : !w.ready || !w.configured || !w.prompt.trim(), w.busy ? "mod-warning" : "mod-cta");
-    if (!w.busy) {
-      run.createSpan({ text: "Send to OpenAI", cls: "y-ai-run-full" });
-      run.createSpan({ text: `Send to OpenAI · paid · max ${w.maximum} calls`, cls: "y-ai-run-tiny" });
-    }
+    const run = this.button(controls, w.busy ? w.canStop ? "Stop" : w.stopping ? "Stopping…" : "Finishing…" : "Send", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, w.busy ? !w.canStop : !w.ready || !w.configured || !w.prompt.trim(), `y-ai-send ${w.busy ? "mod-warning" : "mod-cta"}`);
+    run.title = w.busy ? "Stop future requests and file actions; keep completed work and any already-sent answer" : `Send permitted data directly to OpenAI · API charges · up to ${w.maximum} requests`;
     prompt.addEventListener("input", () => { w.setPrompt(prompt.value); run.disabled = !w.ready || !w.configured || !w.prompt.trim(); this.saveSoon(); });
     prompt.addEventListener("keydown", event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !run.disabled && !w.busy) { event.preventDefault(); run.click(); } });
     scroll.scrollTop = oldScroll; el.scrollTop = oldRootScroll;

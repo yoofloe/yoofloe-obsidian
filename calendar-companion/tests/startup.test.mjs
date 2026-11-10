@@ -33,7 +33,7 @@ for(const platform of ['desktop','ios','android-tablet'])for(const declarative o
   const Constructor=context.module.exports.default, plugin=new Constructor(app);plugin.onload();
   const definitions=tabs[0].getSettingDefinitions();assert.equal(io,0);
   assert(definitions.some(d=>d.name.includes('thinking depth')&&d.aliases.includes('effort')));
-  assert(definitions.some(d=>d.name==='Data and recovery'));
+  assert(definitions.some(d=>d.name==='Privacy and local data'&&d.aliases.includes('servers')));
   assert.equal(definitions.some(d=>d.name.includes('Manual Calendar import')),platform==='android-tablet');
   if(declarative)for(const definition of definitions)definition.render(new Setting());else tabs[0].display();
   if(platform!=='android-tablet')plugin.handler({requestId:'external-untrusted-value'});

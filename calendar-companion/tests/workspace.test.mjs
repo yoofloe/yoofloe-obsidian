@@ -70,3 +70,17 @@ test('draft/result restoration is local, retains existing keys and does not sile
   assert.equal(f.work.result, 'Existing answer'); assert.equal(f.work.prompt, 'Keep my draft'); assert.equal(f.calls(), 0); assert.equal(f.keyReads(), 0);
   await f.work.newTask(f.work.nextSource); assert.equal(f.work.source.path, 'B.md'); assert.equal(f.work.previous[0].answer, 'Existing answer');
 });
+test('Stop changes to Stopping once, preserves a paid response and blocks its file proposal without retry', async () => {
+ const f=fixture();await f.work.initialize();let finish,calls=0;
+ f.options.transport=async()=>{calls++;return await new Promise(resolve=>{finish=resolve;});};
+ f.work.setPrompt('Create a sample note');const pending=f.work.run();while(!finish)await new Promise(r=>setTimeout(r,1));
+ assert.equal(f.work.canStop,true);f.work.stop();assert.equal(f.work.stopping,true);assert.equal(f.work.canStop,false);f.work.stop();
+ finish(response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Returned answer retained.'}]},{type:'function_call',call_id:'late',name:'create_note',arguments:'{"path":"Late.md","markdown":"# Do not execute"}'}]));await pending;
+ assert.equal(calls,1);assert.equal(f.files.size,0);assert.equal(f.work.result,'Returned answer retained.');assert.equal(f.saved().result,f.work.result);assert.equal(f.work.busy,false);assert.equal(f.work.stopping,false);
+ f.options.transport=async()=>{calls++;return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Next task completed.'}]}]);};
+ f.work.setPrompt('A fresh request');await f.work.run();assert.equal(calls,2);assert.equal(f.work.result,'Next task completed.');
+});
+test('All actions restores without changing the separately saved read/write scope or reading a key',async()=>{
+ const f=fixture();f.options.storage.load=async()=>({mode:'all',readScope:'folder',writeScope:'current',outputFolder:'Study',maximum:2});await f.work.initialize();
+ assert.equal(f.work.mode,'all');assert.equal(f.work.readScope,'folder');assert.equal(f.work.writeScope,'current');assert.equal(f.work.outputFolder,'Study');assert.equal(f.work.maximum,2);assert.equal(f.keyReads(),0);assert.equal(f.calls(),0);
+});
