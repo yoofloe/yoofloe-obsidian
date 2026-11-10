@@ -105,7 +105,7 @@
   .is-phone .modal.calendar-note-modal { width: 100%; height: min(92dvh, calc(var(--ycc-viewport-height, 100dvh) - var(--safe-area-inset-bottom, 0px) - var(--safe-area-inset-top, 0px))); max-height: calc(var(--ycc-viewport-height, 100dvh) - var(--safe-area-inset-bottom, 0px) - var(--safe-area-inset-top, 0px)); border-radius: 18px 18px 0 0; margin: 0; }
   .calendar-note-modal .modal-content { padding: 0; }
 }
-.yoofloe-ai { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; padding: 0 !important; overflow: hidden; color: var(--text-normal); background: var(--background-primary); container-type: inline-size; }
+.yoofloe-ai { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; padding: 0; overflow: hidden; color: var(--text-normal); background: var(--background-primary); container-type: inline-size; }
 .yoofloe-ai * { box-sizing: border-box; }
 .yoofloe-ai .y-ai-header { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; padding: 0.65rem 0.8rem; border-bottom: 1px solid var(--background-modifier-border); }
 .yoofloe-ai .y-ai-heading { flex: 1; min-width: 0; }
@@ -165,3 +165,6 @@
 .yoofloe-ai.y-ai-keyboard.y-ai-editing-scope .y-ai-compose { display: none; }
 @container (max-width: 280px) { .yoofloe-ai .y-ai-models { grid-template-columns: minmax(0, 1fr); } }
 @media (max-height: 500px) { .yoofloe-ai .y-ai-header { padding-block: 0.2rem; } .yoofloe-ai .y-ai-compose textarea { min-height: 2.7rem; height: 2.7rem; } }
+
+/* Match the host view with enough specificity without overriding user styles globally. */
+.workspace-leaf-content .view-content.yoofloe-ai { padding: 0; }

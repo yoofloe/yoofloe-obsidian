@@ -1,6 +1,6 @@
 {
   "name": "obsidian-yoofloe",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Write, edit and organize Markdown notes with your own OpenAI key. Optional local Yoofloe Calendar context.",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "test": "node calendar-companion/build.mjs --test && node --test calendar-companion/tests/*.test.mjs",
     "build": "node esbuild.config.mjs production",
     "check": "tsc --noEmit",
-    "lint": "eslint calendar-companion/src src/main.ts",
+    "lint": "eslint calendar-companion/src src/main.ts manifest.json calendar-companion/manifest.json package.json --max-warnings 0",
     "security:audit": "npm audit --audit-level=high"
   },
   "devDependencies": {
@@ -17,9 +17,9 @@
     "@typescript-eslint/parser": "^8.58.2",
     "esbuild": "^0.28.1",
     "eslint": "^9.39.4",
-    "eslint-plugin-obsidianmd": "^0.2.4",
+    "eslint-plugin-obsidianmd": "^0.5.1",
     "globals": "^17.5.0",
-    "obsidian": "^1.11.5",
+    "obsidian": "^1.14.4",
     "typescript": "^5.8.3"
   }
 }
