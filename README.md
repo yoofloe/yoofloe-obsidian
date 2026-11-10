@@ -20,6 +20,10 @@ iOS and physical tablet verification are not included in that evidence.
    A task can make several paid API requests, up to the displayed limit. There are no automatic retries.
 
 The task reads relevant excerpts as needed within your chosen data scope; it does not upload the whole vault upfront.
+The model control shows the full GPT version/name and the exact selected API model ID.
+Choose **Working / output folder** to search existing folders inside the current vault, including the vault root.
+This picker uses local folder names only. It cannot choose an external computer/device folder, and cancelling keeps your previous choice.
+Folder scope includes subfolders while exclusions continue to apply. Selecting an output folder does not expand Current note scope.
 Note titles and vault-relative paths returned by search can also go to OpenAI. Selection scope sends the selected passage,
 not the whole note. Open editor text, including unsaved changes, is used. A changed selection must be selected again.
 
