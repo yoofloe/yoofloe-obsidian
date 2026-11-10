@@ -24,7 +24,7 @@ for(const platform of ['desktop','ios','android-tablet'])for(const declarative o
     addField(callback){const field={inputEl:new Element(),addOption(){return field;},setValue(){return field;},setPlaceholder(){return field;},setDisabled(){return field;},onChange(){return field;}};callback(field);return this;}
     addTextArea(callback){return this.addField(callback);}addDropdown(callback){return this.addField(callback);}addText(callback){return this.addField(callback);}
   }
-  const sdk={Plugin,Modal,PluginSettingTab,Setting,ItemView:class{},App:class{},TFolder:class{},Notice:class{constructor(text){messages.push(text);}},Platform:{isAndroidApp:platform==='android-tablet',isPhone:false,isIosApp:platform==='ios'}};
+  const sdk={Plugin,Modal,FuzzySuggestModal:class{},PluginSettingTab,Setting,ItemView:class{},App:class{},TFolder:class{},Notice:class{constructor(text){messages.push(text);}},Platform:{isAndroidApp:platform==='android-tablet',isPhone:false,isIosApp:platform==='ios'}};
   const adapter=new Proxy({}, {get(){return forbidden;}});
   const app={vault:{adapter,getName:()=> 'Empty fixture vault',getAbstractFileByPath:forbidden,createFolder:forbidden,create:forbidden}};
   const context={module:{exports:{}},exports:{},require:name=>{assert.equal(name,'obsidian');return sdk;},TextEncoder,TextDecoder,URL,Date,

@@ -5,6 +5,8 @@ import { EFFORT_LABELS, resolveEffort, supportedEfforts } from "./effort";
 import { modelCatalog } from "./ai-models";
 import { AREA_LABELS, PERIOD_LABELS } from "./question-query";
 import { safeNoteMarkdown } from "./note-context";
+import { VaultFolderPicker } from "./folder-picker";
+import { availableViewHeight } from "./view-bounds";
 
 export const AI_VIEW = "yoofloe-ai";
 const STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -48,7 +50,7 @@ export class YoofloeAiView extends ItemView {
   }
   private render(): void {
     if (!this.work.current) return;
-    const w = this.work, el = this.contentEl, oldScroll = el.querySelector(".y-ai-scroll")?.scrollTop ?? 0;
+    const w = this.work, el = this.contentEl, oldScroll = el.querySelector(".y-ai-scroll")?.scrollTop ?? 0, oldRootScroll = el.scrollTop;
     this.rendering?.unload(); this.rendering = new Component(); this.rendering.load(); el.empty();
     const header = el.createDiv({ cls: "y-ai-header" }), title = header.createDiv({ cls: "y-ai-heading" });
     title.createEl("h2", { text: "Yoofloe AI" }); title.createEl("p", { text: w.title, attr: { title: w.source?.path ?? "Create a document without opening a note" } });
@@ -62,21 +64,32 @@ export class YoofloeAiView extends ItemView {
     }
     if (w.nextSource) this.button(scroll, `New task for ${w.nextSource.path.split("/").at(-1)}`, () => void w.newTask(w.nextSource), w.busy, "y-ai-next");
     const models = scroll.createDiv({ cls: "y-ai-models" }), choices: Record<string, string> = {};
-    for (const model of modelCatalog("openai").models) choices[model.id] = model.label.replace(/^GPT-[\d.]+ /, "");
+    for (const model of modelCatalog("openai").models) choices[model.id] = model.label;
     if (w.model.model && !choices[w.model.model]) choices[w.model.model] = `Custom · ${w.model.model}`;
     choices.__custom__ = "Custom model…";
-    this.select(models, "Model", choices, w.model.model, value => { if (value === "__custom__") this.options.settings(); else void w.setModel({ model: value }); });
+    const model = this.select(models, "Model", choices, w.model.model, value => { if (value === "__custom__") this.options.settings(); else void w.setModel({ model: value }); });
+    model.title = choices[w.model.model] ?? w.model.model;
     const efforts: Record<string, string> = { default: EFFORT_LABELS.default };
     for (const effort of supportedEfforts(w.model.model)) efforts[effort] = EFFORT_LABELS[effort];
     this.select(models, "Thinking depth", efforts, w.model.effort ?? resolveEffort(w.model.model) ?? "default", value => { void w.setModel({ ...w.model, effort: value }); });
+    models.createEl("p", { text: w.model.model, cls: "y-ai-model-id", attr: { "aria-label": "Selected model ID" } });
     const scope = this.details(scroll, "scope", `${MODE_LABELS[w.mode]} · data: ${w.readScope === "current" && !w.source ? "No attached note" : SCOPE_LABELS[w.readScope]}${w.source?.selection && w.readScope === "current" ? " selection" : ""}`);
     this.select(scope, "Allowed actions", MODE_LABELS, w.mode, value => { w.mode = value; this.render(); });
     this.select(scope, "Data sent to OpenAI", SCOPE_LABELS, w.readScope, value => { w.readScope = value; this.render(); });
     if (w.source?.selection) this.button(scope, "Use whole attached note", () => { if (!w.source) return; delete w.source.selection; delete w.source.selectionVersion; w.preview = ""; this.saveSoon(); this.render(); }, w.busy);
     if (w.mode !== "ask") this.select(scope, "Notes AI can change", SCOPE_LABELS, w.writeScope, value => { w.writeScope = value; });
-    const folderLabel = scope.createEl("label", { cls: "y-ai-field" }); folderLabel.createSpan({ text: "Working / output folder" });
-    const folder = folderLabel.createEl("input", { value: w.outputFolder, attr: { placeholder: "Vault root (leave empty)", "aria-label": "Working and output folder" } }); folder.disabled = w.busy;
-    folder.addEventListener("input", () => { w.outputFolder = folder.value; w.preview = ""; this.saveSoon(); });
+    const folderLabel = scope.createDiv({ cls: "y-ai-field" }); folderLabel.createSpan({ text: "Working / output folder" });
+    const folder = this.button(folderLabel, "", () => {
+      if (w.busy || !w.current) return;
+      new VaultFolderPicker(this.app, () => w.current && !w.busy && folder.isConnected,
+        () => w.excluded.split("\n").map(path => path.trim()).filter(Boolean),
+        path => { w.outputFolder = path; w.preview = ""; this.saveSoon(); this.render(); }).open();
+    }, w.busy, "y-ai-folder");
+    folder.setAttribute("aria-label", `Choose working and output folder: ${w.outputFolder || "Vault root"}`);
+    folder.title = "Choose a folder inside this vault";
+    setIcon(folder.createSpan({ cls: "y-ai-folder-icon" }), "folder");
+    folder.createSpan({ text: w.outputFolder || "Vault root · /", cls: "y-ai-folder-path" });
+    setIcon(folder.createSpan({ cls: "y-ai-folder-icon" }), "chevron-down");
     scope.createEl("p", { text: "Folder scope includes its subfolders. Current note limits reads and edits to the attached note; new notes may be created in the output folder. The agent reads relevant excerpts as needed, rather than uploading every note.", cls: "y-ai-hint" });
     this.select(scope, "Maximum API requests per task", { "1": "1", "2": "2", "4": "4 (default)", "6": "6", "10": "10" }, String(w.maximum), value => { w.maximum = Number(value); });
     const exclusions = scope.createEl("label", { cls: "y-ai-field" }); exclusions.createSpan({ text: "Excluded folders · one vault path per line" });
@@ -149,35 +162,34 @@ export class YoofloeAiView extends ItemView {
     }
     prompt.addEventListener("input", () => { w.setPrompt(prompt.value); run.disabled = !w.ready || !w.configured || !w.prompt.trim(); this.saveSoon(); });
     prompt.addEventListener("keydown", event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !run.disabled && !w.busy) { event.preventDefault(); run.click(); } });
-    scroll.scrollTop = oldScroll;
+    scroll.scrollTop = oldScroll; el.scrollTop = oldRootScroll;
   }
   private watchViewport(): () => void {
     const root = this.contentEl, doc = root.ownerDocument, win = doc.defaultView; if (!win) return () => {};
-    const viewport = win.visualViewport; let timer = 0, settleTimer = 0;
-    const navigation = doc.querySelector<HTMLElement>(".mobile-navbar");
+    const viewport = win.visualViewport; let timer = 0, settleTimer = 0, frame = 0;
+    const chrome = Array.from(doc.querySelectorAll<HTMLElement>(".mobile-navbar, .status-bar"));
     const resize = () => {
       const keyboard = parseFloat(win.getComputedStyle(doc.body).getPropertyValue("--keyboard-height")) || 0;
       const visual = !!viewport && win.innerHeight - viewport.height > 80;
       root.classList.toggle("y-ai-keyboard", keyboard > 50 || visual);
-      const top = root.getBoundingClientRect().top, bottom = viewport ? viewport.offsetTop + viewport.height : win.innerHeight;
-      let visibleBottom = bottom - (visual ? 0 : keyboard);
-      if (navigation) {
-        const bounds = navigation.getBoundingClientRect(), style = win.getComputedStyle(navigation);
-        if (bounds.height > 0 && bounds.top > top && bounds.top < visibleBottom && bounds.right > root.getBoundingClientRect().left && style.visibility !== "hidden" && Number(style.opacity) > 0) visibleBottom = bounds.top - 8;
-      }
-      const available = Math.max(80, visibleBottom - top);
-      root.style.maxHeight = `${available}px`;
-      root.classList.toggle("y-ai-compact", Math.min(root.parentElement?.clientHeight ?? available, available) < 340);
+      const bounds = root.getBoundingClientRect(), bottom = viewport ? viewport.offsetTop + viewport.height : win.innerHeight;
+      const overlays = chrome.filter(el => { const style = win.getComputedStyle(el); return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0; }).map(el => el.getBoundingClientRect());
+      const available = availableViewHeight(bounds, root.parentElement?.getBoundingClientRect().bottom ?? bottom, bottom - (visual ? 0 : keyboard), overlays);
+      const height = `${available}px`; if (root.style.maxHeight !== height) root.style.maxHeight = height;
+      root.classList.toggle("y-ai-compact", available < 340);
+      root.classList.toggle("y-ai-short", available < 340 && !(keyboard > 50 || visual));
       root.classList.toggle("y-ai-tiny", available < 190 && (keyboard > 50 || visual));
       if (root.classList.contains("y-ai-tiny")) root.scrollTop = 0;
       win.clearTimeout(timer); timer = win.setTimeout(() => { const active = doc.activeElement; if (active !== null && active.instanceOf(HTMLElement) && root.contains(active) && active.matches("textarea,input,select")) active.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }); }, 350);
     };
     const focus = () => { const active = doc.activeElement; root.classList.toggle("y-ai-editing-scope", active !== null && active.instanceOf(HTMLElement) && !!active.closest(".y-ai-scroll") && active.matches("input,textarea")); resize(); };
     const settledResize = () => { resize(); win.clearTimeout(settleTimer); settleTimer = win.setTimeout(resize, 350); };
-    const observer = new win.MutationObserver(settledResize); observer.observe(doc.body, { attributes: true, attributeFilter: ["style"] }); observer.observe(doc.documentElement, { attributes: true, attributeFilter: ["style"] });
-    if (navigation) observer.observe(navigation, { attributes: true, attributeFilter: ["class", "style"] });
-    viewport?.addEventListener("resize", settledResize); win.addEventListener("resize", settledResize); root.addEventListener("focusin", focus); root.addEventListener("focusout", focus); settledResize();
-    return () => { observer.disconnect(); viewport?.removeEventListener("resize", settledResize); win.removeEventListener("resize", settledResize); root.removeEventListener("focusin", focus); root.removeEventListener("focusout", focus); win.clearTimeout(timer); win.clearTimeout(settleTimer); };
+    const observer = new win.MutationObserver(settledResize); observer.observe(doc.body, { attributes: true, attributeFilter: ["style", "class"] }); observer.observe(doc.documentElement, { attributes: true, attributeFilter: ["style"] });
+    for (const el of chrome) observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] });
+    const geometry = new win.ResizeObserver(() => { win.cancelAnimationFrame(frame); frame = win.requestAnimationFrame(settledResize); });
+    for (const el of [root, root.parentElement, ...chrome]) if (el) geometry.observe(el);
+    viewport?.addEventListener("resize", settledResize); viewport?.addEventListener("scroll", settledResize); win.addEventListener("resize", settledResize); root.addEventListener("focusin", focus); root.addEventListener("focusout", focus); settledResize();
+    return () => { observer.disconnect(); geometry.disconnect(); win.cancelAnimationFrame(frame); viewport?.removeEventListener("resize", settledResize); viewport?.removeEventListener("scroll", settledResize); win.removeEventListener("resize", settledResize); root.removeEventListener("focusin", focus); root.removeEventListener("focusout", focus); win.clearTimeout(timer); win.clearTimeout(settleTimer); };
   }
 }
 
