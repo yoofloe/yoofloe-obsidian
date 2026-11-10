@@ -29,7 +29,7 @@ export class NoteModal extends Modal {
       if (!focused || !this.contentEl.contains(focused) || !focused.matches("input,textarea")) return;
       focusTimer = view?.setTimeout(() => {
         const active = this.contentEl.ownerDocument.activeElement;
-        if (this.alive && active instanceof HTMLElement && this.contentEl.contains(active) && active.matches("input,textarea")) active.scrollIntoView({ block: "nearest", inline: "nearest" });
+        if (this.alive && active !== null && active.instanceOf(HTMLElement) && this.contentEl.contains(active) && active.matches("input,textarea")) active.scrollIntoView({ block: "nearest", inline: "nearest" });
       }, 400) ?? null;
     };
     const focus = (event: FocusEvent) => {

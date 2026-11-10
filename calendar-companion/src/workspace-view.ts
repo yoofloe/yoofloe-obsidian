@@ -41,7 +41,7 @@ export class YoofloeAiView extends ItemView {
     d.addEventListener("toggle", () => { if (d.open) this.openDetails.add(key); else this.openDetails.delete(key); }); return d;
   }
   private select<T extends string>(el: HTMLElement, label: string, values: Record<T, string>, selected: T, change: (value: T) => void): HTMLSelectElement {
-    const wrap = el.createEl("label", { cls: "y-ai-field" }); wrap.createEl("span", { text: label });
+    const wrap = el.createEl("label", { cls: "y-ai-field" }); wrap.createSpan({ text: label });
     const select = wrap.createEl("select", { attr: { "aria-label": label } });
     for (const [value, text] of Object.entries(values)) select.createEl("option", { text: String(text), value }); select.value = selected; select.disabled = this.work.busy;
     select.addEventListener("change", () => { change(select.value as T); this.work.preview = ""; this.saveSoon(); }); return select;
@@ -74,12 +74,12 @@ export class YoofloeAiView extends ItemView {
     this.select(scope, "Data sent to OpenAI", SCOPE_LABELS, w.readScope, value => { w.readScope = value; this.render(); });
     if (w.source?.selection) this.button(scope, "Use whole attached note", () => { if (!w.source) return; delete w.source.selection; delete w.source.selectionVersion; w.preview = ""; this.saveSoon(); this.render(); }, w.busy);
     if (w.mode !== "ask") this.select(scope, "Notes AI can change", SCOPE_LABELS, w.writeScope, value => { w.writeScope = value; });
-    const folderLabel = scope.createEl("label", { cls: "y-ai-field" }); folderLabel.createEl("span", { text: "Working / output folder" });
+    const folderLabel = scope.createEl("label", { cls: "y-ai-field" }); folderLabel.createSpan({ text: "Working / output folder" });
     const folder = folderLabel.createEl("input", { value: w.outputFolder, attr: { placeholder: "Vault root (leave empty)", "aria-label": "Working and output folder" } }); folder.disabled = w.busy;
     folder.addEventListener("input", () => { w.outputFolder = folder.value; w.preview = ""; this.saveSoon(); });
     scope.createEl("p", { text: "Folder scope includes its subfolders. Current note limits reads and edits to the attached note; new notes may be created in the output folder. The agent reads relevant excerpts as needed, rather than uploading every note.", cls: "y-ai-hint" });
     this.select(scope, "Maximum API requests per task", { "1": "1", "2": "2", "4": "4 (default)", "6": "6", "10": "10" }, String(w.maximum), value => { w.maximum = Number(value); });
-    const exclusions = scope.createEl("label", { cls: "y-ai-field" }); exclusions.createEl("span", { text: "Excluded folders · one vault path per line" });
+    const exclusions = scope.createEl("label", { cls: "y-ai-field" }); exclusions.createSpan({ text: "Excluded folders · one vault path per line" });
     const excluded = exclusions.createEl("textarea", { text: w.excluded, attr: { rows: "2", "aria-label": "Excluded folders" } }); excluded.disabled = w.busy;
     excluded.addEventListener("input", () => { w.excluded = excluded.value; this.saveSoon(); });
     scope.createEl("p", { text: "Thinking depth changes model reasoning cost, not file permissions or response length. Settings, hidden folders, recovery files and detected API keys are excluded. Key detection is not a complete secret scanner.", cls: "y-ai-hint" });
@@ -137,15 +137,15 @@ export class YoofloeAiView extends ItemView {
     const prompt = compose.createEl("textarea", { text: w.prompt, attr: { rows: "3", "aria-label": "Ask Yoofloe AI", placeholder: w.source ? "What should we do with your notes?" : "Describe a document to create…" } }); prompt.disabled = w.busy; prompt.maxLength = 32000;
     const dock = el.createDiv({ cls: "y-ai-dock" });
     const privacy = dock.createEl("p", { cls: "y-ai-hint" });
-    privacy.createEl("span", { text: `OpenAI · API charges · max ${w.maximum} request(s). ${w.mode === "ask" ? "Read only" : `Edits: ${SCOPE_LABELS[w.writeScope]}`}.`, cls: "y-ai-privacy-full" });
-    privacy.createEl("span", { text: `OpenAI · paid · ${w.mode === "ask" ? "read only" : `${w.mode === "organize" ? "organize" : "edit"} ${w.writeScope === "current" ? "note" : w.writeScope}`} · ${w.maximum} calls max`, cls: "y-ai-privacy-short" });
+    privacy.createSpan({ text: `OpenAI · API charges · max ${w.maximum} request(s). ${w.mode === "ask" ? "Read only" : `Edits: ${SCOPE_LABELS[w.writeScope]}`}.`, cls: "y-ai-privacy-full" });
+    privacy.createSpan({ text: `OpenAI · paid · ${w.mode === "ask" ? "read only" : `${w.mode === "organize" ? "organize" : "edit"} ${w.writeScope === "current" ? "note" : w.writeScope}`} · ${w.maximum} calls max`, cls: "y-ai-privacy-short" });
     privacy.setAttribute("title", "Data goes directly to OpenAI, including relevant note excerpts within the permitted scope. Local key storage does not make AI local. New notes may be created in the output folder.");
     const controls = dock.createDiv({ cls: "y-ai-row" });
     this.button(controls, "Review data", () => { prompt.blur(); void w.review(); }, w.busy);
     const run = this.button(controls, w.busy ? w.canStop ? "Stop" : "Working…" : "", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, w.busy ? !w.canStop : !w.ready || !w.configured || !w.prompt.trim(), w.busy ? "mod-warning" : "mod-cta");
     if (!w.busy) {
-      run.createEl("span", { text: "Send to OpenAI", cls: "y-ai-run-full" });
-      run.createEl("span", { text: `Send to OpenAI · paid · max ${w.maximum} calls`, cls: "y-ai-run-tiny" });
+      run.createSpan({ text: "Send to OpenAI", cls: "y-ai-run-full" });
+      run.createSpan({ text: `Send to OpenAI · paid · max ${w.maximum} calls`, cls: "y-ai-run-tiny" });
     }
     prompt.addEventListener("input", () => { w.setPrompt(prompt.value); run.disabled = !w.ready || !w.configured || !w.prompt.trim(); this.saveSoon(); });
     prompt.addEventListener("keydown", event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !run.disabled && !w.busy) { event.preventDefault(); run.click(); } });
@@ -170,9 +170,9 @@ export class YoofloeAiView extends ItemView {
       root.classList.toggle("y-ai-compact", Math.min(root.parentElement?.clientHeight ?? available, available) < 340);
       root.classList.toggle("y-ai-tiny", available < 190 && (keyboard > 50 || visual));
       if (root.classList.contains("y-ai-tiny")) root.scrollTop = 0;
-      win.clearTimeout(timer); timer = win.setTimeout(() => { const active = doc.activeElement; if (active instanceof HTMLElement && root.contains(active) && active.matches("textarea,input,select")) active.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }); }, 350);
+      win.clearTimeout(timer); timer = win.setTimeout(() => { const active = doc.activeElement; if (active !== null && active.instanceOf(HTMLElement) && root.contains(active) && active.matches("textarea,input,select")) active.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }); }, 350);
     };
-    const focus = () => { const active = doc.activeElement; root.classList.toggle("y-ai-editing-scope", active instanceof HTMLElement && !!active.closest(".y-ai-scroll") && active.matches("input,textarea")); resize(); };
+    const focus = () => { const active = doc.activeElement; root.classList.toggle("y-ai-editing-scope", active !== null && active.instanceOf(HTMLElement) && !!active.closest(".y-ai-scroll") && active.matches("input,textarea")); resize(); };
     const settledResize = () => { resize(); win.clearTimeout(settleTimer); settleTimer = win.setTimeout(resize, 350); };
     const observer = new win.MutationObserver(settledResize); observer.observe(doc.body, { attributes: true, attributeFilter: ["style"] }); observer.observe(doc.documentElement, { attributes: true, attributeFilter: ["style"] });
     if (navigation) observer.observe(navigation, { attributes: true, attributeFilter: ["class", "style"] });

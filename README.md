@@ -110,6 +110,8 @@ This product does not claim that using BYOK or these controls automatically make
 ## Build and verify
 
 `npm ci`, `npm run check`, `npm run lint`, `npm test`, `npm run build`.
+Local lint now checks both manifests and the published package metadata with zero warnings allowed. The build validates CSS and rejects `!important`. Settings use the searchable 1.13+ definitions and keep the same rows as a 1.11.5–1.12 fallback.
+
 The default root build uses `calendar-companion/src/main.ts` and publishes only **main.js, manifest.json, styles.css**.
 No additional runtime dependencies, embedding service, planner model or Yoofloe backend is required.
 Tests with synthetic providers do not prove live API/device behavior; release notes distinguish those results.

@@ -12,6 +12,8 @@ export default [
     ]
   },
   ...obsidianmd.configs.recommended,
+  // The shipped child manifest follows the same official checks as the root payload.
+  ...obsidianmd.configs.recommended.filter(config => config.files?.includes("manifest.json")).map(config => ({ ...config, files: ["calendar-companion/manifest.json"] })),
   {
     files: ["src/main.ts", "calendar-companion/src/**/*.ts"],
     languageOptions: {

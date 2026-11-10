@@ -1,4 +1,4 @@
-import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, requestUrl, requireApiVersion } from "obsidian";
+import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, requestUrl, requireApiVersion, type SettingDefinitionRender } from "obsidian";
 import { ACTION, INBOX } from "./protocol";
 import { CalendarSession } from "./session";
 import { AiPreferences, localSecretBinding } from "./ai-preferences";
@@ -144,20 +144,37 @@ export default class YoofloeAiPlugin extends Plugin {
   }
   onunload(): void { this.live = false; this.work?.dispose(); this.work = null; this.ai?.session.enableForSession(false); this.aiSettings?.close(); this.manual?.close(); this.aiSettings = null; this.manual = null; this.ai = null; }
 }
+interface SettingsRow {
+  name: string; desc: string; aliases?: string[]; heading?: boolean; render?(setting: Setting): void;
+}
 class YoofloeSettings extends PluginSettingTab {
   constructor(app: App, private readonly yoofloe: YoofloeAiPlugin) { super(app, yoofloe); }
+  /** Indexed at registration on 1.13+. Definitions are static: no vault reads, keys or provider calls. */
+  getSettingDefinitions(): SettingDefinitionRender[] {
+    return this.rows().map(row => ({ name: row.name, desc: row.desc, aliases: row.aliases, render: setting => this.renderRow(setting, row) }));
+  }
+  /** The same rows remain available on 1.11.5–1.12; newer hosts render the definitions instead. */
   display(): void {
-    const el = this.containerEl; el.empty(); new Setting(el).setName("Workspace").setHeading();
-    el.createEl("p", { text: "Write, edit, organize and explore your Obsidian Markdown with your own OpenAI key. Works independently on desktop and mobile. Yoofloe Calendar is optional." });
-    new Setting(el).setName("One workspace").setDesc("Use the sparkle ribbon, note header, note menu, or Yoofloe AI: Open command. Closing the panel keeps your draft and result.")
-      .addButton(b => b.setButtonText("Open Yoofloe AI").onClick(() => this.yoofloe.openWorkspace()));
-    new Setting(el).setName("OpenAI key, model and thinking depth").setDesc("Settings make no API requests. Starting a task sends permitted note text and context directly to OpenAI; API charges apply. A task may make multiple requests.")
-      .addButton(b => b.setButtonText("AI settings").onClick(() => this.yoofloe.openAiSettings()));
-    el.createEl("p", { text: "Review the data scope and allowed changes before starting. Write and organize modes may change multiple notes within the scope. Original backups and recovery records are local; sync services may copy them. AI can make mistakes. Local storage of a key does not make AI local." });
-    const links = el.createEl("p"); links.createEl("a", { text: "Privacy and data flow", href: "https://github.com/yoofloe/yoofloe-obsidian/blob/main/PRIVACY.md", attr: { target: "_blank", rel: "noopener noreferrer" } });
-    new Setting(el).setName("Yoofloe Calendar · optional Android app").setDesc("Plans, tasks, notes, study, projects and focus. Direct local lookup requires both apps on the same Android phone or tablet and profile, Calendar 1.8.5+, Obsidian 1.11.5+, and a vault in shared device storage. Yoofloe AI works independently on other platforms.")
-      .addButton(b => b.setButtonText("Discover Calendar").onClick(() => el.ownerDocument.defaultView?.open(STORE_URL, "_blank")));
-    if (Platform.isAndroidApp) new Setting(el).setName("Manual Calendar import (advanced)").setDesc("Save complete Markdown snapshots without AI. Calendar records remain unchanged.")
-      .addButton(b => b.setButtonText("Import records").onClick(() => this.yoofloe.openManual()));
+    this.containerEl.empty();
+    for (const row of this.rows()) this.renderRow(new Setting(this.containerEl), row);
+  }
+  private renderRow(setting: Setting, row: SettingsRow): void {
+    setting.setName(row.name).setDesc(row.desc); if (row.heading) setting.setHeading(); row.render?.(setting);
+  }
+  private rows(): SettingsRow[] {
+    const rows: SettingsRow[] = [
+      { name: "Workspace", heading: true, desc: "Write, edit, organize and explore Markdown with your own OpenAI key. Works independently on desktop, mobile and tablets. Yoofloe Calendar is optional." },
+      { name: "One workspace", desc: "Use the sparkle ribbon, note header, note menu, or Yoofloe AI: Open command. Closing the panel keeps your draft and result.", aliases: ["Yoofloe AI", "notes", "data scope", "permissions", "request limit"],
+        render: setting => { setting.addButton(b => b.setButtonText("Open Yoofloe AI").onClick(() => this.yoofloe.openWorkspace())); } },
+      { name: "OpenAI key, model and thinking depth", desc: "Settings make no API requests. Starting a task sends permitted note text and context directly to OpenAI; API charges apply. A task may make multiple requests.", aliases: ["API key", "effort", "custom model", "AI settings", "cost"],
+        render: setting => { setting.addButton(b => b.setButtonText("AI settings").onClick(() => this.yoofloe.openAiSettings())); } },
+      { name: "Data and recovery", desc: "Review the data scope and allowed changes before starting. Write and organize modes may change multiple notes within the scope. Original backups and recovery records are local; sync services may copy them. AI can make mistakes. Local storage of a key does not make AI local.", aliases: ["privacy", "backups", "Undo", "data sharing"],
+        render: setting => { setting.descEl.appendText(" "); setting.descEl.createEl("a", { text: "Privacy and data flow", href: "https://github.com/yoofloe/yoofloe-obsidian/blob/main/PRIVACY.md", attr: { target: "_blank", rel: "noopener noreferrer" } }); } },
+      { name: "Yoofloe Calendar · optional Android app", desc: "Plans, tasks, notes, study, projects and focus. Direct local lookup requires both apps on the same Android phone or tablet and profile, Calendar 1.8.5+, Obsidian 1.11.5+, and a vault in shared device storage. Yoofloe AI works independently on other platforms.", aliases: ["Calendar", "Android", "local records"],
+        render: setting => { setting.addButton(b => b.setButtonText("Discover Calendar").onClick(() => this.containerEl.ownerDocument.defaultView?.open(STORE_URL, "_blank"))); } },
+    ];
+    if (Platform.isAndroidApp) rows.push({ name: "Manual Calendar import (advanced)", desc: "Save complete Markdown snapshots without AI. Calendar records remain unchanged.", aliases: ["Calendar import", "snapshots"],
+      render: setting => { setting.addButton(b => b.setButtonText("Import records").onClick(() => this.yoofloe.openManual())); } });
+    return rows;
   }
 }
