@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { allowedPath, vaultPath, safeOutbound } from '../dist/agent-policy.js';
-import { AgentTask } from '../dist/agent-task.js';
+import { AgentTask, AGENT_INSTRUCTION } from '../dist/agent-task.js';
 import { agentTools, parseAgentReply } from '../dist/agent-protocol.js';
+test('rename instructions permit user-requested filenames instead of conflicting preservation guidance',()=>{assert(AGENT_INSTRUCTION.includes('unless the user requests a rename or move'));assert(!AGENT_INSTRUCTION.includes('Existing filenames and user edits must be preserved.'));});
 const policy={sourcePath:'Work/A.md',folder:'Work',readScope:'vault',writeScope:'current',mode:'edit',configDir:'.obsidian',excluded:['Private']};
 const reply=output=>({status:200,text:JSON.stringify({status:'completed',output,usage:{input_tokens:10,output_tokens:5,output_tokens_details:{reasoning_tokens:2}}})});
 const call=(id='c1')=>({type:'function_call',call_id:id,name:'read_notes',arguments:'{"notes":[]}'});
@@ -11,7 +12,7 @@ test('data scope and write scope are independent, paths/secrets/configuration ne
  assert(allowedPath(policy,'Other/B.md','read'));assert(!allowedPath(policy,'Other/B.md','edit'));assert(allowedPath(policy,'Work/New.md','create'));
  for(const path of ['../A.md','/A.md','C:/A.md','Work/../A.md','.obsidian/settings.md','Private/A.md','Yoofloe AI/Backups/a.md'])assert(!allowedPath(policy,path,'read'));
  assert.throws(()=>vaultPath('Work\\A.md'));assert.throws(()=>safeOutbound('sk-proj-'+ 'a'.repeat(40)));
- assert(!agentTools('ask').some(t=>t.name==='apply_changes'));assert(!agentTools('edit').some(t=>t.name==='rename_note'));
+ assert(!agentTools('ask').some(t=>t.name==='apply_changes'));assert(agentTools('edit').some(t=>t.name==='rename_note'));assert(!agentTools('edit').some(t=>t.name==='propose_trash'));
 });
 test('All actions exposes every supported tool while keeping independently chosen note scopes',()=>{
  const all={...policy,mode:'all'};

@@ -11,13 +11,24 @@ iOS and physical tablet verification are not included in that evidence.
 ## Start
 
 1. Install **Yoofloe AI**, plugin ID `yoofloe`, and open its sparkle workspace.
-2. Open settings, choose a model and save **your own OpenAI key locally**.
+2. Open settings, choose a model, enter **your own OpenAI key**, and choose **Save** once.
+   The same button stores model/thinking settings and the new key together. An empty key field keeps the existing key.
    The UI confirms local storage; it does not make a paid key-validation call.
 3. Describe the task. Attach the current note or a text selection, or create a new document from scratch.
 4. Check **Allowed actions**, **Data sent to OpenAI**, **Notes AI can change**, the working/output folder,
    model, thinking depth and maximum requests. **Preview data** previews the initial input locally.
 5. **Send** starts the task and authorizes its permitted reads and changes. The same fixed-size button becomes **Stop** during work.
-   A task can make several paid API requests, up to the displayed limit. There are no automatic retries.
+   A task can make several paid API requests. Choose a preset, a positive **Custom** count, or **No request-count limit**.
+   Existing settings and the default of 4 are preserved. No-count mode continues until completion, Stop or a technical stopping condition;
+   API charges can accumulate. It does not remove provider context/rate/credit limits. There are no automatic retries.
+
+At a finite boundary the task pauses. Increase the **total** limit or choose no count limit, then **Continue** using
+the same model, original scopes, tool results and cumulative usage. Completed writes are not replayed. **Finish here**
+ends continuation without sending another request. Continuation is available while the current vault session stays open;
+closing/restarting the app keeps saved answers and completed changes but does not automatically resume requests.
+
+The conversation shows your requests, the assistant's answers and file operations actually confirmed by local tools.
+Recent previews are kept in workspace state; full local chat records can be loaded without making an API call.
 
 The task reads relevant excerpts as needed within your chosen data scope; it does not upload the whole vault upfront.
 The model control shows the full GPT version/name and the exact selected API model ID.
@@ -38,7 +49,8 @@ not the whole note. Open editor text, including unsaved changes, is used. A chan
 ## What it can do
 
 - **Ask only:** explain, summarize, translate and search permitted notes without modifying files.
-- **Write and edit:** create documents, rewrite or append text, update requested properties and link notes.
+- **Write and edit:** create documents, rewrite or append text, update requested properties, link notes and rename the current document within its folder.
+  Document title changes use the Markdown filename/tab title; body headings are separate. Moving between folders requires an organizing mode.
 - **Organize notes:** also create folders, rename/move notes and propose Trash operations. Moving notes
   does not silently rewrite backlinks; link updates are separate, version-checked edits within your scope.
 - Write ordinary Markdown: headings, lists, tasks, tables, internal links, blockquotes, LaTeX math,

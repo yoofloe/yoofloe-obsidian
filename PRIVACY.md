@@ -17,9 +17,12 @@ the plugin sends requests directly to `https://api.openai.com/v1/responses`:
 - The optional Calendar excerpts and search totals you added, including their dates and coverage.
 - Requested file operations, their results, model/effort settings and conversation/reasoning state needed to continue the task.
 
-One task may make multiple requests up to its displayed maximum. Additional excerpts can be sent during that task,
+One task may make multiple requests up to its selected finite maximum, or without a plugin request-count cap when you explicitly choose that option. Additional excerpts can be sent during that task,
 within the data scope you selected. **Preview data**, inside the data/permissions section, previews the initial input locally without an API call; it cannot predict every later tool read.
 Activity shows requested tools and source reads. Changing the data/edit scope requires your action in the workspace.
+No-count mode can accumulate API charges; provider context/rate/credit restrictions still apply. Exact no-progress loops
+and repeated blocked steps stop locally. A finite pause resumes only after your explicit Continue action with a higher
+total limit or no count cap, retaining the original model and scopes. No continuation request is replayed automatically after app restart.
 The API key goes in the authorization header, never in a prompt or URL. Do not put credentials in notes or prompts.
 
 No OpenAI request is made by opening the plugin, selecting a model, saving a key or looking up Calendar records locally.
@@ -43,6 +46,9 @@ Requests already in flight may still be processed and charged after Stop.
 - Keys use Obsidian secret storage with the existing vault-bound identifier. The UI checks local readback only;
   it does not establish that the key is valid remotely. The key is not written into plugin `data.json`.
 - Draft prompts, the latest answer and bounded prior turns are stored in the plugin configuration's `workspace.json`.
+- Conversation previews for the most recent 50 tasks are kept there for efficient display. Full request/answer records and
+  confirmed operation summaries are stored under `plugins/yoofloe/chats/` in the configuration directory. Loading an
+  archived conversation is local only; a new task sends limited recent context rather than the whole chat archive.
 - Original Markdown backups are stored under `Yoofloe AI/Backups/`; task journals list changed paths/digests under
   the configuration directory's `plugins/yoofloe/tasks/`. Old panel layout state is backed up there before consolidation.
 - Optional Calendar handoffs use the existing local Inbox and authenticated encrypted replies. Exact session files
@@ -57,7 +63,9 @@ Use **Remove saved key** to remove that plugin's current vault-bound key from lo
 
 To remove local conversation state, first finish or stop the task, use **Remove saved key** if you also want to remove
 the key, and disable Yoofloe AI. You can then remove `.obsidian/plugins/yoofloe/workspace.json` to clear the saved
-draft, latest answer and recent context. For a custom configuration directory, substitute that directory for `.obsidian`.
+draft, latest answer, conversation previews and recent context. Remove `plugins/yoofloe/chats/` in that configuration
+directory as well if you want to remove full archived conversations. Older chat files are not purged automatically when
+their previews leave the recent 50-task display. For a custom configuration directory, substitute that directory for `.obsidian`.
 Task journals are under `plugins/yoofloe/tasks/` in that same configuration directory; original backups are ordinary
 vault files under `Yoofloe AI/Backups/`. Delete those only when you no longer need recovery. Removing a backup can make
 Undo unavailable. Other sync/backup copies and provider-side retention are managed separately.

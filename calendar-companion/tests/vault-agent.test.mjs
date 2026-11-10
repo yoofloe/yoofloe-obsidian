@@ -19,6 +19,29 @@ function fixture(initial = { 'Notes/Plan.md': '# Plan\nOriginal', 'Notes/Other.m
   const agent = new VaultAgent(host, policy, () => true);
   return { agent, host, files, backups, records, trace, policy };
 }
+test('Write and edit renames the document file/title in place without changing body text or broadening folder scope',async()=>{
+ const f=fixture();f.policy.mode='edit';f.policy.readScope='current';f.policy.writeScope='current';f.policy.folder='Other output';
+ const a=new VaultAgent(f.host,f.policy,()=>true),before=await a.initialContext();
+ const result=await a.execute('rename_note',{reference:'N1',version:before.version,path:'Notes/A clear title.md'});
+ assert.equal(result.status,'renamed');assert(!f.files.has('Notes/Plan.md'));assert.equal(f.files.get('Notes/A clear title.md').text,'# Plan\nOriginal');assert.equal(f.policy.sourcePath,'Notes/A clear title.md');assert.equal(a.journal.operations[0].kind,'rename');
+ await a.undo();assert(f.files.has('Notes/Plan.md'));assert.equal(f.policy.sourcePath,'Notes/Plan.md');
+ const g=fixture();g.policy.mode='edit';const b=new VaultAgent(g.host,g.policy,()=>true),source=await b.initialContext();await assert.rejects(b.execute('rename_note',{reference:'N1',version:source.version,path:'Notes/Sub/Title.md'}),/organizing mode|change scope/);assert(g.files.has('Notes/Plan.md'));
+});
+test('more than two hundred mutations split into independently valid recoverable journals',async()=>{
+ const f=fixture(),saved=new Map();f.host.persist=async journal=>{validateJournal(journal);saved.set(journal.id,structuredClone(journal));};
+ for(let i=0;i<201;i++)await f.agent.execute('create_note',{path:`Notes/Bulk ${i}.md`,markdown:'# Synthetic'});
+ assert.equal(f.agent.journals.length,2);assert.equal(f.agent.operations.length,201);assert.equal(saved.size,2);
+ for(const journal of f.agent.journals){validateJournal(journal);assert(journal.operations.length<=200);}
+ let restored=0;for(const journal of [...f.agent.journals].reverse())restored+=(await f.agent.undo(journal)).restored;
+ assert.equal(restored,201);assert(![...f.files.keys()].some(path=>path.startsWith('Notes/Bulk ')));
+});
+test('a batched edit starts a fresh recovery segment before its prepared writes cross the boundary',async()=>{
+ const f=fixture();const first=await f.agent.initialContext();let last;
+ for(let i=0;i<199;i++)last=await f.agent.execute('create_note',{path:`Notes/Batch ${i}.md`,markdown:'# Synthetic'});
+ await f.agent.execute('read_notes',{notes:[{reference:last.reference,from_line:1,through_line:0}]});
+ await f.agent.execute('apply_changes',{changes:[{reference:'N1',version:first.version,action:'append',markdown:'First'},{reference:last.reference,version:last.version,action:'append',markdown:'Second'}]});
+ assert.equal(f.agent.journals.length,2);assert.equal(f.agent.journals[0].operations.length,199);assert.equal(f.agent.journals[1].operations.length,2);for(const j of f.agent.journals)validateJournal(j);
+});
 test('edits require a read version, verified backup and durable journal before writing; Undo preserves newer user edits', async () => {
   const f = fixture(), original = await f.agent.initialContext();
   await assert.rejects(f.agent.execute('apply_changes', { changes: [{ reference: 'N1', version: 'stale', action: 'replace', markdown: 'Bad' }] }), /changed/);

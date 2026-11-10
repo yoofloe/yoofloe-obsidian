@@ -11,6 +11,7 @@ import { loadWorkRecords, obsidianAgentHost } from "./obsidian-agent-host";
 import { CompanionModal } from "./manual-import";
 import { inputDigest } from "./question-input";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, PRIVACY_URL } from "./privacy-copy";
+import { readChat, validChatId, type ChatTurn } from "./chat-history";
 
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
 /** Plugin ID, local secret binding and the Calendar v2/v3 callback stay stable. No startup network requests. */
@@ -121,6 +122,7 @@ export default class YoofloeAiPlugin extends Plugin {
   private workspace(): AiWorkspace {
     if (this.work) return this.work;
     const ai = this.context(), owner = this.app.vault, adapter = owner.adapter, root = `${owner.configDir}/plugins/yoofloe`;
+    let chatQueue: Promise<void> = Promise.resolve();
     this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
       host: current => obsidianAgentHost(this.app, owner, current), inboxHint: () => adapter.getResourcePath(`${INBOX}/`),
       transport: async request => { if (!ai.current()) throw Error("Vault changed"); const response = await requestUrl(request); return { status: response.status, text: response.text }; },
@@ -128,6 +130,21 @@ export default class YoofloeAiPlugin extends Plugin {
         load: async () => { const path = `${root}/workspace.json`; if (!await adapter.exists(path)) return null; const stat = await adapter.stat(path); if (!stat || stat.size > 8 * 1024 * 1024) throw Error("Saved work exceeds its local size limit."); return JSON.parse(await adapter.read(path)) as unknown; },
         save: async value => { if (!ai.current()) throw Error("Vault changed"); const text = JSON.stringify(value); if (text.length > 8 * 1024 * 1024) throw Error("Saved work exceeds its local size limit."); const path = `${root}/workspace.json`; await adapter.write(path, text); if (await adapter.read(path) !== text) throw Error("The local work record could not be confirmed."); },
         history: () => loadWorkRecords(owner),
+        saveChat: (turn: ChatTurn) => {
+          if (!validChatId(turn.id)) return Promise.reject(Error("Invalid local chat record."));
+          const text = JSON.stringify({ ...turn, requestTruncated: false, answerTruncated: false });
+          if (new TextEncoder().encode(text).length > 6 * 1024 * 1024) return Promise.reject(Error("The full chat record exceeds its local size limit. The current answer is kept."));
+          const next = chatQueue.then(async () => {
+            if (!ai.current()) throw Error("Vault changed"); const folder = `${root}/chats`; if (!await adapter.exists(folder)) await adapter.mkdir(folder);
+            const path = `${folder}/${turn.id}.json`; await adapter.write(path, text); if (!ai.current() || await adapter.read(path) !== text) throw Error("Local chat saving could not be confirmed.");
+          }); chatQueue = next.catch(() => {}); return next;
+        },
+        loadChat: async id => {
+          if (!ai.current() || !validChatId(id)) throw Error("This chat record is unavailable.");
+          const path = `${root}/chats/${id}.json`, stat = await adapter.stat(path);
+          if (!stat || stat.size > 6 * 1024 * 1024) throw Error("This full chat record cannot be read safely.");
+          const turn = readChat(JSON.parse(await adapter.read(path)) as unknown); if (!ai.current() || turn?.id !== id) throw Error("The local chat record could not be confirmed."); return turn;
+        },
       },
       ...(Platform.isAndroidApp ? { calendar: () => new CalendarSession({ vaultName: () => owner.getName(), allowed: () => ai.current() && Platform.isAndroidApp,
         store: { exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path), write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
@@ -136,6 +153,7 @@ export default class YoofloeAiPlugin extends Plugin {
     return this.work;
   }
   openAiSettings(manualDrafts = false): void {
+    if (this.work?.settingsLocked) { new Notice("Finish or stop the current task before changing its model and key settings."); return; }
     if (!this.live) return; if (this.aiSettings) { this.aiSettings.open(); return; }
     this.aiSettings = new AiSettingsModal(this.app, this.context(), () => { this.aiSettings = null; void this.work?.refreshSettings(); }, manualDrafts); this.aiSettings.open();
   }
