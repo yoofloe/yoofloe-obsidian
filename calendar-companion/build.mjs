@@ -14,6 +14,7 @@ const copyPayload = async () => {
   if (test) return;
   const css = await transform(await readFile(new URL('styles.css', import.meta.url), 'utf8'), { loader: 'css', minify: true, logLevel: 'silent' });
   if (/!\s*important\b/i.test(css.code)) throw Error('Directory CSS check failed: replace !important with scoped selector specificity.');
+  if (/\bdisplay:contents\b/i.test(css.code)) throw Error('Directory CSS check failed: use an explicit layout container instead of partially supported display:contents.');
   for (const name of ['manifest.json','styles.css']) await copyFile(new URL(name, import.meta.url),new URL(`dist/${name}`, import.meta.url));
 };
 if (process.argv.includes('--watch') && !test) {
