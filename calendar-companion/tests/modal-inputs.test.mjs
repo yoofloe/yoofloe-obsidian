@@ -2,20 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { keepModalInputsVisible } from '../dist/modal-inputs.js';
 
-function fixture() {
+function fixture(keyboardInset = 400) {
   class Target extends EventTarget {}
   const viewport = Object.assign(new Target(), { height: 900 });
   const frames = new Map(), timers = new Map(); let id = 0, scrolls = 0;
   const win = Object.assign(new Target(), { visualViewport: viewport, innerHeight: 900,
+    getComputedStyle: () => ({ getPropertyValue: () => String(keyboardInset) }),
     requestAnimationFrame: cb => { frames.set(++id, cb); return id; }, cancelAnimationFrame: key => frames.delete(key),
     setTimeout: cb => { timers.set(++id, cb); return id; }, clearTimeout: key => timers.delete(key) });
   const input = { type: 'text', matches: selector => selector.startsWith('textarea, input:not(') && !['checkbox','radio','button','submit','range','color','file','hidden'].includes(input.type), scrollIntoView: options => { assert.equal(options.block, 'start'); scrolls++; } };
   Object.defineProperty(input, 'value', { get() { throw Error('Never read protected input contents'); } });
-  const doc = { defaultView: win, activeElement: input };
+  const doc = { defaultView: win, activeElement: input, body: {}, documentElement: {} };
   const content = Object.assign(new Target(), { ownerDocument: doc, style: { paddingBottom: '12px' }, contains: value => value === input });
   const flush = map => { const pending = [...map.values()]; map.clear(); for (const run of pending) run(); };
   return { content, doc, viewport, win, frames, timers, input, scrolls: () => scrolls, frame: () => flush(frames), settle: () => flush(timers) };
 }
+test('desktop focus adds no artificial viewport of blank space and never reads a password value',()=>{
+ const f=fixture(0);f.input.type='password';f.input.scrollIntoView=options=>assert.equal(options.block,'nearest');const dispose=keepModalInputsVisible(f.content,()=>true);f.content.dispatchEvent(new Event('focusin'));f.frame();f.settle();assert.equal(f.content.style.paddingBottom,'12px');dispose();
+});
 test('an overlaid keyboard gets scroll room even when the host viewport does not shrink', () => {
   const f = fixture(), dispose = keepModalInputsVisible(f.content, () => true);
   f.content.dispatchEvent(new Event('focusin')); f.frame();

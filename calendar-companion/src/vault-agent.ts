@@ -6,9 +6,10 @@ import { agentTools } from "./agent-protocol";
 export interface AgentFile { identity: object; path: string; title: string; size: number }
 export interface JournalOp { kind: "edit" | "create" | "rename" | "trash" | "folder"; path: string; target?: string; backup?: string; beforeHash: string; afterHash: string; previousHash: string; status: "pending" | "done" | "undone" }
 export interface WorkJournal { id: string; createdAt: number; status: "running" | "complete" | "interrupted" | "undone"; operations: JournalOp[] }
+export const MAX_JOURNAL_OPERATIONS = 200;
 export function validateJournal(value: unknown): asserts value is WorkJournal {
   closedObject(value, ["id", "createdAt", "status", "operations"]);
-  if (!/^[0-9a-f-]{36}$/.test(textField(value.id)) || !Number.isFinite(value.createdAt) || !["running", "complete", "interrupted", "undone"].includes(textField(value.status)) || !Array.isArray(value.operations) || value.operations.length > 200) throw Error("Invalid recovery record.");
+  if (!/^[0-9a-f-]{36}$/.test(textField(value.id)) || !Number.isFinite(value.createdAt) || !["running", "complete", "interrupted", "undone"].includes(textField(value.status)) || !Array.isArray(value.operations) || value.operations.length > MAX_JOURNAL_OPERATIONS) throw Error("Invalid recovery record.");
   for (const op of value.operations as unknown[]) {
     if (!op || typeof op !== "object" || Array.isArray(op)) throw Error("Invalid recovery action.");
     const item = op as Record<string, unknown>;
@@ -34,7 +35,10 @@ const limitBytes = 32768;
 function list(value: unknown, maximum = 16): unknown[] { if (!Array.isArray(value) || !value.length || value.length > maximum) throw Error("Choose a bounded set of notes."); return value; }
 /** The model only requests typed work. Scope, source versions and recovery are enforced locally. */
 export class VaultAgent {
-  readonly journal: WorkJournal = { id: crypto.randomUUID(), createdAt: Date.now(), status: "running", operations: [] };
+  private currentJournal: WorkJournal = { id: crypto.randomUUID(), createdAt: Date.now(), status: "running", operations: [] };
+  readonly journals: WorkJournal[] = [this.currentJournal];
+  get journal(): WorkJournal { return this.currentJournal; }
+  get operations(): JournalOp[] { return this.journals.flatMap(journal => journal.operations); }
   readonly sent: { title: string; path: string; bytes: number }[] = [];
   readonly pendingTrash: { reference: string; title: string; version: string }[] = [];
   private refs = new Map<string, Ref>();
@@ -44,6 +48,14 @@ export class VaultAgent {
     if (source) this.refs.set("N1", { file: source, allowedRange: policy.readScope === "current" ? policy.selection : undefined });
   }
   private guard() { if (!this.current()) throw Error("This task stopped or the vault changed. No further file action is allowed."); }
+  private async reserveOperations(count: number): Promise<void> {
+    this.guard(); if (count < 1 || count > MAX_JOURNAL_OPERATIONS) throw Error("This action exceeds one recovery segment.");
+    if (this.journal.operations.length + count <= MAX_JOURNAL_OPERATIONS) return;
+    this.journal.status = this.journal.operations.some(op => op.status === "pending") ? "interrupted" : "complete";
+    await this.host.persist(this.journal); this.guard();
+    this.currentJournal = { id: crypto.randomUUID(), createdAt: Math.max(Date.now(), this.journal.createdAt + 1), status: "running", operations: [] }; this.journals.push(this.currentJournal);
+    await this.host.persist(this.currentJournal); this.guard();
+  }
   private ref(reference: unknown): Ref { const r = this.refs.get(textField(reference)); if (!r) throw Error("Read a reference returned by this task's search first."); return r; }
   private reference(file: AgentFile): string {
     for (const [id, ref] of this.refs) if (ref.file.identity === file.identity && ref.file.path === file.path) return id;
@@ -126,7 +138,7 @@ export class VaultAgent {
         else throw Error("Read the complete note before replacing it, or replace only the reviewed selection.");
         plans.push({ ref, before, after, hash: await inputDigest(after) });
       }
-      const ops = []; for (const plan of plans) ops.push(await this.prepareEdit(plan.ref.file, plan.before, plan.hash));
+      await this.reserveOperations(plans.length); const ops = []; for (const plan of plans) ops.push(await this.prepareEdit(plan.ref.file, plan.before, plan.hash));
       for (const [index, plan] of plans.entries()) {
         this.guard(); await this.host.replace(plan.ref.file, plan.before, plan.after);
         if (plan.ref.allowedRange) {
@@ -142,6 +154,7 @@ export class VaultAgent {
       if (!allowedPath(this.policy, path, "create")) throw Error("Create the note inside the permitted output folder.");
       if (this.host.files().some(file => file.path === path)) throw Error("That filename already exists. Choose another name.");
       const markdown = safeNoteMarkdown(textField(args.markdown, 4 * 1024 * 1024)); const hash = await inputDigest(markdown);
+      await this.reserveOperations(1);
       const op: JournalOp = { kind: "create", path, beforeHash: "", afterHash: hash, previousHash: "", status: "pending" }; this.journal.operations.push(op); await this.host.persist(this.journal); this.guard();
       const file = await this.host.create(path, markdown); op.status = "done"; await this.host.persist(this.journal); const ref = this.reference(file); this.refs.get(ref)!.version = hash;
       return { status: "created", reference: ref, path, version: hash, undo_available: true };
@@ -152,23 +165,30 @@ export class VaultAgent {
       if (!ref.version || args.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("Read the current note version first.");
       const values: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
       for (const item of list(args.properties, 32)) { closedObject(item, ["key", "value"]); const key = textField(item.key, 80); if (!key || ["__proto__", "constructor", "prototype"].includes(key)) throw Error("Invalid property name."); values[key] = JSON.parse(textField(item.value, 8192)) as unknown; }
-      const op = await this.prepareEdit(ref.file, before, ""); await this.host.properties(ref.file, before, values); const after = await this.read(ref); op.afterHash = await inputDigest(after); op.status = "done"; ref.version = op.afterHash; ref.complete = false; await this.host.persist(this.journal);
+      await this.reserveOperations(1); const op = await this.prepareEdit(ref.file, before, ""); await this.host.properties(ref.file, before, values); const after = await this.read(ref); op.afterHash = await inputDigest(after); op.status = "done"; ref.version = op.afterHash; ref.complete = false; await this.host.persist(this.journal);
       return { status: "updated", reference: this.reference(ref.file), version: ref.version };
     }
     if (name === "rename_note") {
       closedObject(args, ["reference", "version", "path"]); const ref = this.ref(args.reference), before = await this.read(ref), path = vaultPath(textField(args.path));
-      if (!allowedPath(this.policy, ref.file.path, "organize") || !allowedPath(this.policy, path, "create") || ref.allowedRange) throw Error("Rename/move must stay inside the permitted organize scope.");
+      const sourceAction = this.policy.mode === "edit" ? "edit" : "organize";
+      const parent = (value: string) => value.includes("/") ? value.slice(0, value.lastIndexOf("/")) : "";
+      const sameFolder = parent(ref.file.path) === parent(path);
+      // Renaming the same file stays in its current folder; the output folder governs new notes.
+      const destinationPolicy = sameFolder ? { ...this.policy, folder: parent(ref.file.path) } : this.policy;
+      if (!allowedPath(this.policy, ref.file.path, sourceAction) || !allowedPath(destinationPolicy, path, "create") || ref.allowedRange) throw Error("Document renaming must stay inside the permitted change scope and requires the complete note.");
+      if (this.policy.mode === "edit" && !sameFolder) throw Error("Write and edit can rename this document in its current folder. Choose an organizing mode explicitly to move it to another folder.");
       if (!ref.version || args.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("Read the current note version first.");
       const affected = this.host.affected(ref.file.path).filter(item => item !== ref.file.path);
       if (affected.some(item => !allowedPath(this.policy, item, "edit"))) throw Error("Backlinks outside the edit scope may change. Expand the scope explicitly before renaming.");
+      await this.reserveOperations(1);
       const oldPath = ref.file.path, op: JournalOp = { kind: "rename", path: oldPath, target: path, beforeHash: ref.version, afterHash: ref.version, previousHash: ref.version, status: "pending" };
       this.journal.operations.push(op); await this.host.persist(this.journal); this.guard(); await this.host.rename(ref.file, path); op.status = "done";
       if (this.policy.sourcePath === oldPath) this.policy.sourcePath = path;
-      ref.version = await inputDigest(await this.read(ref)); await this.host.persist(this.journal); return { status: "renamed", reference: this.reference(ref.file), path, version: ref.version, links_to_review: affected, meaning: "Links are not changed automatically. Search/read their notes and apply version-checked edits within the permitted scope." };
+      ref.version = await inputDigest(await this.read(ref)); await this.host.persist(this.journal); return { status: "renamed", reference: this.reference(ref.file), path, version: ref.version, links_to_review: affected.filter(item => allowedPath(this.policy, item, "read")), meaning: "The filename and document/tab title changed. Body headings are separate. Links are not changed automatically; review only permitted backlink notes." };
     }
     if (name === "create_folder") {
       closedObject(args, ["path"]); const path = vaultPath(textField(args.path), true); if (!allowedPath(this.policy, path, "organize")) throw Error("The folder is outside the organize scope.");
-      const created = await this.host.folder(path); if (created) { this.journal.operations.push({ kind: "folder", path, beforeHash: "", afterHash: "", previousHash: "", status: "done" }); await this.host.persist(this.journal); } return { status: created ? "created" : "existing", path };
+      await this.reserveOperations(1); const created = await this.host.folder(path); if (created) { this.journal.operations.push({ kind: "folder", path, beforeHash: "", afterHash: "", previousHash: "", status: "done" }); await this.host.persist(this.journal); } return { status: created ? "created" : "existing", path };
     }
     if (name === "propose_trash") {
       closedObject(args, ["references"]);
@@ -179,7 +199,7 @@ export class VaultAgent {
   }
   async confirmTrash(): Promise<void> {
     this.guard();
-    while (this.pendingTrash.length) { const item = this.pendingTrash[0], ref = this.ref(item.reference), before = await this.read(ref); if (await inputDigest(before) !== item.version) throw Error("A proposed note changed. Review it again before moving it to Trash."); const backup = await this.host.backup(ref.file.path, before); const op: JournalOp = { kind: "trash", path: ref.file.path, backup, beforeHash: item.version, afterHash: "", previousHash: item.version, status: "pending" }; this.journal.operations.push(op); await this.host.persist(this.journal); this.guard(); await this.host.trash(ref.file); op.status = "done"; this.pendingTrash.shift(); await this.host.persist(this.journal); }
+    while (this.pendingTrash.length) { await this.reserveOperations(1); const item = this.pendingTrash[0], ref = this.ref(item.reference), before = await this.read(ref); if (await inputDigest(before) !== item.version) throw Error("A proposed note changed. Review it again before moving it to Trash."); const backup = await this.host.backup(ref.file.path, before); const op: JournalOp = { kind: "trash", path: ref.file.path, backup, beforeHash: item.version, afterHash: "", previousHash: item.version, status: "pending" }; this.journal.operations.push(op); await this.host.persist(this.journal); this.guard(); await this.host.trash(ref.file); op.status = "done"; this.pendingTrash.shift(); await this.host.persist(this.journal); }
   }
   async undo(journal: WorkJournal = this.journal): Promise<{ restored: number; kept: number }> {
     this.guard(); validateJournal(journal); let restored = 0, kept = 0;
@@ -197,7 +217,7 @@ export class VaultAgent {
           if (!op.afterHash || hash !== op.afterHash && hash !== op.previousHash) throw Error("Newer edits are kept.");
           this.guard();
           if (op.kind === "create") await this.host.trash(file);
-          else if (op.kind === "rename") { if (this.host.files().some(file => file.path === op.path)) throw Error("The old name is occupied."); await this.host.rename(file, op.path); }
+          else if (op.kind === "rename") { if (this.host.files().some(file => file.path === op.path)) throw Error("The old name is occupied."); await this.host.rename(file, op.path); if (this.policy.sourcePath === op.target) this.policy.sourcePath = op.path; }
           else { if (original === null) throw Error("No original backup"); await this.host.replace(file, current, original); }
         }
         op.status = "undone"; restored++;

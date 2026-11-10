@@ -10,6 +10,8 @@ export function keepModalInputsVisible(content: HTMLElement, current: () => bool
     const input = content.ownerDocument.activeElement;
     if (!input || !content.contains(input) || !input.matches("textarea, input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=range]):not([type=color]):not([type=file]):not([type=hidden])")) { reset(); return; }
     const height = viewport?.height || win.innerHeight;
+    const nativeKeyboard = win.getComputedStyle ? parseFloat(win.getComputedStyle(content.ownerDocument.body).getPropertyValue("--keyboard-height")) || 0 : 0;
+    if (nativeKeyboard <= 50 && win.innerHeight - height <= 80) { reset(); input.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" }); return; }
     // Extra scroll room also covers hosts whose layout/visual viewport does not shrink with the IME.
     content.style.paddingBottom = `${Math.ceil(height)}px`;
     input.scrollIntoView({ behavior: "auto", block: "start", inline: "nearest" });
@@ -23,8 +25,10 @@ export function keepModalInputsVisible(content: HTMLElement, current: () => bool
   };
   content.addEventListener("focusin", schedule); content.addEventListener("focusout", schedule);
   win.addEventListener("resize", schedule); viewport?.addEventListener("resize", schedule);
+  const observer = win.MutationObserver ? new win.MutationObserver(schedule) : null;
+  if (observer) { observer.observe(content.ownerDocument.body, { attributes: true, attributeFilter: ["style"] }); observer.observe(content.ownerDocument.documentElement, { attributes: true, attributeFilter: ["style"] }); }
   return () => {
-    live = false; win.cancelAnimationFrame(frame); win.clearTimeout(settle);
+    live = false; observer?.disconnect(); win.cancelAnimationFrame(frame); win.clearTimeout(settle);
     content.removeEventListener("focusin", schedule); content.removeEventListener("focusout", schedule);
     win.removeEventListener("resize", schedule); viewport?.removeEventListener("resize", schedule); reset();
   };

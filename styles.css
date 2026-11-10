@@ -4,6 +4,7 @@
 .calendar-companion section { padding: 0.75rem; border: 1px solid var(--background-modifier-border); border-radius: 0.5rem; margin-block: 0.75rem; }
 .calendar-companion pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .calendar-companion-status { padding: 0.75rem; background: var(--background-secondary); border-radius: 0.5rem; }
+.calendar-companion-status:empty { display: none; }
 .calendar-companion .calendar-companion-hint { color: var(--text-muted); font-size: var(--font-small); margin-block: 0.5rem; overflow-wrap: anywhere; }
 .calendar-companion-model-details .setting-item { padding-block: 0.5rem; }
 .calendar-companion input, .calendar-companion textarea { scroll-margin-block-start: 24px; }
@@ -115,6 +116,8 @@
 .yoofloe-ai .y-ai-scroll { flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; padding: 0.7rem 0.8rem; scroll-padding-block: 0.8rem; }
 .yoofloe-ai .y-ai-models { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 0 0.5rem; margin-bottom: 0.5rem; }
 .yoofloe-ai .y-ai-model-id { grid-column: 1 / -1; margin: 0 0 0.25rem; color: var(--text-muted); font-size: var(--font-ui-smaller); overflow-wrap: anywhere; user-select: text; }
+.yoofloe-ai .y-ai-limit-error { color: var(--text-error); line-height: 1.4; overflow-wrap: anywhere; }
+.yoofloe-ai .y-ai-limit-error:empty { display: none; }
 .yoofloe-ai .y-ai-folder { display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: start; }
 .yoofloe-ai .y-ai-folder-path { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .yoofloe-ai .y-ai-folder-icon { display: flex; flex: 0 0 auto; color: var(--text-muted); }
@@ -135,6 +138,14 @@
 .yoofloe-ai .y-ai-setup button { flex-shrink: 0; min-height: 36px; }
 .yoofloe-ai .y-ai-hint { font-size: var(--font-ui-smaller); color: var(--text-muted); line-height: 1.5; margin-block: 0.4rem; overflow-wrap: anywhere; }
 .yoofloe-ai .y-ai-status { border-left: 2px solid var(--interactive-accent); padding-left: 0.65rem; font-size: var(--font-ui-small); line-height: 1.5; overflow-wrap: anywhere; }
+.yoofloe-ai .y-ai-chat { display: flex; flex-direction: column; gap: 0.75rem; margin-block: 0.75rem; }
+.yoofloe-ai .y-ai-exchange { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+.yoofloe-ai .y-ai-message { min-width: 0; max-width: 100%; border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 0.6rem 0.7rem; overflow-wrap: anywhere; }
+.yoofloe-ai .y-ai-user { align-self: flex-end; max-width: 94%; background: var(--background-secondary); }
+.yoofloe-ai .y-ai-assistant { align-self: stretch; background: var(--background-primary); }
+.yoofloe-ai .y-ai-message-label { color: var(--text-muted); font-size: var(--font-ui-small); }
+.yoofloe-ai .y-ai-request-text { margin: 0.35rem 0 0; white-space: pre-wrap; line-height: 1.45; }
+.yoofloe-ai .y-ai-chat-actions { margin-block: 0.4rem; padding-inline-start: 0.5rem; border-inline-start: 2px solid var(--interactive-accent); }
 .yoofloe-ai .y-ai-result { font-size: var(--font-text-size); line-height: var(--line-height-normal); min-width: 0; overflow-wrap: anywhere; }
 .yoofloe-ai .y-ai-result pre, .yoofloe-ai .y-ai-details pre { white-space: pre-wrap; word-break: break-word; max-height: 28rem; overflow: auto; font-size: var(--font-smaller); }
 .yoofloe-ai .y-ai-table, .yoofloe-ai .mermaid, .yoofloe-ai .math-block { max-width: 100%; overflow: auto; overscroll-behavior: contain; }
@@ -181,6 +192,7 @@
 .yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-dock .y-ai-hint { grid-column: 1 / -1; grid-row: 1; padding: 1px 8px; line-height: 1.05; border-top: 1px solid var(--background-modifier-border); }
 .yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-dock .y-ai-row { grid-column: 2; grid-row: 2; width: max(128px, calc(5.2em + 1rem)); max-width: 100%; margin: 1px 8px 1px 0; align-self: start; }
 @container (max-width: 380px) { .yoofloe-ai .y-ai-models { grid-template-columns: minmax(0, 1fr); } }
+@container (max-width: 480px) { .yoofloe-ai .y-ai-usage-tiny { display: none; } }
 @media (max-height: 500px) { .yoofloe-ai .y-ai-header { padding-block: 0.2rem; } .yoofloe-ai .y-ai-compose textarea { min-height: 2.7rem; height: 2.7rem; } }
 
 /* Match the host view with enough specificity without overriding user styles globally. */

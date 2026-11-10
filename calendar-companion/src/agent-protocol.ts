@@ -33,8 +33,9 @@ export function agentTools(mode: WorkMode) {
   const edit = [tool("apply_changes", "Apply requested edits to reviewed references using exact versions. A partial source can only replace its reviewed selection. Creates verified original backups.", { changes: array(object({ reference: str, version: str, action: { type: "string", enum: ["replace", "append", "replace_selection"] }, markdown: str })) }),
     tool("create_note", "Create a new Markdown note in the permitted output folder. Existing files are never replaced.", { path: str, markdown: str }),
     tool("update_properties", "Update requested YAML properties, preserving other keys. Each value is a JSON string.", { reference: str, version: str, properties: array(object({ key: str, value: str })) })];
-  if (mode !== "organize" && mode !== "all") return [...read, ...edit];
-  return [...read, ...edit, tool("rename_note", "Rename or move a note. Links are not changed automatically: read and apply version-checked edits to the returned backlinks separately. All affected backlinks must stay inside the allowed edit scope.", { reference: str, version: str, path: str }),
+  const rename = tool("rename_note", "Change the Markdown filename and document/tab title, rather than just a heading inside its body. Write and edit mode permits same-folder renaming; organizing modes may also move a note. Links are not changed automatically. Review returned in-scope backlinks separately.", { reference: str, version: str, path: str });
+  if (mode !== "organize" && mode !== "all") return [...read, ...edit, rename];
+  return [...read, ...edit, rename,
     tool("create_folder", "Create a folder within the allowed work scope.", { path: str }),
     tool("propose_trash", "Propose moving notes to Trash. This never deletes; the user must select the concrete Trash action.", { references: array(str) })];
 }

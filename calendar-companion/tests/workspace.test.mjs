@@ -49,14 +49,14 @@ test('a selection edit updates its private scope for a follow-up without includi
 test('a Trash-only task exposes immediate Undo after the separate user confirmation',async()=>{
  const f=fixture();await f.host.create('Task A.md','Original A');await f.work.initialize();await f.work.newTask({path:'Task A.md'});f.work.mode='organize';let calls=0;
  f.options.transport=async()=>response(++calls===1?[{type:'function_call',call_id:'trash',name:'propose_trash',arguments:'{"references":["N1"]}'}]:[{type:'message',role:'assistant',content:[{type:'output_text',text:'Awaiting your choice.'}]}]);
- f.work.setPrompt('Propose this note for Trash');await f.work.run();assert.equal(f.work.history.length,0);assert(f.files.has('Task A.md'));await f.work.confirmTrash();assert(!f.files.has('Task A.md'));assert.equal(f.work.history.length,1);
+ f.work.setPrompt('Propose this note for Trash');await f.work.run();assert.equal(f.work.history.length,0);assert(f.files.has('Task A.md'));await f.work.confirmTrash();assert(!f.files.has('Task A.md'));assert.equal(f.work.history.length,1);assert(f.work.chat.at(-1).actions.some(op=>op.kind==='trash'&&op.path==='Task A.md'));assert(f.saved().chat.at(-1).actions.some(op=>op.kind==='trash'));
  await f.work.undo(f.work.history[0]);assert.equal(f.files.get('Task A.md').text,'Original A');assert.equal(calls,2);
 });
 test('partially confirmed Trash retains immediate recovery and removes only completed proposals from the pending list',async()=>{
  const f=fixture();await f.host.create('Task A.md','Original A');await f.host.create('Task B.md','Original B');await f.work.initialize();await f.work.newTask({path:'Task A.md'});f.work.mode='organize';f.work.readScope='vault';f.work.writeScope='vault';let calls=0;
  f.options.transport=async()=>response(++calls===1?[{type:'function_call',call_id:'search',name:'search_notes',arguments:'{"query":"Task","limit":4,"offset":0}'}]:calls===2?[{type:'function_call',call_id:'trash',name:'propose_trash',arguments:'{"references":["N1","N2"]}'}]:[{type:'message',role:'assistant',content:[{type:'output_text',text:'Awaiting your choice.'}]}]);
  f.work.setPrompt('Propose both sample notes for Trash');await f.work.run();f.files.get('Task B.md').text+=' Human edit';await f.work.confirmTrash();
- assert(!f.files.has('Task A.md'));assert.equal(f.work.agent.pendingTrash.length,1);assert.equal(f.work.history.length,1);assert.equal(f.work.history[0].status,'interrupted');
+ assert(!f.files.has('Task A.md'));assert.equal(f.work.agent.pendingTrash.length,1);assert.equal(f.work.history.length,1);assert.equal(f.work.history[0].status,'interrupted');assert.equal(f.work.chat.at(-1).actions.filter(op=>op.kind==='trash').length,1);
  await f.work.undo(f.work.history[0]);assert.equal(f.files.get('Task A.md').text,'Original A');assert.match(f.files.get('Task B.md').text,/Human edit/);assert.equal(calls,3);
 });
 test('a secret in a prompt is blocked locally before reading the key or calling OpenAI; draft remains', async () => {
@@ -83,4 +83,31 @@ test('Stop changes to Stopping once, preserves a paid response and blocks its fi
 test('All actions restores without changing the separately saved read/write scope or reading a key',async()=>{
  const f=fixture();f.options.storage.load=async()=>({mode:'all',readScope:'folder',writeScope:'current',outputFolder:'Study',maximum:2});await f.work.initialize();
  assert.equal(f.work.mode,'all');assert.equal(f.work.readScope,'folder');assert.equal(f.work.writeScope,'current');assert.equal(f.work.outputFolder,'Study');assert.equal(f.work.maximum,2);assert.equal(f.keyReads(),0);assert.equal(f.calls(),0);
+});
+test('finite task pause continues without duplicate writes, keeps the original scope and updates one chat turn',async()=>{
+ const f=fixture();await f.work.initialize();f.work.maximum=1;f.work.setPrompt('Create the sample document');await f.work.run();
+ assert.equal(f.work.canContinue,true);assert.equal(f.work.settingsLocked,true);assert.equal(f.files.size,1);assert.equal(f.work.chat.length,1);assert.equal(f.work.chat[0].status,'paused');
+ const oldModel=f.work.model.model;await f.work.setModel({model:'another-model'});assert.equal(f.work.model.model,oldModel);
+ const requests=f.calls();await f.work.continueTask();assert.equal(f.calls(),requests);
+ f.work.maximum='none';await f.work.continueTask();assert.equal(f.calls(),2);assert.equal(f.files.size,1);assert.equal(f.work.canContinue,false);assert.equal(f.work.chat.length,1);assert.equal(f.work.chat[0].status,'completed');assert.equal(f.work.chat[0].requests,2);assert.equal(f.work.chat[0].actions.length,1);
+ assert.equal(f.work.chat[0].request,'Create the sample document');assert.match(f.work.chat[0].answer,/Created/);
+});
+test('invalid custom draft sends nothing and retains question and prior key',async()=>{
+ const f=fixture();await f.work.initialize();f.work.customMaximum='0';f.work.setPrompt('Keep this question');await f.work.run();assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);assert.equal(f.files.size,0);assert.equal(f.work.prompt,'Keep this question');assert.match(f.work.limitProblem,/positive whole/);
+});
+test('Stop during continuation checkpoint saving prevents any additional provider request',async()=>{
+ const f=fixture();await f.work.initialize();f.work.maximum=1;f.work.setPrompt('Create one sample');await f.work.run();assert(f.work.canContinue);
+ let release,entered=false;const gate=new Promise(resolve=>{release=resolve;}),save=f.options.storage.save;f.options.storage.save=async value=>{entered=true;await gate;await save(value);};f.work.maximum='none';const continuing=f.work.continueTask();while(!entered)await new Promise(r=>setTimeout(r,1));f.work.stop();release();await continuing;
+ assert.equal(f.calls(),1);assert.equal(f.work.canContinue,false);assert.equal(f.work.busy,false);assert.match(f.work.message,/Stopped/);
+});
+test('no-count and custom settings restore locally; full chat archive is separate from bounded previews',async()=>{
+ const f=fixture(),archives=new Map();f.options.storage.load=async()=>({maximum:'none',prompt:'Saved draft',result:'Existing answer',lastRequest:'Earlier question'});
+ f.options.storage.saveChat=async turn=>archives.set(turn.id,structuredClone(turn));f.options.storage.loadChat=async id=>structuredClone(archives.get(id));
+ await f.work.initialize();assert.equal(f.work.maximum,'none');assert.equal(f.keyReads(),0);assert.equal(f.work.chat.length,1);
+ const turn=f.work.chat[0];turn.answer='x'.repeat(50000);await f.options.storage.saveChat(turn);await f.work.persist();assert.equal(f.saved().chat[0].answer.length,16000);assert.equal(f.saved().chat[0].answerTruncated,true);assert.equal(archives.get(turn.id).answer.length,50000);
+ turn.answer='preview';turn.answerTruncated=true;await f.work.loadFullChat(turn.id);assert.equal(f.work.chat[0].answer.length,50000);assert.equal(f.calls(),0);
+});
+test('saved token/model usage survives reload and resaving without granting continuation authority',async()=>{
+ const f=fixture();f.options.storage.load=async()=>({result:'Saved answer',lastRequest:'Question',maximum:'none',taskUsage:{requests:12,state:'paused',model:'gpt-6-luna',usage:{input:100,output:40,reasoning:12}}});await f.work.initialize();
+ assert.equal(f.work.task.requests,12);assert.equal(f.work.task.modelId,'gpt-6-luna');assert.deepEqual(f.work.task.usage,{input:100,output:40,reasoning:12});assert.equal(f.work.canContinue,false);assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);await f.work.persist();assert.equal(f.saved().taskUsage.usage.output,40);assert.equal(f.saved().taskUsage.model,'gpt-6-luna');
 });

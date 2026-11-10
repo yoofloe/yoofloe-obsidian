@@ -7,9 +7,11 @@ import type { CalendarSession } from "./session";
 import type { DeliveryV3 } from "./protocol";
 import { planQuestion, QUERY_AREAS, type QueryArea, type QueryPeriod } from "./question-query";
 import { buildQuestionInput } from "./question-input";
+import { requestLimit, customRequestLimit, type RequestLimit } from "./request-limit";
+import { CHAT_HISTORY_LIMIT, chatPreview, readChat, type ChatTurn } from "./chat-history";
 
 export interface WorkspaceSource { path: string; selection?: { from: number; to: number }; selectionVersion?: string }
-export interface WorkspaceStorage { load(): Promise<unknown>; save(value: unknown): Promise<void>; history(): Promise<WorkJournal[]> }
+export interface WorkspaceStorage { load(): Promise<unknown>; save(value: unknown): Promise<void>; history(): Promise<WorkJournal[]>; saveChat?(turn: ChatTurn): Promise<void>; loadChat?(id: string): Promise<ChatTurn> }
 /** One vault-owned controller. Views only subscribe; hiding one never discards paid work. */
 export class AiWorkspace {
   prompt = "";
@@ -20,7 +22,8 @@ export class AiWorkspace {
   writeScope: WorkScope = "current";
   outputFolder = "";
   excluded = "";
-  maximum = 4;
+  maximum: RequestLimit = 4;
+  customMaximum: string | null = null;
   model: AiModelOptions = { model: "" };
   configured = false;
   busy = false;
@@ -31,6 +34,8 @@ export class AiWorkspace {
   agent: VaultAgent | null = null;
   history: WorkJournal[] = [];
   previous: { request: string; answer: string }[] = [];
+  chat: ChatTurn[] = [];
+  private activeChatId: string | null = null;
   calendarQuestion = "";
   area: QueryArea | "auto" = "auto";
   period: QueryPeriod | "auto" = "auto";
@@ -54,6 +59,13 @@ export class AiWorkspace {
   get result() { return this.task?.text ?? ""; }
   get canStop() { return this.busy && this.running && !this.stopRequested; }
   get stopping() { return this.busy && this.stopRequested; }
+  get canContinue() { return this.current && !!this.task?.canResume && !!this.agent; }
+  get settingsLocked() { return this.busy || this.canContinue; }
+  get limitProblem(): string {
+    if (this.customMaximum !== null && customRequestLimit(this.customMaximum) === null) return "Enter a positive whole number, or choose no request-count limit.";
+    try { requestLimit(this.maximum); return ""; } catch { return "Choose a positive whole number or no request-count limit."; }
+  }
+  get canResumeWithLimit() { return this.canContinue && !this.limitProblem && (this.maximum === "none" || this.maximum > (this.task?.requests ?? 0)); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   changed(): void { if (this.current) for (const listener of this.listeners) listener(); }
   async initialize(): Promise<void> {
@@ -79,9 +91,30 @@ export class AiWorkspace {
         for (const key of ["readScope", "writeScope"] as const) if (["current", "folder", "vault"].includes(String(saved[key]))) this[key] = saved[key] as WorkScope;
         if (typeof saved.outputFolder === "string") this.outputFolder = saved.outputFolder.slice(0, 500);
         if (typeof saved.excluded === "string") this.excluded = saved.excluded.slice(0, 4000);
-        if (typeof saved.maximum === "number" && saved.maximum >= 1 && saved.maximum <= 10 && Number.isInteger(saved.maximum)) this.maximum = saved.maximum;
+        try { if (saved.maximum !== undefined) this.maximum = requestLimit(saved.maximum); } catch { this.message = "The saved request limit was invalid. The default of 4 was restored locally."; }
+        if (typeof saved.customMaximum === "string") { this.customMaximum = saved.customMaximum.slice(0, 32); const count = customRequestLimit(this.customMaximum); if (count !== null) this.maximum = count; }
         if (Array.isArray(saved.previous)) this.previous = saved.previous.filter((v): v is { request: string; answer: string } => !!v && typeof v === "object" && typeof (v as Record<string, unknown>).request === "string" && typeof (v as Record<string, unknown>).answer === "string").slice(-2).map(v => ({ request: v.request.slice(0, 8000), answer: v.answer.slice(0, 12000) }));
         if (typeof saved.result === "string" && saved.result.length <= 4 * 1024 * 1024) { this.task = this.createTask({ execute: () => Promise.reject(Error("Start a new task first.")) }); this.task.text = saved.result; }
+        if (saved.taskUsage && typeof saved.taskUsage === "object") {
+          const summary = saved.taskUsage as Record<string, unknown>;
+          if (typeof summary.requests === "number" && Number.isSafeInteger(summary.requests) && summary.requests > 0) {
+            if (!this.task) this.task = this.createTask({ execute: () => Promise.reject(Error("Start a new task first.")) });
+            this.task.restoreSummary({ requests: summary.requests, model: summary.model, usage: summary.usage });
+            this.task.events.push({ kind: "status", text: `Saved task · ${summary.requests} request(s). No request resumed automatically.` });
+            if (summary.state === "paused" || summary.state === "running") this.message = "The previous task ended when the vault session closed. Saved answers and completed changes are kept. Start a focused follow-up; no request resumed automatically.";
+          }
+        }
+        if (Array.isArray(saved.chat)) this.chat = saved.chat.map(readChat).filter((turn): turn is ChatTurn => !!turn).slice(-CHAT_HISTORY_LIMIT).map(turn => ({ ...turn, status: turn.status === "running" || turn.status === "paused" ? "stopped" : turn.status }));
+        if (!this.chat.length) {
+          const restored = [...this.previous];
+          if (this.result && !restored.some(turn => turn.request === this.lastRequest && turn.answer === this.result)) restored.push({ request: this.lastRequest, answer: this.result });
+          for (const turn of restored) {
+            const usage = saved.taskUsage && typeof saved.taskUsage === "object" ? saved.taskUsage as Record<string, unknown> : {};
+            const latest = turn.answer === this.result && turn.request === this.lastRequest;
+            const record: ChatTurn = { id: crypto.randomUUID(), request: turn.request, answer: turn.answer, startedAt: null, sourcePath: latest ? this.source?.path ?? "" : "", model: latest ? this.task?.modelId ?? "" : "", status: latest && (usage.state === "paused" || usage.state === "running") ? "stopped" : "completed", requests: latest ? this.task?.requests ?? 0 : 0, inputTokens: latest ? this.task?.usage.input ?? 0 : 0, outputTokens: latest ? this.task?.usage.output ?? 0 : 0, actions: [] };
+            this.chat.push(record); await this.options.storage.saveChat?.(record);
+          }
+        }
       }
       this.history = await this.options.storage.history();
       await this.refreshSettings();
@@ -95,12 +128,12 @@ export class AiWorkspace {
   }
   bind(source: WorkspaceSource | null, force = false): void {
     if (!this.current) return;
-    if ((this.busy || this.result || this.prompt.trim()) && !force) { if (source?.path !== this.source?.path) this.nextSource = source; this.changed(); return; }
+    if ((this.busy || this.canContinue || this.result || this.prompt.trim()) && !force) { if (source?.path !== this.source?.path) this.nextSource = source; this.changed(); return; }
     this.source = source; this.nextSource = null; this.outputFolder = source?.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
     this.preview = ""; this.changed();
   }
-  setPrompt(value: string): void { if (!this.busy) { this.prompt = value; this.preview = ""; } }
-  async setModel(model: AiModelOptions): Promise<void> { if (this.busy) return; try { await this.options.preferences.save(model, "openai"); this.model = model; } catch { this.message = "Model settings could not be saved. No request was sent."; } this.changed(); }
+  setPrompt(value: string): void { if (!this.settingsLocked) { this.prompt = value; this.preview = ""; } }
+  async setModel(model: AiModelOptions): Promise<void> { if (this.settingsLocked) return; try { await this.options.preferences.save(model, "openai"); this.model = model; } catch { this.message = "Model settings could not be saved. No request was sent."; } this.changed(); }
   private policy(): TaskPolicy {
     const folder = this.outputFolder.trim().replace(/\/$/, ""), excluded = this.excluded.split("\n").map(s => s.trim()).filter(Boolean);
     if (folder) vaultPath(folder, true); for (const path of excluded) vaultPath(path, true);
@@ -126,13 +159,15 @@ export class AiWorkspace {
     safeOutbound(input); return input;
   }
   async review(): Promise<void> {
-    if (this.busy || !this.current) return;
+    if (this.settingsLocked || !this.current) return;
     try { const agent = new VaultAgent(this.options.host(() => this.current), this.policy(), () => this.current); this.preview = await this.prepare(agent); this.message = "Initial data below. During this task, relevant excerpts within the data scope may also be sent to OpenAI. Settings and excluded folders cannot be read."; }
     catch (error) { this.message = error instanceof Error ? error.message : "The data preview could not be prepared."; }
     this.changed();
   }
   async run(): Promise<void> {
+    if (this.canContinue) { await this.continueTask(); return; }
     if (!this.current || this.busy || !this.prompt.trim()) return;
+    if (this.limitProblem) { this.message = this.limitProblem; this.changed(); return; }
     const epoch = ++this.runEpoch;
     this.stopRequested = false; this.busy = true; this.running = true; this.preview = ""; this.message = "Preparing this task locally. Stop prevents it from starting."; this.changed();
     let task: AgentTask | null = null;
@@ -144,54 +179,107 @@ export class AiWorkspace {
       await this.persist(); // Draft is recoverable before the first billable request.
       if (!current()) return;
       task = this.createTask(agent, () => this.current && epoch === this.runEpoch); this.task = task; this.agent = agent; this.lastRequest = this.prompt;
-      const unsubscribe = task.subscribe(() => { this.changed(); });
+      this.activeChatId = crypto.randomUUID(); const turn: ChatTurn = { id: this.activeChatId, request: this.prompt.trim(), answer: "", startedAt: Date.now(), model: this.model.model, status: "running", requests: 0, inputTokens: 0, outputTokens: 0, actions: [] }; this.chat = [...this.chat, turn].slice(-CHAT_HISTORY_LIMIT);
+      const unsubscribe = this.watchTask(task);
       try { await task.run(input, { ...this.model }, this.mode, this.maximum); }
       finally { unsubscribe(); }
       if (!this.current) return;
-      this.message = task.message;
-      if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
-      if (this.source && agent.policy.selection) { this.source.selection = { ...agent.policy.selection }; this.source.selectionVersion = agent.policy.selectionVersion; }
-      if (task.text || agent.journal.operations.some(op => op.status === "done")) this.prompt = "";
-      if (agent.journal.operations.length) {
-        agent.journal.status = task.stopped || task.events.some(e => e.kind === "blocked") ? "interrupted" : "complete";
-        await this.options.host(() => this.current).persist(agent.journal);
-        this.rememberJournal(agent.journal);
-      }
+      await this.collectTask(task, agent);
     } catch (error) { this.message = epoch !== this.runEpoch ? "Stopped. No further request or file action was started." : error instanceof Error ? error.message : "The task could not finish. No automatic retry was made."; }
     finally {
-      this.busy = false; this.running = false;
+      this.running = false;
       if (this.stopRequested) this.message = "Stopped. Completed work and any returned answer are kept; no further request or file action was started.";
-      if (this.current) { await this.persist().catch(() => { this.message += " Local draft saving could not be confirmed."; }); this.changed(); }
+      if (this.current) { this.changed(); await this.persist().catch(() => { this.message += " Local draft saving could not be confirmed."; }); }
+      this.busy = false; if (this.current) this.changed();
     }
   }
-  stop(): void { if (!this.canStop) return; this.stopRequested = true; this.runEpoch++; if (this.task?.busy) this.task.stop(); this.message = "Stopping. Completed work is kept. An already-sent request may still finish and incur charges; no further request or file action will start."; this.changed(); }
+  private watchTask(task: AgentTask): () => void {
+    return task.subscribe(() => {
+      if (this.agent) this.captureChat(task, this.agent);
+      if (task.events.at(-1)?.kind === "response") void this.persist().catch(() => { this.message = "Local answer saving could not be confirmed. Keep this vault session open."; this.changed(); });
+      this.changed();
+    });
+  }
+  private async collectTask(task: AgentTask, agent: VaultAgent): Promise<void> {
+    this.message = task.message;
+    if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
+    if (this.source && agent.policy.selection) { this.source.selection = { ...agent.policy.selection }; this.source.selectionVersion = agent.policy.selectionVersion; }
+    if (task.state !== "paused" && (task.text || agent.operations.some(op => op.status === "done"))) this.prompt = "";
+    for (const journal of agent.journals) if (journal.operations.length) {
+      journal.status = task.state !== "completed" || task.events.some(e => e.kind === "blocked") ? "interrupted" : "complete";
+      await this.options.host(() => this.current).persist(journal); this.rememberJournal(journal);
+    }
+    this.captureChat(task, agent);
+    const turn = this.chat.find(item => item.id === this.activeChatId); if (turn) await this.archiveChat(turn);
+  }
+  private captureChat(task: AgentTask, agent: VaultAgent): void {
+    const turn = this.chat.find(item => item.id === this.activeChatId); if (!turn) return;
+    turn.answer = task.text; turn.status = task.state === "idle" ? "running" : task.state;
+    turn.actionsKnown = true; turn.sourcePath = agent.policy.sourcePath ?? "";
+    turn.requests = task.requests; turn.inputTokens = task.usage.input; turn.outputTokens = task.usage.output;
+    const actions = agent.operations.filter(op => op.status === "done"); turn.actionTotal = actions.length;
+    turn.actions = actions.slice(-100).map(op => ({ kind: op.kind, path: op.path, ...(op.target ? { target: op.target } : {}) }));
+    if (task.events.at(-1)?.kind === "response") void this.archiveChat(turn);
+  }
+  private async archiveChat(turn: ChatTurn): Promise<void> {
+    try { await this.options.storage.saveChat?.(turn); }
+    catch { this.message = "Full chat saving could not be confirmed. The current answer is kept; copy it before starting another task."; }
+  }
+  async loadFullChat(id: string): Promise<void> {
+    if (!this.current || !this.options.storage.loadChat) return;
+    try { const full = await this.options.storage.loadChat(id); if (!this.current) return; if (id !== this.activeChatId && (full.status === "running" || full.status === "paused")) full.status = "stopped"; const index = this.chat.findIndex(turn => turn.id === id); if (index >= 0) this.chat[index] = full; }
+    catch { this.message = "The full local chat record is unavailable. Its saved preview is kept."; }
+    this.changed();
+  }
+  async continueTask(): Promise<void> {
+    if (this.busy || !this.canContinue || !this.task || !this.agent) return;
+    if (!this.canResumeWithLimit) { this.message = this.limitProblem || "Choose a total limit above requests already used, or no request-count limit."; this.changed(); return; }
+    const task = this.task, agent = this.agent;
+    this.busy = true; this.running = true; this.stopRequested = false; this.message = "Continuing the original task with its original model and scopes."; this.changed();
+    const unsubscribe = this.watchTask(task);
+    try { await this.persist(); if (this.stopRequested || !this.current) return; await task.resume(this.maximum); if (this.current) await this.collectTask(task, agent); }
+    catch (error) { this.message = error instanceof Error ? error.message : "This task could not continue. No retry was made."; }
+    finally { unsubscribe(); this.running = false; if (this.stopRequested) this.message = "Stopped. Completed work and returned answers are kept."; if (this.current) { this.changed(); await this.persist().catch(() => {}); } this.busy = false; if (this.current) this.changed(); }
+  }
+  async finishHere(): Promise<void> {
+    if (this.busy || !this.canContinue) return; this.task?.finish(); this.message = this.task?.message ?? "Finished here.";
+    if (this.task && this.agent) this.captureChat(this.task, this.agent);
+    const turn = this.chat.find(item => item.id === this.activeChatId); if (turn) { turn.status = "stopped"; await this.archiveChat(turn); }
+    await this.persist(); this.changed();
+  }
+  stop(): void { if (!this.canStop) return; this.stopRequested = true; this.runEpoch++; this.task?.stop(); this.message = "Stopping. Completed work is kept. An already-sent request may still finish and incur charges; no further request or file action will start."; this.changed(); }
   async newTask(source: WorkspaceSource | null = this.nextSource ?? this.source): Promise<void> {
     if (this.busy) return;
+    if (this.canContinue) await this.finishHere();
     this.rememberLast();
-    this.prompt = ""; this.task = null; this.agent = null; this.message = "Ready. No data is sent until you start."; this.bind(source, true); await this.persist(); this.changed();
+    this.prompt = ""; this.task = null; this.agent = null; this.activeChatId = null; this.message = "Ready. No data is sent until you start."; this.bind(source, true); await this.persist(); this.changed();
   }
   async undo(journal: WorkJournal): Promise<void> {
-    if (!this.current || this.busy) return; this.busy = true; this.changed();
-    try { const agent = new VaultAgent(this.options.host(() => this.current), this.policy(), () => this.current); const result = await agent.undo(journal); this.message = `Undo: ${result.restored} action(s) restored; ${result.kept} kept because recovery could not safely be confirmed. Newer user edits are preserved.`; }
+    if (!this.current || this.settingsLocked) return; this.busy = true; this.changed();
+    try { const agent = new VaultAgent(this.options.host(() => this.current), this.policy(), () => this.current); const result = await agent.undo(journal); if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath; this.message = `Undo: ${result.restored} action(s) restored; ${result.kept} kept because recovery could not safely be confirmed. Newer user edits are preserved.`; await this.persist(); }
     catch { this.message = "Recovery could not be confirmed. Notes and backups were kept."; }
     finally { this.busy = false; this.changed(); }
   }
   async confirmTrash(): Promise<void> {
-    if (!this.agent || this.busy || !this.current) return; this.busy = true; this.changed();
+    if (!this.agent || this.settingsLocked || !this.current) return; this.busy = true; this.changed();
     let failed = false;
     try { await this.agent.confirmTrash(); this.message = "Selected notes moved to Obsidian Trash. Original backups and Undo are available."; }
     catch (error) { failed = true; this.message = error instanceof Error ? error.message : "Trash could not be confirmed. No retry was made."; }
     finally {
-      const journal = this.agent.journal;
-      if (this.current && journal.operations.length) {
-        journal.status = failed ? "interrupted" : "complete"; this.rememberJournal(journal);
-        await this.options.host(() => this.current).persist(journal).catch(() => { this.message += " The recovery record could not be refreshed; original backups are kept."; });
+      if (this.current) {
+        for (const journal of this.agent.journals) if (journal.operations.length) {
+          journal.status = failed ? "interrupted" : "complete"; this.rememberJournal(journal);
+          await this.options.host(() => this.current).persist(journal).catch(() => { this.message += " The recovery record could not be refreshed; original backups are kept."; });
+        }
+        if (this.task) this.captureChat(this.task, this.agent);
+        const turn = this.chat.find(item => item.id === this.activeChatId); if (turn) await this.archiveChat(turn);
+        await this.persist();
       }
       this.busy = false; this.changed();
     }
   }
   async findCalendar(): Promise<string | null> {
-    if (!this.current || this.busy || !this.options.calendar || this.requestId) return null;
+    if (!this.current || this.settingsLocked || !this.options.calendar || this.requestId) return null;
     this.busy = true; this.changed();
     try {
       const question = this.calendarQuestion.trim() || this.prompt.trim(); if (!question) throw Error("Describe the Calendar information needed for this task."); this.calendarQuestion = question;
@@ -204,16 +292,19 @@ export class AiWorkspace {
     finally { this.busy = false; this.changed(); }
   }
   async receiveCalendar(id: string): Promise<void> {
-    if (!this.current || this.busy || !this.calendar || this.delivery) return;
+    if (!this.current || this.settingsLocked || !this.calendar || this.delivery) return;
     this.busy = true;
     try { const reply = await this.calendar.receive(id); if (!this.current || reply.version !== 3) return; this.delivery = reply; this.message = `${reply.records.length} Calendar excerpt(s) added. Local lookup made no AI request. Review before sending to OpenAI.`; }
     catch { this.message = "No verified Calendar reply yet. Approve the local search in Calendar, then check again."; }
     finally { this.busy = false; this.changed(); }
   }
-  async removeCalendar(): Promise<void> { if (this.busy) return; await this.calendar?.dispose(); this.calendar = null; this.delivery = null; this.preview = ""; this.changed(); }
+  async removeCalendar(): Promise<void> { if (this.settingsLocked) return; await this.calendar?.dispose(); this.calendar = null; this.delivery = null; this.preview = ""; this.changed(); }
   persist(): Promise<void> {
     const value = { prompt: this.prompt, lastRequest: this.lastRequest, source: this.source?.path ?? null, selection: this.source?.selection, selectionVersion: this.source?.selectionVersion, mode: this.mode, readScope: this.readScope, writeScope: this.writeScope,
-      outputFolder: this.outputFolder, excluded: this.excluded, maximum: this.maximum, result: this.result, previous: this.previous };
+      outputFolder: this.outputFolder, excluded: this.excluded, maximum: this.maximum, result: this.result, previous: this.previous,
+      ...(this.customMaximum !== null ? { customMaximum: this.customMaximum } : {}),
+      ...(this.chat.length ? { chat: this.chat.slice(-CHAT_HISTORY_LIMIT).map(chatPreview) } : {}),
+      ...(this.task && this.task.requests > 0 ? { taskUsage: { requests: this.task.requests, state: this.task.state, model: this.task.modelId, usage: { ...this.task.usage } } } : {}) };
     const next = this.saveQueue.then(async () => { if (!this.current) return; await this.options.storage.save(value); }); this.saveQueue = next.catch(() => {}); return next;
   }
   dispose(): void { this.task?.stop(); this.alive = false; this.listeners.clear(); void this.calendar?.dispose(); }

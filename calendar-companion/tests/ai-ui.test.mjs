@@ -11,13 +11,16 @@ import { AiSession } from '../dist/ai-session.js';
 const { build } = createRequire(new URL('../../package.json', import.meta.url))('esbuild');
 const bundle = await build({ absWorkingDir: fileURLToPath(new URL('../', import.meta.url)), entryPoints: ['src/ai-modals.ts'], write: false, bundle: true, format: 'cjs', platform: 'browser', external: ['obsidian'], target: 'es2022' });
 
-class Element {
+class Element extends EventTarget {
   children = []; settings = []; classList = { add() {} }; value = '';
   empty() { this.children = []; this.settings = []; }
   createEl(tag, options = {}) { const el = new Element(); el.tag = tag; el.text = options.text; this.children.push(el); return el; }
   createDiv() { return this.createEl('div'); }
   setAttribute() {}
   appendText(value) { this.children.push(Object.assign(new Element(), { text: value })); }
+  get textContent() { return this.allText(); }
+  set textContent(value) { this.text = value; this.children = []; }
+  remove() { this.text = ''; this.empty(); }
   allSettings() { return [...this.settings, ...this.children.flatMap(child => child.allSettings())]; }
   allText() { return [this.text ?? '', ...this.children.map(child => child.allText())].join('\n'); }
 }
@@ -66,9 +69,9 @@ test('settings UI loads disabled, stores and removes a synthetic key with zero t
   const f = fixture(), { OpenAiSettingsModal } = modals(); let closed = false;
   const modal = new OpenAiSettingsModal({}, f.ai, () => { closed = true; }); modal.open(); await settle();
   assert.equal(field(modal, 'Enable OpenAI for this session').value, false); assert.equal(field(modal, 'Enable OpenAI for this session').disabled, true);
-  const input = field(modal, 'No API key saved'); assert.equal(input.inputEl.type, 'password'); assert.equal(input.inputEl.value, '');
-  input.inputEl.value = 'sk-offline-fixture-only-never-real'; button(modal, 'Save key locally').fire(); await settle();
-  assert.equal(f.calls.length, 0); assert.equal(field(modal, 'API key saved locally').inputEl.value, '');
+  const input = field(modal, 'API key'); assert.equal(input.inputEl.type, 'password'); assert.equal(input.inputEl.value, '');
+  input.inputEl.value = 'sk-offline-fixture-only-never-real'; button(modal, 'Save').fire(); await settle();
+  assert.equal(f.calls.length, 0); assert.equal(field(modal, 'API key').inputEl.value, '');
   assert(modal.contentEl.allText().includes('Key saved on this device. API access is checked only when you generate.'));
   field(modal, 'Enable OpenAI for this session').fire(true); assert.equal(f.ai.session.enabled, true); assert.equal(f.calls.length, 0);
   button(modal, 'Remove saved key').fire(); await settle(); assert.equal(f.ai.session.enabled, false); assert.equal(f.calls.length, 0);
@@ -105,7 +108,7 @@ test('model dropdown offers current presets with an economical default and Custo
   assert(selector.choices.get('gpt-6-luna').includes('recommended')); assert(selector.choices.get('gpt-6-astra').includes('Higher cost'));
   assert(modal.contentEl.allText().includes('2026-11-08')); assert.equal(f.calls.length, 0);
   assert(modal.contentEl.allText().includes('No plugin output-token cap')); assert(!modal.contentEl.allSettings().some(row => row.name === 'Maximum output tokens'));
-  selector.fire('gpt-6.1-terra'); button(modal, 'Save model settings').fire(); await settle();
+  selector.fire('gpt-6.1-terra'); button(modal, 'Save').fire(); await settle();
   assert.equal((await f.ai.preferences.read()).model, 'gpt-6.1-terra'); assert.equal(f.ai.session.enabled, false); assert.equal(f.calls.length, 0); modal.close();
 });
 test('Custom preserves an existing model ID and its draft when switching presets; examples guide validation', async () => {
@@ -115,21 +118,32 @@ test('Custom preserves an existing model ID and its draft when switching presets
   assert.equal(field(modal, 'Custom model ID').placeholder, 'e.g. gpt-6-luna'); assert(modal.contentEl.allText().includes('not a chat display name or an API key'));
   field(modal, 'Custom model ID').fire('my-new-model'); field(modal, 'Model').fire('gpt-6-luna'); field(modal, 'Model').fire('__custom__');
   assert.equal(field(modal, 'Custom model ID').value, 'my-new-model');
-  field(modal, 'Custom model ID').fire(''); assert.equal(button(modal, 'Save model settings').disabled, true);
-  field(modal, 'Custom model ID').fire('GPT 6 Luna'); assert.equal(button(modal, 'Save model settings').disabled, true);
-  field(modal, 'Custom model ID').fire('sk-offline-fixture-never-real'); assert.equal(button(modal, 'Save model settings').disabled, true);
-  field(modal, 'Custom model ID').fire('ft:gpt-6-luna:fixture:custom'); assert.equal(button(modal, 'Save model settings').disabled, false);
-  button(modal, 'Save model settings').fire(); await settle(); assert.equal((await f.ai.preferences.read()).model, 'ft:gpt-6-luna:fixture:custom'); assert.equal(f.calls.length, 0); modal.close();
+  field(modal, 'Custom model ID').fire(''); assert.equal(button(modal, 'Save').disabled, true);
+  field(modal, 'Custom model ID').fire('GPT 6 Luna'); assert.equal(button(modal, 'Save').disabled, true);
+  field(modal, 'Custom model ID').fire('sk-offline-fixture-never-real'); assert.equal(button(modal, 'Save').disabled, true);
+  field(modal, 'Custom model ID').fire('ft:gpt-6-luna:fixture:custom'); assert.equal(button(modal, 'Save').disabled, false);
+  button(modal, 'Save').fire(); await settle(); assert.equal((await f.ai.preferences.read()).model, 'ft:gpt-6-luna:fixture:custom'); assert.equal(f.calls.length, 0); modal.close();
 });
-test('selecting and saving a model preserves an unsaved masked key; closing clears it', async () => {
+test('one Save commits both model and typed key, and closing clears the input', async () => {
   const f = fixture('gpt-6-luna'), { OpenAiSettingsModal } = modals();
   const modal = new OpenAiSettingsModal({}, f.ai, () => {}); modal.open(); await settle();
-  const input = field(modal, 'No API key saved'); input.inputEl.value = 'sk-unsaved-offline-fixture-only';
-  field(modal, 'Model').fire('__custom__'); assert.equal(field(modal, 'No API key saved'), input);
-  field(modal, 'Custom model ID').fire('custom-fixture-model'); button(modal, 'Save model settings').fire(); await settle();
-  const kept = field(modal, 'No API key saved').inputEl; assert.equal(kept.value, 'sk-unsaved-offline-fixture-only');
-  assert.equal(kept.type, 'password'); assert.equal(await f.ai.preferences.hasKey(), false); assert.equal(f.calls.length, 0);
+  const input = field(modal, 'API key'); input.inputEl.value = 'sk-unsaved-offline-fixture-only';
+  field(modal, 'Model').fire('__custom__'); assert.equal(field(modal, 'API key'), input);
+  field(modal, 'Custom model ID').fire('custom-fixture-model'); button(modal, 'Save').fire(); await settle();
+  const kept = field(modal, 'API key').inputEl; assert.equal(kept.value, ''); assert.equal(await f.ai.preferences.key(), 'sk-unsaved-offline-fixture-only');
+  assert.equal(kept.type, 'password'); assert.equal(await f.ai.preferences.hasKey(), true); assert.equal(f.calls.length, 0);
   modal.close(); assert.equal(kept.value, '');
+});
+test('replacement key remains pending until one Save; failed save keeps its draft and previous stored key',async()=>{
+ const f=fixture('gpt-6-luna'),{OpenAiSettingsModal}=modals();await f.ai.preferences.saveKey('sk-previous-offline-fixture-key');const modal=new OpenAiSettingsModal({},f.ai,()=>{});modal.open();await settle();
+ field(modal,'API key').fire('sk-new-offline-fixture-key');assert(modal.contentEl.allText().includes('not saved yet'));assert.equal(await f.ai.preferences.key(),'sk-previous-offline-fixture-key');
+ const save=f.ai.preferences.saveKey;f.ai.preferences.saveKey=async()=>{throw Error('Synthetic local storage failure');};button(modal,'Save').fire();await settle();
+ assert.equal(field(modal,'API key').inputEl.value,'sk-new-offline-fixture-key');assert.equal(await f.ai.preferences.key(),'sk-previous-offline-fixture-key');assert(modal.contentEl.allText().includes('Could not save locally'));
+ f.ai.preferences.saveKey=save;button(modal,'Save').fire();await settle();assert.equal(await f.ai.preferences.key(),'sk-new-offline-fixture-key');assert.equal(field(modal,'API key').inputEl.value,'');assert.equal(f.calls.length,0);modal.close();
+});
+test('Save with an empty key field keeps the existing key and Enter saves the typed replacement once',async()=>{
+ const f=fixture('gpt-6-luna'),{OpenAiSettingsModal}=modals();await f.ai.preferences.saveKey('sk-previous-offline-fixture-key');const modal=new OpenAiSettingsModal({},f.ai,()=>{});modal.open();await settle();button(modal,'Save').fire();await settle();assert.equal(await f.ai.preferences.key(),'sk-previous-offline-fixture-key');
+ const input=field(modal,'API key');input.inputEl.value='sk-enter-offline-fixture-key';const event=new Event('keydown',{cancelable:true});Object.defineProperty(event,'key',{value:'Enter'});input.inputEl.dispatchEvent(event);await settle();assert.equal(await f.ai.preferences.key(),'sk-enter-offline-fixture-key');assert.equal(field(modal,'API key').inputEl.value,'');assert.equal(f.calls.length,0);modal.close();
 });
 
 
@@ -137,24 +151,24 @@ futureGeminiTest('Gemini provider has a separate masked key, current model choic
   const f = fixture('gpt-6-luna'), { AiSettingsModal } = modals();
   await f.ai.preferences.saveKey('sk-openai-offline-fixture-only'); f.ai.session.enableForSession(true);
   const modal = new AiSettingsModal({}, f.ai, () => {}); modal.open(); await settle();
-  const openAiInput = field(modal, 'API key saved locally').inputEl; openAiInput.value = 'sk-unsaved-openai-fixture-only';
+  const openAiInput = field(modal, 'API key').inputEl; openAiInput.value = 'sk-unsaved-openai-fixture-only';
   field(modal, 'AI provider').fire('gemini'); await settle();
-  assert.equal(f.ai.session.enabled, false); assert.equal(field(modal, 'No API key saved').inputEl.value, '');
+  assert.equal(f.ai.session.enabled, false); assert.equal(field(modal, 'API key').inputEl.value, '');
   assert.equal(openAiInput.value, ''); assert.equal(field(modal, 'Enable Gemini for this session').disabled, true);
   assert.equal(field(modal, 'Model').value, 'gemini-3.5-flash-lite');
   assert.deepEqual([...field(modal, 'Model').choices.keys()], ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-4-argon', '__custom__']);
   assert(modal.contentEl.allText().includes('Google may use free-tier API content'));
   field(modal, 'Model').fire('__custom__'); field(modal, 'Custom model ID').fire('gemini-account-custom');
-  const geminiInput = field(modal, 'No API key saved').inputEl; geminiInput.value = 'AIza-unsaved-gemini-offline-fixture';
+  const geminiInput = field(modal, 'API key').inputEl; geminiInput.value = 'AIza-unsaved-gemini-offline-fixture';
   field(modal, 'AI provider').fire('openai'); await settle();
-  assert.equal(geminiInput.value, ''); assert.equal(field(modal, 'API key saved locally').inputEl.value, 'sk-unsaved-openai-fixture-only');
+  assert.equal(geminiInput.value, ''); assert.equal(field(modal, 'API key').inputEl.value, 'sk-unsaved-openai-fixture-only');
   field(modal, 'AI provider').fire('gemini'); await settle();
   assert.equal(field(modal, 'Custom model ID').value, 'gemini-account-custom');
-  assert.equal(field(modal, 'No API key saved').inputEl.value, 'AIza-unsaved-gemini-offline-fixture');
-  button(modal, 'Save model settings').fire(); await settle();
+  assert.equal(field(modal, 'API key').inputEl.value, 'AIza-unsaved-gemini-offline-fixture');
+  button(modal, 'Save').fire(); await settle();
   assert.equal((await f.ai.preferences.read('gemini')).model, 'gemini-account-custom');
   assert.equal(await f.ai.preferences.hasKey('gemini'), false); assert.equal(f.calls.length, 0);
-  const finalInput = field(modal, 'No API key saved').inputEl; modal.close(); assert.equal(finalInput.value, '');
+  const finalInput = field(modal, 'API key').inputEl; modal.close(); assert.equal(finalInput.value, '');
 });
 
 futureGeminiTest('Gemini draft review names Google and uses the Gemini key only after explicit approval', async () => {

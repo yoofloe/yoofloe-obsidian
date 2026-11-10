@@ -8,6 +8,7 @@ import { keepModalInputsVisible } from "./modal-inputs";
 import { recordLabel } from "./record-types";
 import { EFFORT_LABELS, resolveEffort, supportedEfforts, type EffortSetting } from "./effort";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, PRIVACY_URL, OPENAI_DATA_URL } from "./privacy-copy";
+import { validateOpenAiKey } from "./openai";
 
 export interface AiContext { session: AiSession; preferences: AiPreferences; current(): boolean }
 
@@ -26,6 +27,8 @@ export class AiSettingsModal extends Modal {
   private readonly modelDrafts = new Map<AiProvider, { options: AiModelOptions; modelChoice: string; customModel: string }>();
   private saveModelButton: ButtonComponent | null = null;
   private keyInput: HTMLInputElement | null = null;
+  private keyStatus: HTMLElement | null = null;
+  private saveStatus: HTMLElement | null = null;
   private stopKeyboard: (() => void) | null = null;
   constructor(app: App, private readonly ai: AiContext, private readonly closed: () => void, private readonly manualDrafts = true) { super(app); }
   private current = () => this.alive && this.ai.current();
@@ -71,6 +74,16 @@ export class AiSettingsModal extends Modal {
     finally { this.busy = false; if (this.current()) this.render(); }
   }
   private updateModelSave(): void { this.saveModelButton?.setDisabled(this.busy || !isAiModelId(this.provider, this.options.model)); }
+  private markDirty(): void { this.message = "Unsaved changes. Choose Save to store your settings locally."; if (this.saveStatus) this.saveStatus.textContent = this.message; }
+  private async saveSettings(): Promise<void> {
+    if (!this.current() || this.busy) return;
+    const value = this.keyInput?.value ?? "", provider = this.provider, options = { ...this.options };
+    if (value.trim()) {
+      try { validateOpenAiKey(value); }
+      catch { this.message = "The new key format is invalid. Nothing was saved; the entered key is kept for correction. No API request was sent."; this.keyDrafts.set(provider, value); this.render(); return; }
+    }
+    await this.change(async () => { await this.ai.preferences.save(options, provider); if (value.trim()) await this.ai.preferences.saveKey(value, provider); }, !!value.trim());
+  }
   private modelDetails(el: HTMLElement): void {
     el.empty(); const preset = findAiModel(this.provider, this.options.model), example = modelCatalog(this.provider).defaultModel;
     if (this.modelChoice === CUSTOM_MODEL_CHOICE) {
@@ -94,7 +107,7 @@ export class AiSettingsModal extends Modal {
       for (const effort of supportedEfforts(this.options.model)) dropdown.addOption(effort, EFFORT_LABELS[effort]);
       dropdown.setValue(this.options.effort ?? resolveEffort(this.options.model) ?? "default").setDisabled(this.busy);
       dropdown.selectEl.setAttribute("aria-label", "Thinking depth");
-      dropdown.onChange(value => { this.options.effort = value as EffortSetting; });
+      dropdown.onChange(value => { this.options.effort = value as EffortSetting; this.markDirty(); });
     });
     this.updateModelSave();
   }
@@ -115,7 +128,7 @@ export class AiSettingsModal extends Modal {
     privacy.createEl("a", { text: "Privacy and data controls ↗", href: PRIVACY_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
     privacy.createEl("p").createEl("a", { text: "OpenAI data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
     el.createEl("p", { text: "Settings, saving a key and previewing data make no API requests.", cls: "calendar-companion-hint" });
-    if (this.message) el.createEl("p", { text: this.message, cls: "calendar-companion-status", attr: { role: "status" } });
+    this.saveStatus = el.createEl("p", { text: this.message, cls: "calendar-companion-status", attr: { role: "status", "aria-live": "polite" } });
     const modelSetting = new Setting(el).setName("Model").setDesc("Not sure? Start with economy (recommended). Selecting a model sends no API request.");
     const details = el.createDiv({ cls: "calendar-companion-model-details" });
     modelSetting.addDropdown(dropdown => {
@@ -124,7 +137,7 @@ export class AiSettingsModal extends Modal {
       dropdown.selectEl.setAttribute("aria-label", `${name} model`);
       dropdown.onChange(value => {
         if (value !== CUSTOM_MODEL_CHOICE && !findAiModel(this.provider, value)) return;
-        this.modelChoice = value; this.options.model = value === CUSTOM_MODEL_CHOICE ? this.customModel.trim() : value; delete this.options.effort; this.modelDetails(details);
+        this.modelChoice = value; this.options.model = value === CUSTOM_MODEL_CHOICE ? this.customModel.trim() : value; delete this.options.effort; this.modelDetails(details); this.markDirty();
       });
     });
     this.modelDetails(details);
@@ -133,13 +146,18 @@ export class AiSettingsModal extends Modal {
     links.createEl("a", { text: "Models", href: catalog.url, attr: { target: "_blank", rel: "noopener noreferrer" } }); links.appendText(" · ");
     links.createEl("a", { text: "Pricing", href: catalog.pricing, attr: { target: "_blank", rel: "noopener noreferrer" } });
     el.createEl("p", { text: `Response length: model default. No plugin output-token cap is sent. ${name}'s own limits still apply; longer responses and thinking tokens can cost more.`, cls: "calendar-companion-hint" });
-    new Setting(el).addButton(button => { this.saveModelButton = button; button.setButtonText("Save model settings").onClick(() => void this.change(() => this.ai.preferences.save({ ...this.options }, this.provider))); }); this.updateModelSave();
-    new Setting(el).setName(this.configured ? "API key saved locally" : "No API key saved").setDesc(`${name} only. Stored through Obsidian secret storage, outside this plugin's vault files. Other trusted plugins share Obsidian's trust boundary.`)
-      .addText(input => { this.keyInput = input.inputEl; input.inputEl.type = "password"; input.inputEl.autocomplete = "off"; input.inputEl.setAttribute("aria-label", `${name} API key`); input.setPlaceholder("Your own API key").setValue(this.keyDrafts.get(this.provider) ?? "").setDisabled(this.busy); });
-    if (this.keyMessage || this.configured) el.createEl("p", { text: this.keyMessage || "A key is stored on this device. API access is checked only when you generate.", cls: "calendar-companion-status", attr: { role: "status", "aria-live": "polite" } });
+    new Setting(el).setName("API key").setDesc(`${name} only. Stored through Obsidian secret storage, outside this plugin's vault files. Save stores both your model settings and any new key. Leaving this field empty keeps the saved key.`)
+      .addText(input => {
+        this.keyInput = input.inputEl; input.inputEl.type = "password"; input.inputEl.autocomplete = "off"; input.inputEl.setAttribute("aria-label", `${name} API key`);
+        input.setPlaceholder(this.configured ? "Enter a replacement key, or keep empty" : "Your own API key").setValue(this.keyDrafts.get(this.provider) ?? "").setDisabled(this.busy);
+        input.onChange(value => { this.keyDrafts.set(this.provider, value); this.markDirty(); this.keyMessage = value.trim() ? "New key entered · not saved yet. Choose Save to confirm it locally." : this.configured ? "The existing saved key is kept." : "No key is saved yet."; if (this.keyStatus) this.keyStatus.textContent = this.keyMessage; });
+        input.inputEl.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); void this.saveSettings(); } });
+      });
+    this.keyStatus = el.createEl("p", { text: this.keyMessage || (this.configured ? "Key saved on this device. API access is checked only when you generate." : "No key saved yet. Save will store the model settings and the entered key together."), cls: "calendar-companion-status", attr: { role: "status", "aria-live": "polite" } });
     new Setting(el)
-      .addButton(button => button.setButtonText("Save key locally").setDisabled(this.busy).onClick(() => { const value = this.keyInput?.value ?? ""; void this.change(() => this.ai.preferences.saveKey(value, this.provider), true); }))
+      .addButton(button => { this.saveModelButton = button; button.setButtonText("Save").setCta().onClick(() => void this.saveSettings()); })
       .addButton(button => button.setButtonText("Remove saved key").setDisabled(this.busy || !this.configured).onClick(() => void this.change(() => this.ai.preferences.clearKey(this.provider), true)));
+    this.updateModelSave();
     if (this.manualDrafts) new Setting(el).setName(`Enable ${name} for this session`).setDesc("For advanced manual-import drafts only. The Yoofloe AI workspace starts with its send button. Disabling cannot recall an already-sent request.")
       .addToggle(toggle => toggle.setValue(this.ai.session.enabled).setDisabled(this.busy || !this.configured).onChange(value => this.ai.session.enableForSession(value)));
   }
