@@ -154,9 +154,9 @@ export class YoofloeAiView extends ItemView {
       }
     }
     if (w.preview) { const preview = this.details(scroll, "preview", "Data to be sent · initial preview"); preview.open = true; preview.createEl("pre", { text: w.preview }); }
-    const compose = el.createDiv({ cls: "y-ai-compose" });
-    const prompt = compose.createEl("textarea", { text: w.prompt, attr: { rows: "3", "aria-label": "Ask Yoofloe AI", placeholder: w.source ? "What should we do with your notes?" : "Describe a document to create…" } }); prompt.disabled = w.busy; prompt.maxLength = 32000;
     const dock = el.createDiv({ cls: "y-ai-dock" });
+    const compose = dock.createDiv({ cls: "y-ai-compose" });
+    const prompt = compose.createEl("textarea", { text: w.prompt, attr: { rows: "3", "aria-label": "Ask Yoofloe AI", placeholder: w.source ? "What should we do with your notes?" : "Describe a document to create…" } }); prompt.disabled = w.busy; prompt.maxLength = 32000;
     const privacy = dock.createEl("p", { cls: "y-ai-hint" });
     privacy.createSpan({ text: `OpenAI · API charges · max ${w.maximum} request(s). ${w.mode === "ask" ? "Read only" : `Edits: ${SCOPE_LABELS[w.writeScope]}`}.`, cls: "y-ai-privacy-full" });
     privacy.createSpan({ text: `OpenAI · paid · ${w.mode === "ask" ? "read only" : `${w.mode === "organize" ? "organize" : "edit"} ${w.writeScope === "current" ? "note" : w.writeScope}`} · ${w.maximum} calls max`, cls: "y-ai-privacy-short" });

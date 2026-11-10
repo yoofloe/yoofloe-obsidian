@@ -143,6 +143,7 @@
 .yoofloe-ai .y-ai-compose { flex-shrink: 1; min-height: 0; max-height: 30%; padding: 0.4rem 0.8rem 0.2rem; overflow: auto; }
 .yoofloe-ai .y-ai-compose textarea { resize: none; min-height: 3.4rem; max-height: 8rem; }
 .yoofloe-ai .y-ai-dock { flex-shrink: 0; padding: 0.25rem 0.8rem max(0.65rem, env(safe-area-inset-bottom)); border-top: 1px solid var(--background-modifier-border); background: var(--background-primary); }
+.yoofloe-ai .y-ai-dock .y-ai-compose { max-height: none; padding: 0.15rem 0 0.2rem; }
 .yoofloe-ai .y-ai-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-block: 0.35rem; }
 .yoofloe-ai button { min-height: 36px; height: auto; padding: 0.45rem 0.65rem; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .yoofloe-ai .y-ai-dock .mod-cta, .yoofloe-ai .y-ai-dock .mod-warning { flex: 1; }
@@ -175,9 +176,8 @@
 .yoofloe-ai.y-ai-keyboard .y-ai-compose textarea { height: 3rem; min-height: 3rem; }
 .yoofloe-ai.y-ai-keyboard.y-ai-tiny .y-ai-compose textarea { height: max(40px, calc(1.2em + 0.5rem)); min-height: max(40px, calc(1.2em + 0.5rem)); }
 .yoofloe-ai.y-ai-keyboard.y-ai-editing-scope .y-ai-compose { display: none; }
-.yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) { display: grid; grid-template-columns: minmax(0, 1fr) max-content; grid-template-rows: auto auto; align-content: start; }
 .yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-compose { grid-column: 1; grid-row: 2; align-self: start; }
-.yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-dock { display: contents; }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-dock { display: grid; grid-template-columns: minmax(0, 1fr) max-content; grid-template-rows: auto auto; align-content: start; gap: 0; padding: 0; border-top: 0; }
 .yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-dock .y-ai-hint { grid-column: 1 / -1; grid-row: 1; padding: 1px 8px; line-height: 1.05; border-top: 1px solid var(--background-modifier-border); }
 .yoofloe-ai.y-ai-tiny:not(.y-ai-editing-scope) .y-ai-dock .y-ai-row { grid-column: 2; grid-row: 2; width: max(128px, calc(5.2em + 1rem)); max-width: 100%; margin: 1px 8px 1px 0; align-self: start; }
 @container (max-width: 380px) { .yoofloe-ai .y-ai-models { grid-template-columns: minmax(0, 1fr); } }
