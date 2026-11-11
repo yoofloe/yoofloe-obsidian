@@ -33,7 +33,7 @@ export async function boundedOpenAiDownload(url: string, key: string, maximum: n
 export function providerFiles(request:FileHttp, stream?: FileDownload) {
   return {
     async upload(this: void, file:Attachment,data:ArrayBuffer,key:string,current:()=>boolean):Promise<string> {
-      const payload=await multipart(file,data,{purpose:"user_data","expires_after[anchor]":"created_at","expires_after[seconds]":"3600"});
+      const payload=await multipart(file,data,{purpose:file.kind==="image"?"vision":"user_data","expires_after[anchor]":"created_at","expires_after[seconds]":"3600"});
       if(!current())throw Error("Stopped before uploading attachments.");
       const response=await request({url:ROOT+"/files",method:"POST",headers:{Authorization:`Bearer ${key}`},...payload,throw:false});check(response.status,"File upload");
       const result:unknown=JSON.parse(response.text);if(!result||typeof result!=="object"||typeof(result as Record<string,unknown>).id!=="string"||!/^file-[A-Za-z0-9_-]{1,150}$/.test(String((result as Record<string,unknown>).id)))throw Error("OpenAI returned an invalid file reference.");

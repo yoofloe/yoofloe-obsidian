@@ -43,6 +43,13 @@ test('provider upload expires after one hour and downloads never send authorizat
  await assert.rejects(api.download('cntr_a','cfile_a','secret',()=>true),/size budget/);assert.equal(calls.length,2);
  await assert.rejects(api.download('https://evil.test','cfile_a','secret',()=>true),/Invalid/);assert.equal(calls.length,2);assert(calls.every(c=>new URL(c.url).origin==='https://api.openai.com'));
 });
+test('image uploads use vision purpose while documents retain user_data and both expire',async()=>{
+ const bodies=[];const api=providerFiles(async r=>{bodies.push(new TextDecoder().decode(r.body));return {status:200,text:'{"id":"file-test"}',arrayBuffer:new ArrayBuffer(0)};});
+ await api.upload({kind:'image',name:'chart.png',mime:'image/png'},new Uint8Array([1]).buffer,'synthetic',()=>true);
+ await api.upload({kind:'document',name:'brief.pdf',mime:'application/pdf'},new Uint8Array([2]).buffer,'synthetic',()=>true);
+ assert.match(bodies[0],/name="purpose"\r\n\r\nvision\r\n/);assert.match(bodies[1],/name="purpose"\r\n\r\nuser_data\r\n/);
+ for(const body of bodies){assert(body.includes('expires_after[seconds]'));assert(body.includes('3600'));}
+});
 test('unknown provider file sizes use bounded streaming without redirects or an unbounded native request',async()=>{
  const runtime=fetch=>({fetch,setTimeout,clearTimeout,setInterval,clearInterval});const route='https://api.openai.com/v1/containers/cntr_a/files/cfile_a/content';let streamed=0,requests=0;
  const api=providerFiles(async()=>{requests++;return{status:200,text:'{"id":"cfile_a","container_id":"cntr_a","object":"container.file","bytes":null}',arrayBuffer:new ArrayBuffer(0)};},async(url,key,max,current)=>{streamed++;return boundedOpenAiDownload(url,key,max,current,runtime(async(_url,options)=>{assert.equal(options.redirect,'error');return new Response(new Uint8Array([1,2,3]));}));});
