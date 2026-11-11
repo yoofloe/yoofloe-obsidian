@@ -8,4 +8,4 @@ export function customRequestLimit(value: string): number | null {
   if (!/^\d+$/.test(value.trim())) return null;
   const parsed = Number(value.trim()); return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
-export function requestLimitLabel(value: RequestLimit): string { return value === "none" ? "No request-count limit" : `${value} request(s) max`; }
+export function requestLimitLabel(value: RequestLimit): string { return value === "none" ? "No limit" : value === 1 ? "1 request" : `${value} requests max`; }

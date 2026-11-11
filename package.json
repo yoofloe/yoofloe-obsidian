@@ -1,7 +1,7 @@
 {
   "name": "obsidian-yoofloe",
-  "version": "0.7.6",
-  "description": "Write, edit and organize Markdown notes with your own OpenAI key. Optional local Yoofloe Calendar context.",
+  "version": "0.8.0",
+  "description": "Research, write and organize Markdown with your own OpenAI key. Optional Yoofloe Calendar context. Visit www.yoofloe.com.",
   "private": true,
   "type": "module",
   "scripts": {

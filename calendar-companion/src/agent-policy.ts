@@ -11,8 +11,8 @@ export function vaultPath(raw: string, folder = false): string {
   return raw;
 }
 const inside = (path: string, root: string) => path === root || path.startsWith(root + "/");
-export function allowedPath(policy: TaskPolicy, path: string, action: "read" | "edit" | "create" | "organize"): boolean {
-  try { vaultPath(path, action === "organize" && !path.endsWith(".md")); } catch { return false; }
+export function allowedPath(policy: TaskPolicy, path: string, action: "read" | "edit" | "create" | "organize", attachment = false): boolean {
+  try { vaultPath(path, attachment || action === "organize" && !path.endsWith(".md")); } catch { return false; }
   // Block case aliases conservatively; permission scopes below still require exact paths.
   const blockedPath = path.toLowerCase();
   if (inside(blockedPath, policy.configDir.toLowerCase()) || /^(?:Yoofloe AI\/(?:Backups|History)|Yoofloe Calendar\/(?:AI backups|AI drafts|Inbox))(?:\/|$)/i.test(path) || policy.excluded.some(root => inside(blockedPath, root.toLowerCase()))) return false;

@@ -69,7 +69,7 @@ function inertFence(line: string): string {
 }
 
 /** Keep native document formatting, tables, math and diagrams; deactivate embeds and plugin code. */
-export function safeNoteMarkdown(value: string): string {
+export function safeNoteMarkdown(value: string, allowedImages: ReadonlySet<string> = new Set()): string {
   let fence: { char: string; length: number; start: number; language: string; body: string[] } | null = null;
   const lines: string[] = [];
   for (const line of value.replace(/\r\n?/g, "\n").replaceAll(String.fromCharCode(0), "").split("\n")) {
@@ -88,11 +88,12 @@ export function safeNoteMarkdown(value: string): string {
       }
     }
     if (fence) { fence.body.push(line); lines.push(normalized); continue; }
-    const inert = normalized.replace(/(`+)([ \t]*\$?=)/g, "$1\u200b$2")
+    const inert = normalized.replace(/!?\[([^\]\n]*)\]\(sandbox:[^\n)]*\)/gi, "$1 (generated file)").replace(/(`+)([ \t]*\$?=)/g, "$1\u200b$2")
       .replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/^(\s*(?:&gt;\s*)+)/, prefix => prefix.replace(/&gt;/g, ">"))
       .replace(/\\*!\[/g, "\\![")
       .replace(/\b(javascript|vbscript|data|file|obsidian):/gi, "$1\\:");
-    lines.push(inert);
+    // Only files created and verified by this task may become active local image embeds.
+    lines.push(inert.replace(/\\!\[\[([^\]\n|#]+)\]\]/g, (match, path: string) => allowedImages.has(path) ? `![[${path}]]` : match));
   }
   if (fence) lines.push(fence.char.repeat(fence.length));
   return lines.join("\n").trim();

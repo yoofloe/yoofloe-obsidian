@@ -1,6 +1,7 @@
 import { App, MarkdownView, TFile, TFolder, normalizePath, parseYaml, stringifyYaml, type Vault } from "obsidian";
 import { validateJournal, type AgentFile, type AgentHost, type WorkJournal } from "./vault-agent";
 import { vaultPath } from "./agent-policy";
+import { binaryDigest, generatedCachePath, generatedPath, MAX_GENERATED_BYTES, validateGeneratedBytes } from "./generated-files";
 export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean): AgentHost {
   const guard = () => { if (!current() || app.vault !== vault) throw Error("The task stopped or the vault changed."); };
   const fileFor = (file: AgentFile): TFile => { guard(); const item = vault.getAbstractFileByPath(file.path); if (!(item instanceof TFile) || item !== file.identity) throw Error("The note was renamed or replaced."); return item; };
@@ -25,6 +26,31 @@ export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean
     async create(path, text) {
       guard(); vaultPath(path); const normalized = normalizePath(path); if (normalized !== path || vault.getAbstractFileByPath(path)) throw Error("That filename exists or is invalid. Choose another name.");
       const file = await vault.create(path, text); guard(); if (await vault.read(file) !== text || vault.getAbstractFileByPath(path) !== file) throw Error("The created note could not be confirmed. No existing file was overwritten."); return record(file);
+    },
+    async createAsset(asset, path) {
+      guard(); generatedPath(path); if (normalizePath(path) !== path || vault.getAbstractFileByPath(path)) throw Error("That attachment path already exists or is invalid.");
+      const cached = generatedCachePath(vault.configDir, asset), stat = await vault.adapter.stat(cached);
+      if (!stat || stat.type !== "file" || stat.size !== asset.bytes || stat.size > MAX_GENERATED_BYTES) throw Error("The generated result is unavailable in the local cache.");
+      const bytes = await vault.adapter.readBinary(cached); validateGeneratedBytes(bytes, asset.extension);
+      if (await binaryDigest(bytes) !== asset.sha256) throw Error("The cached generated file changed.");
+      const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""; if (parent) await ensure(parent);
+      guard(); if (vault.getAbstractFileByPath(path)) throw Error("A new file occupies this attachment path.");
+      const file = await vault.createBinary(path, bytes); guard();
+      if (vault.getAbstractFileByPath(path) !== file || await binaryDigest(await vault.readBinary(file)) !== asset.sha256) throw Error("The saved attachment could not be confirmed.");
+    },
+    async assetHash(path) {
+      guard(); generatedPath(path); const file = vault.getAbstractFileByPath(path);
+      if (!file) return null; if (!(file instanceof TFile) || file.stat.size > MAX_GENERATED_BYTES) return "exists";
+      const value = await binaryDigest(await vault.readBinary(file)); guard(); return vault.getAbstractFileByPath(path) === file ? value : "changed";
+    },
+    async trashAsset(path, hash) {
+      guard(); generatedPath(path); const file = vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile) || file.stat.size > MAX_GENERATED_BYTES) throw Error("The attachment changed. Its newer contents are kept.");
+      const before = { ...file.stat }, diskBefore = await vault.adapter.stat(path);
+      if (!diskBefore || await this.assetHash?.(path) !== hash) throw Error("The attachment changed. Its newer contents are kept.");
+      const diskAfter = await vault.adapter.stat(path);
+      guard(); if (vault.getAbstractFileByPath(path) !== file || !diskAfter || file.stat.mtime !== before.mtime || file.stat.size !== before.size || file.stat.ctime !== before.ctime || diskAfter.mtime !== diskBefore.mtime || diskAfter.size !== diskBefore.size || diskAfter.ctime !== diskBefore.ctime) throw Error("The attachment changed during recovery. Its newer contents are kept.");
+      await app.fileManager.trashFile(file); guard(); if (vault.getAbstractFileByPath(path) === file) throw Error("Attachment recovery could not be confirmed.");
     },
     async rename(file, path) {
       const item = fileFor(file); vaultPath(path); if (vault.getAbstractFileByPath(path)) throw Error("The destination name already exists.");

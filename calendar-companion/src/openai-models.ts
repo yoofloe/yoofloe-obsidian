@@ -1,5 +1,5 @@
 /** Curated text models, checked against official OpenAI docs. Never fetched with an API key. */
-export const MODEL_CATALOG_CHECKED = "2026-11-08";
+export const MODEL_CATALOG_CHECKED = "2026-11-11";
 export const MODEL_CATALOG_URL = "https://developers.openai.com/api/docs/models";
 export const MODEL_PRICING_URL = "https://developers.openai.com/api/docs/pricing";
 export const CUSTOM_MODEL_CHOICE = "__custom__";

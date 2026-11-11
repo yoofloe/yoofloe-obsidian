@@ -1,9 +1,9 @@
 {
   "id": "yoofloe",
   "name": "Yoofloe AI",
-  "version": "0.7.6",
+  "version": "0.8.0",
   "minAppVersion": "1.11.5",
-  "description": "Write, edit and organize Markdown notes with your own OpenAI key. Optional local Yoofloe Calendar context.",
+  "description": "Research, write and organize Markdown with your own OpenAI key. Optional Yoofloe Calendar context. Visit www.yoofloe.com.",
   "author": "Yoofloe",
   "isDesktopOnly": false,
   "authorUrl": "https://yoofloe.com"

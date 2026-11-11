@@ -19,6 +19,17 @@ function fixture(initial = { 'Notes/Plan.md': '# Plan\nOriginal', 'Notes/Other.m
   const agent = new VaultAgent(host, policy, () => true);
   return { agent, host, files, backups, records, trace, policy };
 }
+test('web source lists do not break an inline selection and remain attached to whole-note writes',async()=>{
+ const f=fixture({'Notes/Plan.md':'Left old right'});f.policy.readScope='current';f.policy.writeScope='current';f.policy.selection={from:5,to:8};
+ const a=new VaultAgent(f.host,f.policy,()=>true),source=await a.initialContext();a.research([{url:'https://example.org/source',title:'Source'}],[]);
+ await a.execute('apply_changes',{changes:[{reference:'N1',version:source.version,action:'replace_selection',markdown:'new'}]});assert.equal(f.files.get('Notes/Plan.md').text,'Left new right');
+ const whole=fixture({'Notes/Plan.md':'Old text\nSources:\nhttps://example.org/source'});const b=await whole.agent.initialContext();whole.agent.research([{url:'https://example.org/source',title:'Source'}],[]);await whole.agent.execute('apply_changes',{changes:[{reference:'N1',version:b.version,action:'replace',markdown:'New researched text'}]});assert(whole.files.get('Notes/Plan.md').text.includes('https://example.org/source'));
+});
+test('rewriting a note preserves its existing safe local images but cannot introduce arbitrary embeds',async()=>{
+ const f=fixture({'Notes/Plan.md':'# Original\n![[Notes/diagram.png]]'});const source=await f.agent.initialContext();
+ await f.agent.execute('apply_changes',{changes:[{reference:'N1',version:source.version,action:'replace',markdown:'# Revised\n![[Notes/diagram.png]]\n![[Notes/unreviewed.png]]'}]});
+ const text=f.files.get('Notes/Plan.md').text;assert(text.includes('\n![[Notes/diagram.png]]'));assert(text.includes('\\![[Notes/unreviewed.png]]'));
+});
 test('Write and edit renames the document file/title in place without changing body text or broadening folder scope',async()=>{
  const f=fixture();f.policy.mode='edit';f.policy.readScope='current';f.policy.writeScope='current';f.policy.folder='Other output';
  const a=new VaultAgent(f.host,f.policy,()=>true),before=await a.initialContext();
