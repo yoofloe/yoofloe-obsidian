@@ -52,9 +52,11 @@ export class YoofloeAiView extends ItemView {
     if (win) {
       let saved: unknown;
       try { saved = this.app.loadLocalStorage(CHAT_SPLIT_KEY); } catch { /* Use the default split. */ }
-      this.chatSplit = new WorkspaceChatSplit(this.contentEl, win, saved, ratio => {
-        try { this.app.saveLocalStorage(CHAT_SPLIT_KEY, ratio); } catch { /* Keep the current size in this view. */ }
-      });
+      this.chatSplit = new WorkspaceChatSplit(
+        this.contentEl, win, saved,
+        ratio => { try { this.app.saveLocalStorage(CHAT_SPLIT_KEY, ratio); } catch { /* Keep the current size in this view. */ } },
+        () => this.followChat && !this.chatQuery,
+      );
     }
     this.stopViewport = this.watchViewport(); this.render(); await this.work.initialize();
   }

@@ -7,9 +7,20 @@ interface SplitElements {
   settingsBar: HTMLElement;
 }
 
+interface SplitDrag {
+  id: number;
+  initialY: number;
+  anchorY: number;
+  y: number;
+  height: number;
+  moved: boolean;
+  original: number | null;
+}
+
 const MIN_MESSAGES = 48;
 const MIN_SETTINGS = 72;
 const MIN_TRAVEL = 24;
+const DRAG_THRESHOLD = 2;
 const HEIGHT_PROP = "--y-ai-chat-height";
 const MIN_PROP = "--y-ai-chat-min";
 const MAX_PROP = "--y-ai-chat-max";
@@ -21,10 +32,16 @@ export class WorkspaceChatSplit {
   private parts: SplitElements | null = null;
   private bounds: { available: number; min: number; max: number } | null = null;
   private ratio: number | null;
-  private drag: { id: number; startY: number; y: number; height: number; original: number | null } | null = null;
+  private drag: SplitDrag | null = null;
   private frame = 0;
 
-  constructor(private readonly root: HTMLElement, private readonly win: Window & typeof globalThis, saved: unknown, private readonly save: (ratio: number | null) => void) {
+  constructor(
+    private readonly root: HTMLElement,
+    private readonly win: Window & typeof globalThis,
+    saved: unknown,
+    private readonly save: (ratio: number | null) => void,
+    private readonly followConversation: () => boolean,
+  ) {
     this.ratio = typeof saved === "number" && saved > 0 && saved < 1 ? saved : null;
     this.events = new win.AbortController();
     this.geometry = new win.ResizeObserver(() => this.refresh());
@@ -50,6 +67,7 @@ export class WorkspaceChatSplit {
   refresh(): void {
     const p = this.parts;
     if (!p) return;
+    const previous = this.bounds;
     this.bounds = null;
     const singlePane = ["y-ai-keyboard", "y-ai-compact", "y-ai-settings-expanded"].some(cls => this.root.classList.contains(cls));
     if (!singlePane && this.root.clientWidth > 0) {
@@ -68,12 +86,16 @@ export class WorkspaceChatSplit {
     p.divider.setAttribute("aria-valuemin", String(this.bounds.min));
     p.divider.setAttribute("aria-valuemax", String(this.bounds.max));
     this.apply();
+    if (this.drag && previous && (previous.available !== this.bounds.available || previous.min !== this.bounds.min || previous.max !== this.bounds.max)) {
+      this.drag.anchorY = this.drag.y;
+      this.drag.height = p.panel.getBoundingClientRect().height;
+    }
   }
 
   private apply(): void {
     if (!this.parts || !this.bounds) return;
     const { messages, divider, panel } = this.parts, { available, min, max } = this.bounds;
-    const follow = messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 24;
+    const follow = this.followConversation() && messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 24;
     const requested = this.ratio === null ? null : Math.max(min, Math.min(max, Math.round(available * this.ratio)));
     if (requested === null) this.root.style.removeProperty(HEIGHT_PROP);
     else this.root.setCssProps({ [HEIGHT_PROP]: `${requested}px` });
@@ -97,7 +119,10 @@ export class WorkspaceChatSplit {
     if (!this.parts || event.target !== this.parts.divider || !this.bounds || this.drag || !event.isPrimary || event.button !== 0) return;
     event.preventDefault();
     this.root.setPointerCapture(event.pointerId);
-    this.drag = { id: event.pointerId, startY: event.clientY, y: event.clientY, height: this.parts.panel.getBoundingClientRect().height, original: this.ratio };
+    this.drag = {
+      id: event.pointerId, initialY: event.clientY, anchorY: event.clientY, y: event.clientY,
+      height: this.parts.panel.getBoundingClientRect().height, moved: false, original: this.ratio,
+    };
     this.root.classList.add("y-ai-split-dragging");
   };
 
@@ -107,16 +132,32 @@ export class WorkspaceChatSplit {
     drag.y = event.clientY;
     if (!this.frame) this.frame = this.win.requestAnimationFrame(() => {
       this.frame = 0;
-      if (this.drag === drag) this.resizeTo(drag.height + drag.y - drag.startY);
+      if (this.drag === drag) this.applyDrag(drag);
     });
   };
 
   private onUp = (event: PointerEvent): void => {
     const drag = this.drag;
     if (!drag || event.pointerId !== drag.id) return;
-    this.resizeTo(drag.height + event.clientY - drag.startY);
+    drag.y = event.clientY;
+    this.applyDrag(drag);
     this.endDrag(true);
+    if (!drag.moved && event.pointerType === "mouse") this.parts?.divider.focus({ preventScroll: true });
   };
+
+  private applyDrag(drag: SplitDrag): void {
+    if (!this.parts) return;
+    if (Math.abs(drag.y - drag.initialY) < DRAG_THRESHOLD) {
+      if (!drag.moved) return;
+      this.ratio = drag.original;
+      this.apply();
+      drag.anchorY = drag.y;
+      drag.height = this.parts.panel.getBoundingClientRect().height;
+      return;
+    }
+    drag.moved = true;
+    if (drag.y !== drag.anchorY) this.resizeTo(drag.height + drag.y - drag.anchorY);
+  }
 
   private onCancel = (event: PointerEvent): void => { if (this.drag?.id === event.pointerId) this.endDrag(false); };
 
