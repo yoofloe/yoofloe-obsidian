@@ -1,7 +1,7 @@
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport } from "./ai-session";
 import { OPENAI_ENDPOINT, validateOpenAiKey, validateOpenAiOptions } from "./openai";
 import { resolveEffort } from "./effort";
-import { safeOutbound, type WorkMode } from "./agent-policy";
+import { safeOutbound, type WorkMode, type WriteScope } from "./agent-policy";
 import { agentTools, parseAgentReply } from "./agent-protocol";
 import { NOTE_INSTRUCTION } from "./note-context";
 import { requestLimit, type RequestLimit } from "./request-limit";
@@ -44,7 +44,7 @@ export class AgentTask {
   private cleanupUploads: (() => Promise<void>) | null = null;
   private listeners = new Set<() => void>();
   constructor(private readonly options: {
-    current(): boolean; preserve?(): boolean; key(): Promise<string | null>; transport: AiTransport; executor: AgentExecutor; gate: { busy: boolean }; generated?: GeneratedStore; attachments?: AttachmentRun;
+    current(): boolean; preserve?(): boolean; key(): Promise<string | null>; transport: AiTransport; executor: AgentExecutor; gate: { busy: boolean }; generated?: GeneratedStore; attachments?: AttachmentRun; writeScope?: WriteScope;
   }) {}
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private update(kind: WorkEvent["kind"], text: string): void { this.message = text; this.events.push({ kind, text }); if (this.events.length > 100) this.events.shift(); for (const listener of this.listeners) listener(); }
@@ -96,7 +96,7 @@ export class AgentTask {
       while ((maximum === "none" || this.requests < maximum) && !this.stopped && this.options.current()) {
         const remaining = this.onlineMaximum === "none" ? "none" : Math.max(0, this.onlineMaximum - this.onlineCalls);
         const hosted = onlineTools(this.sourceMode, remaining, this.fileIds, model.model, effort);
-        const body = JSON.stringify({ model: model.model, instructions: AGENT_INSTRUCTION.replace("Do not run code, call external URLs, request keys, access configuration/backup folders, or expand permissions.", "Never request keys, access configuration/backup folders, execute local code, or expand permissions.") + " " + sourceInstructions(this.sourceMode, supportsHostedTools(model.model)) + " When asked to change a document or note title, use rename_note to change its filename/tab title; adding a Markdown heading alone is not a document rename. If the user explicitly requests only a body heading, edit that heading. Report only file operations confirmed by the tools." + (remaining === 0 ? " The online tool budget is exhausted. Finish with verified evidence already obtained; disclose missing coverage without claiming further research." : ""), input: this.items, tools: [...agentTools(mode), ...hosted], parallel_tool_calls: false,
+        const body = JSON.stringify({ model: model.model, instructions: AGENT_INSTRUCTION.replace("Do not run code, call external URLs, request keys, access configuration/backup folders, or expand permissions.", "Never request keys, access configuration/backup folders, execute local code, or expand permissions.") + " " + sourceInstructions(this.sourceMode, supportsHostedTools(model.model)) + " When asked to change a document or note title, use rename_note to change its filename/tab title; adding a Markdown heading alone is not a document rename. If the user explicitly requests only a body heading, edit that heading. Report only file operations confirmed by the tools. The write target is authoritative even in All actions. Current note forbids creating notes or files and moving to another folder. New documents permits creating notes in the output folder and revising only notes created by this task; existing notes are context, not writable targets. A folder selection alone never grants new permissions." + (remaining === 0 ? " The online tool budget is exhausted. Finish with verified evidence already obtained; disclose missing coverage without claiming further research." : ""), input: this.items, tools: [...agentTools(mode, this.options.writeScope ?? "current"), ...hosted], parallel_tool_calls: false,
           ...(hosted.length && remaining !== "none" && remaining > 0 ? { max_tool_calls: remaining } : {}),
           store: false, stream: false, include: ["reasoning.encrypted_content", ...(this.sourceMode === "expanded" && hosted.length ? ["web_search_call.action.sources"] : [])], ...(effort ? { reasoning: { effort } } : {}) });
         if (new TextEncoder().encode(body).length > MAX_AI_INPUT_BYTES) throw Error("This task reached its data budget. Your work is kept. Start a focused follow-up.");

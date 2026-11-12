@@ -19,7 +19,7 @@ test('the remaining step budget reaches the size check before a generated downlo
 test('only registered generated files can be saved within scope, embedded, and undone while preserving newer data',async()=>{
  const docs=new Map(),assets=new Map(),journals=[];const hash=await binaryDigest(png),file={id:crypto.randomUUID(),name:'chart.png',extension:'png',bytes:png.byteLength,sha256:hash};
  const host={files:()=>[...docs.values()],create:async(path,text)=>{const f={identity:{},path,title:path,size:text.length,text};docs.set(path,f);return f;},read:async f=>f.text,persist:async j=>journals.push(structuredClone(j)),createAsset:async(_f,path)=>assets.set(path,hash),assetHash:async path=>assets.get(path)??null,trashAsset:async(path,expected)=>{assert.equal(assets.get(path),expected);assets.delete(path);},trash:async f=>docs.delete(f.path)};
- const p={mode:'edit',readScope:'current',writeScope:'current',sourcePath:null,folder:'Work',configDir:'.obsidian',excluded:['Work/Private']};const a=new VaultAgent(host,p,()=>true);a.research([{url:'https://example.org/source',title:'Data'}],[file]);
+ const p={mode:'edit',readScope:'current',writeScope:'new',sourcePath:null,folder:'Work',configDir:'.obsidian',excluded:['Work/Private']};const a=new VaultAgent(host,p,()=>true);a.research([{url:'https://example.org/source',title:'Data'}],[file]);
  await assert.rejects(a.execute('save_generated_file',{reference:file.id,path:'Outside/chart.png'}),/permitted/);
  await assert.rejects(a.execute('save_generated_file',{reference:file.id,path:'Work/Private/chart.png'}),/permitted/);
  await assert.rejects(a.execute('save_generated_file',{reference:'unknown',path:'Work/chart.png'}),/reference/);

@@ -1,6 +1,6 @@
 import { Component, ItemView, MarkdownRenderer, Notice, Platform, setIcon, type WorkspaceLeaf } from "obsidian";
 import { AiWorkspace } from "./workspace";
-import { MODE_LABELS, SCOPE_LABELS } from "./agent-policy";
+import { MODE_LABELS, SCOPE_LABELS, WRITE_SCOPE_LABELS } from "./agent-policy";
 import { EFFORT_LABELS, resolveEffort, supportedEfforts } from "./effort";
 import { modelCatalog } from "./ai-models";
 import { AREA_LABELS, PERIOD_LABELS } from "./question-query";
@@ -229,14 +229,17 @@ export class YoofloeAiView extends ItemView {
       this.limitControl(pause); this.onlineLimitControl(pause); this.button(pause, "Finish here", () => void w.finishHere(), w.busy); this.button(pause, "New task", () => void w.newTask(), w.busy);
     }
     const scope = this.details(primarySettings, "scope", "Permissions");
-    this.settingSummary(scope, "Access", w.readScope === w.writeScope ? w.readScope === "current" && !w.source ? "New document" : SCOPE_LABELS[w.readScope] : "Custom scopes", "sliders-horizontal");
-    scope.querySelector("summary")?.setAttribute("title", `${MODE_LABELS[w.mode]} · Read: ${SCOPE_LABELS[w.readScope]} · Change: ${SCOPE_LABELS[w.writeScope]}`);
+    this.settingSummary(scope, "Access", w.mode === "ask" ? "Read only" : WRITE_SCOPE_LABELS[w.writeScope], "sliders-horizontal");
+    scope.querySelector("summary")?.setAttribute("title", `${MODE_LABELS[w.mode]} · Read: ${SCOPE_LABELS[w.readScope]} · Write: ${WRITE_SCOPE_LABELS[w.writeScope]}`);
     this.select(scope, "Allowed actions", MODE_LABELS, w.mode, value => { w.mode = value; this.render(); });
-    if (w.mode === "all") scope.createEl("p", { text: "All supported actions: write, edit, update properties, create folders, rename, move and propose trash. Choose the data and change scopes below.", cls: "y-ai-hint" });
+    if (w.mode === "all") scope.createEl("p", { text: "All actions still follow the read scope and write target below. They never expand access to other notes.", cls: "y-ai-hint" });
     this.select(scope, "Notes AI can read", SCOPE_LABELS, w.readScope, value => { w.readScope = value; this.render(); });
     scope.createEl("p", { text: "This scope controls notes. Selected attachments and the source mode are separate context choices.", cls: "y-ai-hint" });
     if (w.source?.selection) this.button(scope, "Use whole attached note", () => { if (!w.source) return; delete w.source.selection; delete w.source.selectionVersion; w.preview = ""; this.saveSoon(); this.render(); }, w.settingsLocked);
-    if (w.mode !== "ask") this.select(scope, "Notes AI can change", SCOPE_LABELS, w.writeScope, value => { w.writeScope = value; });
+    if (w.mode !== "ask") {
+      this.select(scope, "Write target", WRITE_SCOPE_LABELS, w.writeScope, value => { w.writeScope = value; w.preview = ""; this.render(); });
+      scope.createEl("p", { text: w.writeScope === "current" ? w.source ? "Only the attached note can change. Choose New documents to create notes." : "No note attached. Attach a note to edit it, or choose New documents to create notes." : w.writeScope === "new" ? "Create notes in the output folder and revise only notes created in this task. Existing notes stay unchanged." : "Edit notes inside this scope and create new notes in the output folder. Excluded folders remain protected.", cls: "y-ai-hint" });
+    }
     const folderLabel = scope.createDiv({ cls: "y-ai-field" }); folderLabel.createSpan({ text: "Working / output folder" });
     const folder = this.button(folderLabel, "", () => {
       if (w.settingsLocked || !w.current) return;
@@ -249,7 +252,7 @@ export class YoofloeAiView extends ItemView {
     setIcon(folder.createSpan({ cls: "y-ai-folder-icon" }), "folder");
     folder.createSpan({ text: w.outputFolder || "Vault root · /", cls: "y-ai-folder-path" });
     setIcon(folder.createSpan({ cls: "y-ai-folder-icon" }), "chevron-down");
-    scope.createEl("p", { text: "Folder scope includes its subfolders. Current note limits reads and edits to the attached note; new notes may be created in the output folder. The agent reads relevant excerpts as needed, rather than uploading every note.", cls: "y-ai-hint" });
+    scope.createEl("p", { text: "Folder scope includes subfolders. Choosing a folder never expands the selected write target. Save attachment is a separate manual file save; AI permissions stay unchanged.", cls: "y-ai-hint" });
     if (!w.canContinue) { this.limitControl(scope); this.onlineLimitControl(scope); }
     const exclusions = scope.createEl("label", { cls: "y-ai-field" }); exclusions.createSpan({ text: "Excluded folders · one vault path per line" });
     const excluded = exclusions.createEl("textarea", { text: w.excluded, attr: { rows: "2", "aria-label": "Excluded folders" } }); excluded.disabled = w.settingsLocked;
@@ -321,7 +324,7 @@ export class YoofloeAiView extends ItemView {
     const compose = dock.createDiv({ cls: "y-ai-compose" });
     const prompt = compose.createEl("textarea", { text: w.prompt, attr: { rows: "2", "aria-label": "Ask Yoofloe AI", placeholder: "Ask Yoofloe AI…" } }); prompt.disabled = w.settingsLocked; prompt.maxLength = 32000;
     const privacy = dock.createEl("p", { cls: "y-ai-hint" });
-    const full = privacy.createSpan({ cls: "y-ai-privacy-full" }); full.appendText("OpenAI · API charges · "); full.createSpan({ text: requestLimitLabel(w.maximum), cls: "y-ai-limit-caption" }); full.appendText(`. ${w.mode === "ask" ? "Read only" : `Edits: ${SCOPE_LABELS[w.writeScope]}`}.`);
+    const full = privacy.createSpan({ cls: "y-ai-privacy-full" }); full.appendText("OpenAI · API charges · "); full.createSpan({ text: requestLimitLabel(w.maximum), cls: "y-ai-limit-caption" }); full.appendText(`. ${w.mode === "ask" ? "Read only" : `Write: ${WRITE_SCOPE_LABELS[w.writeScope]}`}.`);
     privacy.createSpan({ text: `OpenAI · paid · ${requestLimitLabel(w.maximum)}`, cls: "y-ai-privacy-short" });
     const tiny = privacy.createSpan({ text: "OpenAI · paid", cls: "y-ai-privacy-tiny" });
     if (w.task?.requests) { full.appendText(` ${w.busy || w.canContinue ? "Used" : "Last task"} ${w.task.requests} · ${w.task.usage.input + w.task.usage.output} tokens.`); if (w.busy || w.canContinue) tiny.createSpan({ text: ` · ${w.task.requests} used`, cls: "y-ai-usage-tiny" }); }
