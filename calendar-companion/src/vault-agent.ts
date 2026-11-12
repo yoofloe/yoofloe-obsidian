@@ -3,8 +3,10 @@ import { inputDigest } from "./question-input";
 import { safeNoteMarkdown } from "./note-context";
 import { noteTerms, rankNote } from "./note-workspace";
 import { agentTools } from "./agent-protocol";
+import { generatedPath, generatedExtension, readGeneratedFiles, type GeneratedFile } from "./generated-files";
+import { sourceList, withSources, type WebSource } from "./research";
 export interface AgentFile { identity: object; path: string; title: string; size: number }
-export interface JournalOp { kind: "edit" | "create" | "rename" | "trash" | "folder"; path: string; target?: string; backup?: string; beforeHash: string; afterHash: string; previousHash: string; status: "pending" | "done" | "undone" }
+export interface JournalOp { kind: "edit" | "create" | "rename" | "trash" | "folder" | "asset"; path: string; target?: string; backup?: string; beforeHash: string; afterHash: string; previousHash: string; status: "pending" | "done" | "undone" }
 export interface WorkJournal { id: string; createdAt: number; status: "running" | "complete" | "interrupted" | "undone"; operations: JournalOp[] }
 export const MAX_JOURNAL_OPERATIONS = 200;
 export function validateJournal(value: unknown): asserts value is WorkJournal {
@@ -14,8 +16,8 @@ export function validateJournal(value: unknown): asserts value is WorkJournal {
     if (!op || typeof op !== "object" || Array.isArray(op)) throw Error("Invalid recovery action.");
     const item = op as Record<string, unknown>;
     if (Object.keys(item).some(key => !["kind", "path", "target", "backup", "beforeHash", "afterHash", "previousHash", "status"].includes(key))) throw Error("Invalid recovery fields.");
-    const kind = textField(item.kind); if (!["edit", "create", "rename", "trash", "folder"].includes(kind) || !["pending", "done", "undone"].includes(textField(item.status))) throw Error("Invalid recovery action.");
-    vaultPath(textField(item.path), kind === "folder");
+    const kind = textField(item.kind); if (!["edit", "create", "rename", "trash", "folder", "asset"].includes(kind) || !["pending", "done", "undone"].includes(textField(item.status))) throw Error("Invalid recovery action.");
+    if (kind === "asset") generatedPath(textField(item.path)); else vaultPath(textField(item.path), kind === "folder");
     if (kind === "rename") vaultPath(textField(item.target));
     if (item.backup !== undefined && !/^Yoofloe AI\/Backups\/[0-9a-f-]{36}\.md$/.test(textField(item.backup))) throw Error("Invalid recovery backup.");
     for (const key of ["beforeHash", "afterHash", "previousHash"]) if (!/^(?:[a-f0-9]{64})?$/.test(textField(item[key]))) throw Error("Invalid recovery digest.");
@@ -28,6 +30,7 @@ export interface AgentHost {
   properties(file: AgentFile, expected: string, values: Record<string, unknown>): Promise<void>; affected(path: string): string[];
   trash(file: AgentFile): Promise<void>; backup(path: string, text: string): Promise<string>; readBackup(path: string): Promise<string>;
   persist(journal: WorkJournal): Promise<void>;
+  createAsset?(file: GeneratedFile, path: string): Promise<void>; assetHash?(path: string): Promise<string | null>; trashAsset?(path: string, hash: string): Promise<void>;
 }
 interface Ref { file: AgentFile; version?: string; complete?: boolean; range?: { from: number; to: number }; allowedRange?: { from: number; to: number } }
 const encoder = new TextEncoder();
@@ -43,6 +46,18 @@ export class VaultAgent {
   readonly pendingTrash: { reference: string; title: string; version: string }[] = [];
   private refs = new Map<string, Ref>();
   private next = 2;
+  private sources: WebSource[] = [];
+  private generated = new Map<string, GeneratedFile>();
+  private savedImages = new Set<string>();
+  research(sources: WebSource[], files: GeneratedFile[]): void { this.sources = sourceList(sources); for (const file of readGeneratedFiles(files)) this.generated.set(file.id, file); }
+  private markdown(value: string, original = "", inline = false, append = false): string {
+    const images = new Set(this.savedImages);
+    for (const match of original.matchAll(/!\[\[([^\]\n|#]+)\]\]/g)) {
+      try { const path = generatedPath(match[1]); if (["png", "jpg", "jpeg", "webp"].includes(generatedExtension(path)) && allowedPath(this.policy, path, "create", true)) images.add(path); } catch { /* Preserve only safe existing local image paths. */ }
+    }
+    const sources = inline ? [] : this.sources.filter(source => !append || !original.includes(source.url));
+    return safeNoteMarkdown(withSources(value, sources), images);
+  }
   constructor(readonly host: AgentHost, readonly policy: TaskPolicy, private readonly current: () => boolean) {
     const source = host.files().find(file => file.path === policy.sourcePath);
     if (source) this.refs.set("N1", { file: source, allowedRange: policy.readScope === "current" ? policy.selection : undefined });
@@ -131,7 +146,7 @@ export class VaultAgent {
         if (!allowedPath(this.policy, ref.file.path, "edit")) throw Error("This note is outside the permitted edit scope.");
         if (seen.has(ref.file.path)) throw Error("Use one change per note in a batch."); seen.add(ref.file.path);
         if (!ref.version || change.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("The note changed. Read its new version before editing.");
-        const markdown = safeNoteMarkdown(textField(change.markdown, 4 * 1024 * 1024)); let after: string;
+        const markdown = this.markdown(textField(change.markdown, 4 * 1024 * 1024), before, change.action === "replace_selection", change.action === "append"); let after: string;
         if (change.action === "replace" && ref.complete) after = markdown;
         else if (change.action === "append" && !ref.allowedRange) after = before + (before.endsWith("\n\n") || !before ? "" : before.endsWith("\n") ? "\n" : "\n\n") + markdown + "\n";
         else if (change.action === "replace_selection" && ref.range) after = before.slice(0, ref.range.from) + markdown + before.slice(ref.range.to);
@@ -153,11 +168,23 @@ export class VaultAgent {
       closedObject(args, ["path", "markdown"]); const path = vaultPath(textField(args.path));
       if (!allowedPath(this.policy, path, "create")) throw Error("Create the note inside the permitted output folder.");
       if (this.host.files().some(file => file.path === path)) throw Error("That filename already exists. Choose another name.");
-      const markdown = safeNoteMarkdown(textField(args.markdown, 4 * 1024 * 1024)); const hash = await inputDigest(markdown);
+      const markdown = this.markdown(textField(args.markdown, 4 * 1024 * 1024)); const hash = await inputDigest(markdown);
       await this.reserveOperations(1);
       const op: JournalOp = { kind: "create", path, beforeHash: "", afterHash: hash, previousHash: "", status: "pending" }; this.journal.operations.push(op); await this.host.persist(this.journal); this.guard();
       const file = await this.host.create(path, markdown); op.status = "done"; await this.host.persist(this.journal); const ref = this.reference(file); this.refs.get(ref)!.version = hash;
       return { status: "created", reference: ref, path, version: hash, undo_available: true };
+    }
+    if (name === "save_generated_file") {
+      closedObject(args, ["reference", "path"]); const file = this.generated.get(textField(args.reference)), path = generatedPath(textField(args.path));
+      if (!file || !this.host.createAsset || !this.host.assetHash) throw Error("Choose a generated-file reference returned by this task.");
+      if (generatedExtension(path) !== file.extension || !allowedPath(this.policy, path, "create", true)) throw Error("Save this file with its original extension inside the permitted output folder.");
+      if (await this.host.assetHash(path) !== null) throw Error("The destination already exists. Choose a new name.");
+      await this.reserveOperations(1); const op: JournalOp = { kind: "asset", path, beforeHash: "", afterHash: file.sha256, previousHash: "", status: "pending" };
+      this.journal.operations.push(op); await this.host.persist(this.journal); this.guard(); await this.host.createAsset(file, path); this.guard();
+      if (await this.host.assetHash(path) !== file.sha256) throw Error("The generated attachment could not be verified.");
+      op.status = "done"; await this.host.persist(this.journal);
+      if (["png", "jpg", "jpeg", "webp"].includes(file.extension)) this.savedImages.add(path);
+      return { status: "saved", path, image_embed: this.savedImages.has(path) ? `![[${path}]]` : undefined, undo_available: true };
     }
     if (name === "update_properties") {
       closedObject(args, ["reference", "version", "properties"]); const ref = this.ref(args.reference), before = await this.read(ref);
@@ -207,6 +234,10 @@ export class VaultAgent {
       if (op.status === "undone" || op.kind === "folder") continue;
       if (op.status === "pending" && op.kind !== "edit") { kept++; continue; }
       try {
+        if (op.kind === "asset") {
+          generatedPath(op.path); if (!this.host.trashAsset || !op.afterHash) throw Error("Attachment recovery is unavailable.");
+          this.guard(); await this.host.trashAsset(op.path, op.afterHash); op.status = "undone"; restored++; await this.host.persist(journal); continue;
+        }
         const path = op.kind === "rename" ? op.target! : op.path; vaultPath(path); const file = this.host.files().find(file => file.path === path);
         const original = op.backup ? await this.host.readBackup(op.backup) : null;
         if (original !== null && await inputDigest(original) !== op.beforeHash) throw Error("The backup changed. Existing notes are kept.");

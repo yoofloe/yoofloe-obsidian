@@ -1,6 +1,7 @@
 # Yoofloe AI
 
-Write, edit and organize your Obsidian Markdown with your own OpenAI API key.
+Research, write and organize your Obsidian Markdown with your own OpenAI API key.
+Visit [www.yoofloe.com](https://www.yoofloe.com) for Yoofloe apps and support.
 Use one workspace from the sparkle ribbon, note header, note menu, or **Yoofloe AI: Open** command.
 Yoofloe Calendar is optional: the plugin is useful on its own, including when no note is open.
 
@@ -14,12 +15,13 @@ iOS and physical tablet verification are not included in that evidence.
 2. Open settings, choose a model, enter **your own OpenAI key**, and choose **Save** once.
    The same button stores model/thinking settings and the new key together. An empty key field keeps the existing key.
    The UI confirms local storage; it does not make a paid key-validation call.
-3. Describe the task. Attach the current note or a text selection, or create a new document from scratch.
-4. Check **Allowed actions**, **Data sent to OpenAI**, **Notes AI can change**, the working/output folder,
+3. Describe the task. Attach the current note or use **+** to add images, documents and audio.
+   **Expanded** is the default; choose **Provided only** when factual evidence must stay within supplied material.
+4. Check **Allowed actions**, **Notes AI can read**, **Notes AI can change**, the working/output folder,
    model, thinking depth and maximum requests. **Preview data** previews the initial input locally.
 5. **Send** starts the task and authorizes its permitted reads and changes. The same fixed-size button becomes **Stop** during work.
-   A task can make several paid API requests. Choose a preset, a positive **Custom** count, or **No request-count limit**.
-   Existing settings and the default of 4 are preserved. No-count mode continues until completion, Stop or a technical stopping condition;
+   A task can make several paid API requests. Choose **1 request**, **Custom…**, or **No limit**.
+   **No limit** is the new default; explicitly saved limits remain available as Custom. No-limit mode continues until completion, Stop or a technical stopping condition;
    API charges can accumulate. It does not remove provider context/rate/credit limits. There are no automatic retries.
 
 At a finite boundary the task pauses. Increase the **total** limit or choose no count limit, then **Continue** using
@@ -27,11 +29,15 @@ the same model, original scopes, tool results and cumulative usage. Completed wr
 ends continuation without sending another request. Continuation is available while the current vault session stays open;
 closing/restarting the app keeps saved answers and completed changes but does not automatically resume requests.
 
-The conversation shows your requests, the assistant's answers and file operations actually confirmed by local tools.
-Recent previews are kept in workspace state; full local chat records can be loaded without making an API call.
+The conversation stays above the settings with a fixed-height, independently scrolling message area.
+Model and permission cards sit below it; Calendar, activity, privacy and recovery remain compact.
+Conversation search is local: it searches saved requests, answers and attachment names, highlights matches,
+and pages through older archived conversations without an AI request. Previews remain bounded for mobile performance.
+The conversation shows user requests, assistant answers, actual confirmed operations, sources and returned files.
 
 The task reads relevant excerpts as needed within your chosen data scope; it does not upload the whole vault upfront.
 The model control shows the full GPT version/name and the exact selected API model ID.
+Images use GPT-Image-2.6 Flare. Image planning uses Low for Fast/Light or Model default, Medium for Balanced, and High for deeper settings. This separate image setting keeps Fast text responses compatible with image generation; image rendering can still incur tool charges.
 Choose **Working / output folder** to browse a collapsible folder tree like the file explorer, including the vault root.
 Search reaches every existing subfolder; larger search results have an explicit **Show more** control.
 This picker uses local folder names only. It cannot choose an external computer/device folder, and cancelling keeps your previous choice.
@@ -46,6 +52,37 @@ See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local re
 Note titles and vault-relative paths returned by search can also go to OpenAI. Selection scope sends the selected passage,
 not the whole note. Open editor text, including unsaved changes, is used. A changed selection must be selected again.
 
+## Sources and attachments
+
+**Expanded** uses permitted notes, supplied attachments, general knowledge and live web research as needed.
+Current-news/search requests perform a real search, and saved research notes include clickable sources.
+**Provided only** omits web search and excludes prior expanded-mode answers from new-task context. It still
+supports writing, translation, calculation and analysis of supplied facts. It uses OpenAI and is not offline AI.
+Switching source modes never expands note read/write permissions.
+
+Use **+** to select up to 10 files, 20 MiB combined. Files are copied to a protected local plugin cache;
+selection makes no provider request. **Send** authorizes sharing the selected files with OpenAI.
+Supported inputs include PNG/JPEG/WebP, PDF, Office documents/spreadsheets, text/code and recorded audio
+(MP3, M4A, MP4, WAV, MPEG/MPGA and WebM). Unsupported or oversized files show an error before upload.
+Audio uses `gpt-transcribe`; each new transcription counts toward the API request limit and has an audio charge.
+Completed transcripts are cached and reused on continuation. Removing a chip excludes that file from the next
+request; it does not erase the original file. Completed attachments remain visible in the conversation; **Attach again** explicitly selects them for a follow-up.
+The composer clears its attachment selection when that task finishes. A paused task keeps its original attachments.
+
+Office inputs expose extracted text, not embedded images; use PDF to preserve document charts/images.
+Spreadsheet previews may cover only the first 1,000 rows per sheet. The uploaded file is also available to the
+analysis container so the model can perform full-file calculations rather than claiming complete coverage from a preview.
+
+Uploaded file objects are requested with a one-hour expiry and deleted after the task finishes or stops when possible.
+Pausing retains them for continuation within that expiry. This is separate from OpenAI abuse-monitoring retention.
+Generated images, charts and documents are cached locally with type/size/hash checks. **Save attachment** or the
+permitted file tool copies a verified result into the chosen output folder without overwriting existing files.
+Per-file generated downloads are streamed with a 12 MiB cap, including when OpenAI reports an unknown file size. File transfer and cleanup calls do not consume the model/transcription request count. Recovery keeps newer human edits.
+
+Model response/transcription requests and built-in search/analysis/image calls have separate counters and optional limits, both defaulting
+to **No limit**. Hosted tools and transcription can add charges beyond text tokens; a request count is not a price cap.
+Read [OpenAI pricing](https://developers.openai.com/api/docs/pricing) before choosing a large task.
+
 ## What it can do
 
 - **Ask only:** explain, summarize, translate and search permitted notes without modifying files.
@@ -55,11 +92,13 @@ not the whole note. Open editor text, including unsaved changes, is used. A chan
   does not silently rewrite backlinks; link updates are separate, version-checked edits within your scope.
 - Write ordinary Markdown: headings, lists, tasks, tables, internal links, blockquotes, LaTeX math,
   Mermaid flowcharts, sequences, mindmaps, timelines, pie charts and numerical charts.
-  Charts must use supplied data; the model is instructed not to invent measurements.
+  Charts must use supplied or verified retrieved data; the model is instructed not to invent measurements.
 
 The model requests typed tools; local code checks permissions, paths, note versions and recovery before performing them.
-It cannot execute JavaScript, shell commands, arbitrary network tools, hidden/configuration files or Calendar writes.
-Active HTML, embeds, executable plugin blocks and unsafe Mermaid features are made inert before insertion.
+Expanded mode adds OpenAI-hosted web search, Python analysis and image generation when needed. The analysis
+container has network disabled. No code is executed on the user's computer or phone. Hidden/configuration files and
+Calendar writes remain blocked. Active HTML, remote embeds, executable plugin blocks and unsafe Mermaid features
+are made inert. Verified generated local image attachments can be embedded in notes.
 Other installed plugins can still interpret ordinary Markdown; review generated content in the context of your vault.
 
 ### Scope and cost

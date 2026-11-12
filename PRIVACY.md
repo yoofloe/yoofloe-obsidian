@@ -12,7 +12,7 @@ Local storage and OpenAI processing are separate from Yoofloe receiving that con
 AI is optional and starts only when you choose **Send**. With your OpenAI API key,
 the plugin sends requests directly to `https://api.openai.com/v1/responses`:
 
-- Your task prompt, attached note or selected text, and bounded prior task context.
+- Your task prompt, attached note or selected text, selected files/images/audio, and bounded prior task context.
 - Relevant note excerpts, outlines, titles and vault-relative paths returned by permitted search/read tools.
 - The optional Calendar excerpts and search totals you added, including their dates and coverage.
 - Requested file operations, their results, model/effort settings and conversation/reasoning state needed to continue the task.
@@ -20,15 +20,42 @@ the plugin sends requests directly to `https://api.openai.com/v1/responses`:
 One task may make multiple requests up to its selected finite maximum, or without a plugin request-count cap when you explicitly choose that option. Additional excerpts can be sent during that task,
 within the data scope you selected. **Preview data**, inside the data/permissions section, previews the initial input locally without an API call; it cannot predict every later tool read.
 Activity shows requested tools and source reads. Changing the data/edit scope requires your action in the workspace.
-No-count mode can accumulate API charges; provider context/rate/credit restrictions still apply. Exact no-progress loops
+No-limit mode is the default for new settings and can accumulate API charges; provider context/rate/credit restrictions still apply. Exact no-progress loops
 and repeated blocked steps stop locally. A finite pause resumes only after your explicit Continue action with a higher
 total limit or no count cap, retaining the original model and scopes. No continuation request is replayed automatically after app restart.
 The API key goes in the authorization header, never in a prompt or URL. Do not put credentials in notes or prompts.
 
-No OpenAI request is made by opening the plugin, selecting a model, saving a key or looking up Calendar records locally.
+No OpenAI request is made by opening the plugin, selecting a model, saving a key, selecting attachments, searching local chat history or looking up Calendar records locally.
 There are no background AI jobs, automatic retries, paid search planners, embedding uploads or Yoofloe telemetry.
-Yoofloe operates no relay or database for this plugin. External store/help links open only when you choose them;
+Yoofloe operates no relay or database for this plugin. Expanded mode can invoke OpenAI web search when you send a task. Store/help links open only when you choose them;
 Obsidian's own updates and other plugins have their own network behavior.
+
+## Expanded mode and selected files
+
+Expanded mode is the default. OpenAI can use hosted web search, analysis and image tools when useful for your task.
+Search queries and relevant context can be processed by OpenAI and its search service providers. Avoid sensitive
+material in queries. Web content is untrusted evidence, not new permission to read or modify your vault.
+Provided-only mode omits web search and excludes earlier expanded-mode answers from new-task context; the selected
+material still goes to OpenAI. Analysis containers have network disabled in both modes. No code runs on your device.
+
+The + picker stores selected files locally first. Send authorizes their upload/processing. Audio is transcribed
+through OpenAI `gpt-transcribe`, which adds a paid request; completed transcripts are cached locally to avoid repeated
+transcription when continuing the same material. Binary images/documents use Files API objects with a requested
+one-hour expiry. The plugin attempts to delete this task's uploads when it finishes or stops. If the app exits, the
+key fails, or cleanup cannot complete, the expiry is the fallback; provider abuse-monitoring retention is separate.
+No hosted vector store or persistent vault index is created. Long pauses can outlast uploaded-file availability.
+
+Code Interpreter stores generated files temporarily in its container. Results are downloaded only from validated
+OpenAI container/file references after identity/metadata checks, with bounded streaming and authenticated redirects disabled. Generated results and selected attachments are
+kept locally under `plugins/yoofloe/generated/` and `plugins/yoofloe/attachments/` in the vault configuration folder.
+Audio transcripts live alongside their local attachment copy. The plugin does not automatically erase these caches.
+After stopping work and disabling the plugin, you may delete those folders to remove local cached copies; existing
+saved note attachments and originals are separate files. Removing a file chip only removes it from the request.
+
+Search, containers, image generation and transcription can incur their own API charges. The interface tracks model
+requests, hosted tool calls and transcriptions separately. No limit removes the selected count cap; it does not mean
+free usage or remove account/context/rate restrictions. Stop prevents further model/tool actions, but cleanup may
+still delete only this task's provider-uploaded copies. Already dispatched processing can finish and be charged.
 
 ## OpenAI's processing
 

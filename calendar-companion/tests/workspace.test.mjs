@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AiWorkspace } from '../dist/workspace.js';
 import { inputDigest } from '../dist/question-input.js';
+import { chatPreview } from '../dist/chat-history.js';
 const response = output => ({ status: 200, text: JSON.stringify({ status: 'completed', output }) });
 function fixture() {
   let saved, calls = 0, keyReads = 0;
@@ -23,6 +24,25 @@ function fixture() {
   };
   return { work: new AiWorkspace(options), options, host, files, journals, saved: () => saved, calls: () => calls, keyReads: () => keyReads };
 }
+test('saving a generated attachment updates the full archive and also works for older search-only turns',async()=>{
+ const f=fixture(),assets=new Map();f.host.assetHash=async path=>assets.get(path)??null;f.host.createAsset=async(file,path)=>assets.set(path,file.sha256);
+ const generated=Array.from({length:40},(_,i)=>({id:crypto.randomUUID(),name:`file${i}.png`,extension:'png',bytes:10,sha256:'a'.repeat(64)}));
+ const full={id:'long-chat',request:'r'.repeat(5000),answer:'a'.repeat(22000)+' END',startedAt:1,model:'gpt-6-luna',status:'completed',requests:1,inputTokens:1,outputTokens:1,actions:[],generated};let stored=structuredClone(full);
+ f.options.storage.loadChat=async id=>{assert.equal(id,'long-chat');return structuredClone(stored);};f.options.storage.saveChat=async turn=>{stored=structuredClone(turn);};
+ await f.work.initialize();f.work.chat=[chatPreview(full)];assert(f.work.chat[0].generatedTruncated);assert.equal(f.work.chat[0].answer.length,16000);
+ await f.work.saveGeneratedFile('long-chat',generated[0].id);assert.equal(stored.request,full.request);assert.equal(stored.answer,full.answer);assert.equal(stored.generated.length,40);assert.equal(assets.size,1);
+ f.work.chat=[];await f.work.saveGeneratedFile('long-chat',generated[39].id);assert.equal(assets.size,2);assert.equal(stored.answer,full.answer);assert.equal(stored.generated.length,40);assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);
+});
+test('completed attachments leave the composer and can be explicitly attached again without network work',async()=>{
+ const f=fixture();await f.work.initialize();const file={id:crypto.randomUUID(),name:'sample.txt',extension:'txt',kind:'document',mime:'text/plain',bytes:6,sha256:'a'.repeat(64)};
+ f.options.attachments={forTask:()=>({prepare:async()=>({parts:[{type:'input_text',text:'Sample'}],fileIds:[]}),cleanup:async()=>true})};f.work.attachments=[file];
+ f.work.setPrompt('Create a note from the sample');await f.work.run();assert.equal(f.work.attachments.length,0);assert.equal(f.work.chat.at(-1).attachments.length,1);const calls=f.calls();
+ f.work.useAttachments(f.work.chat.at(-1).attachments);assert.equal(f.work.attachments.length,1);assert.equal(f.calls(),calls);
+});
+test('a no-search instruction in Expanded also removes earlier web-derived context before dispatch',async()=>{
+ const f=fixture();f.options.storage.load=async()=>({previous:[{request:'Research',answer:'PRIOR_WEB_CONTEXT',sourceMode:'expanded'}]});await f.work.initialize();f.work.sourceMode='expanded';f.work.setPrompt('Translate supplied news; do not search the web.');await f.work.review();
+ assert.equal(JSON.parse(f.work.preview).source_mode,'provided');assert(!f.work.preview.includes('PRIOR_WEB_CONTEXT'));assert.equal(f.calls(),0);
+});
 test('standalone use without a note or Calendar creates a Markdown document only after explicit start and keeps result after view unsubscribe', async () => {
   const f = fixture(); await f.work.initialize(); assert.equal(f.calls(), 0); assert.equal(f.keyReads(), 0); assert.equal(f.work.source, null);
   f.work.setPrompt('Create a welcome document with a Mermaid diagram');

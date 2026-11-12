@@ -1,3 +1,6 @@
+import { sourceList, type SourceMode, type WebSource, type OnlineUsage } from "./research";
+import { readGeneratedFiles, type GeneratedFile } from "./generated-files";
+import { readAttachments, type Attachment } from "./attachments";
 export interface ChatAction { kind: string; path: string; target?: string }
 export interface ChatTurn {
   id: string; request: string; answer: string; startedAt: number | null; model: string;
@@ -6,11 +9,14 @@ export interface ChatTurn {
   requestTruncated?: boolean; answerTruncated?: boolean;
   sourcePath?: string; actionsKnown?: boolean;
   actionTotal?: number;
+  sourceMode?: SourceMode; sources?: WebSource[]; online?: OnlineUsage; generated?: GeneratedFile[];
+  attachments?: Attachment[]; transcriptions?: number; fileWarnings?: string[];
+  generatedTruncated?: boolean;
 }
 export const CHAT_HISTORY_LIMIT = 50;
 export function validChatId(id: string): boolean { return /^[a-zA-Z0-9_-]{1,80}$/.test(id); }
 export function chatPreview(turn: ChatTurn): ChatTurn {
-  return { ...turn, request: turn.request.slice(0, 4000), answer: turn.answer.slice(0, 16000), actions: turn.actions.slice(-100),
+  return { ...turn, request: turn.request.slice(0, 4000), answer: turn.answer.slice(0, 16000), actions: turn.actions.slice(-100), generated: turn.generated?.slice(0, 16), generatedTruncated: !!turn.generatedTruncated || (turn.generated?.length ?? 0) > 16,
     requestTruncated: !!turn.requestTruncated || turn.request.length > 4000, answerTruncated: !!turn.answerTruncated || turn.answer.length > 16000 };
 }
 export function readChat(value: unknown): ChatTurn | null {
@@ -28,5 +34,15 @@ export function readChat(value: unknown): ChatTurn | null {
   return { id: v.id, request: v.request, answer: v.answer, startedAt: typeof v.startedAt === "number" && Number.isFinite(v.startedAt) ? v.startedAt : null,
     model: typeof v.model === "string" ? v.model.slice(0, 128) : "", status, requests: count(v.requests), inputTokens: count(v.inputTokens), outputTokens: count(v.outputTokens), actions,
     requestTruncated: v.requestTruncated === true, answerTruncated: v.answerTruncated === true,
-    ...(typeof v.sourcePath === "string" ? { sourcePath: v.sourcePath.slice(0, 500) } : {}), actionsKnown: v.actionsKnown === true, actionTotal: Math.max(count(v.actionTotal), actions.length) };
+    ...(typeof v.sourcePath === "string" ? { sourcePath: v.sourcePath.slice(0, 500) } : {}), actionsKnown: v.actionsKnown === true, actionTotal: Math.max(count(v.actionTotal), actions.length),
+    sourceMode: v.sourceMode === "expanded" ? "expanded" : "provided", sources: sourceList(v.sources), generated: readGeneratedFiles(v.generated), generatedTruncated: v.generatedTruncated === true,
+    attachments: readAttachments(v.attachments), transcriptions: count(v.transcriptions), fileWarnings: Array.isArray(v.fileWarnings) ? v.fileWarnings.filter((value): value is string => typeof value === "string").slice(0, 32).map(value => value.slice(0, 500)) : [],
+    online: v.online && typeof v.online === "object" ? { search: count((v.online as OnlineUsage).search), analysis: count((v.online as OnlineUsage).analysis), image: count((v.online as OnlineUsage).image) } : undefined };
+}
+export function chatMatches(turn: ChatTurn, query: string): boolean {
+  return [turn.request,turn.answer,...turn.actions.map(action=>action.path),...(turn.attachments??[]).map(file=>file.name)].join("\n").toLocaleLowerCase().includes(query.toLocaleLowerCase());
+}
+export function searchChatPreview(turn: ChatTurn, query: string): ChatTurn {
+  const excerpt = (text: string) => { const index=text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()), start=Math.max(0,index-160); return (start?"…":"")+text.slice(start,start+1600)+(text.length>start+1600?"…":""); };
+  return {...chatPreview(turn),request:excerpt(turn.request),answer:excerpt(turn.answer),requestTruncated:turn.request.length>1600,answerTruncated:turn.answer.length>1600};
 }

@@ -11,7 +11,10 @@ import { loadWorkRecords, obsidianAgentHost } from "./obsidian-agent-host";
 import { CompanionModal } from "./manual-import";
 import { inputDigest } from "./question-input";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, PRIVACY_URL } from "./privacy-copy";
-import { readChat, validChatId, type ChatTurn } from "./chat-history";
+import { readChat, validChatId, chatMatches, searchChatPreview, type ChatTurn } from "./chat-history";
+import { generatedStore } from "./generated-files";
+import { attachmentStore } from "./attachments";
+import { boundedOpenAiDownload, providerFiles } from "./provider-files";
 
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
 /** Plugin ID, local secret binding and the Calendar v2/v3 callback stay stable. No startup network requests. */
@@ -122,8 +125,15 @@ export default class YoofloeAiPlugin extends Plugin {
   private workspace(): AiWorkspace {
     if (this.work) return this.work;
     const ai = this.context(), owner = this.app.vault, adapter = owner.adapter, root = `${owner.configDir}/plugins/yoofloe`;
+    const provider = providerFiles(async request => { const response = await requestUrl(request); return { status: response.status, text: response.text, arrayBuffer: response.arrayBuffer }; }, boundedOpenAiDownload);
+    const localFiles = { configDir: owner.configDir, exists: (path: string) => adapter.exists(path), mkdir: async (path: string) => { if (!ai.current()) throw Error("Vault changed"); await adapter.mkdir(path); }, read: (path: string) => adapter.readBinary(path), write: async (path: string, bytes: ArrayBuffer) => { if (!ai.current()) throw Error("Vault changed"); await adapter.writeBinary(path, bytes); } };
     let chatQueue: Promise<void> = Promise.resolve();
     this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
+      generated: generatedStore({ ...localFiles, download: provider.download }),
+      attachments: attachmentStore({ ...localFiles, upload: provider.upload, transcribe: provider.transcribe, removeUpload: provider.removeUpload,
+        transcript: async path => { if (!await adapter.exists(path)) return null; const stat = await adapter.stat(path); if (!stat || stat.size > 512 * 1024) throw Error("The saved transcript exceeds its limit."); return adapter.read(path); },
+        saveTranscript: async (path, text) => { if (!ai.current()) throw Error("Vault changed"); await adapter.write(path, text); if (await adapter.read(path) !== text) throw Error("The transcript could not be saved locally."); },
+      }),
       host: current => obsidianAgentHost(this.app, owner, current), inboxHint: () => adapter.getResourcePath(`${INBOX}/`),
       transport: async request => { if (!ai.current()) throw Error("Vault changed"); const response = await requestUrl(request); return { status: response.status, text: response.text }; },
       storage: {
@@ -132,7 +142,8 @@ export default class YoofloeAiPlugin extends Plugin {
         history: () => loadWorkRecords(owner),
         saveChat: (turn: ChatTurn) => {
           if (!validChatId(turn.id)) return Promise.reject(Error("Invalid local chat record."));
-          const text = JSON.stringify({ ...turn, requestTruncated: false, answerTruncated: false });
+          if (turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated) return Promise.reject(Error("Load the full conversation before updating its archive."));
+          const text = JSON.stringify({ ...turn, requestTruncated: false, answerTruncated: false, generatedTruncated: false });
           if (new TextEncoder().encode(text).length > 6 * 1024 * 1024) return Promise.reject(Error("The full chat record exceeds its local size limit. The current answer is kept."));
           const next = chatQueue.then(async () => {
             if (!ai.current()) throw Error("Vault changed"); const folder = `${root}/chats`; if (!await adapter.exists(folder)) await adapter.mkdir(folder);
@@ -144,6 +155,18 @@ export default class YoofloeAiPlugin extends Plugin {
           const path = `${root}/chats/${id}.json`, stat = await adapter.stat(path);
           if (!stat || stat.size > 6 * 1024 * 1024) throw Error("This full chat record cannot be read safely.");
           const turn = readChat(JSON.parse(await adapter.read(path)) as unknown); if (!ai.current() || turn?.id !== id) throw Error("The local chat record could not be confirmed."); return turn;
+        },
+        searchChats: async (query, offset) => {
+          if (!ai.current() || !query.trim() || query.length > 200 || !Number.isSafeInteger(offset) || offset < 0) return { turns: [], nextOffset: null };
+          const folder = `${root}/chats`; if (!await adapter.exists(folder)) return { turns: [], nextOffset: null };
+          const listing = await adapter.list(folder), paths = listing.files.filter(path => { const name = path.slice(folder.length + 1); return path.startsWith(folder + "/") && name.endsWith(".json") && validChatId(name.slice(0, -5)); }).sort().reverse();
+          const turns: ChatTurn[] = []; let index = offset, bytes = 0;
+          for (; index < Math.min(paths.length, offset + 20); index++) {
+            if (!ai.current()) break; const stat = await adapter.stat(paths[index]); if (!stat || stat.size > 6 * 1024 * 1024) continue;
+            if (bytes && bytes + stat.size > 8 * 1024 * 1024) break; bytes += stat.size;
+            try { const turn = readChat(JSON.parse(await adapter.read(paths[index])) as unknown); if (turn && chatMatches(turn, query)) turns.push(searchChatPreview(turn, query)); } catch { /* An unreadable archive stays untouched. */ }
+          }
+          return { turns, nextOffset: index < paths.length ? index : null };
         },
       },
       ...(Platform.isAndroidApp ? { calendar: () => new CalendarSession({ vaultName: () => owner.getName(), allowed: () => ai.current() && Platform.isAndroidApp,
@@ -183,6 +206,7 @@ class YoofloeSettings extends PluginSettingTab {
   private rows(): SettingsRow[] {
     const rows: SettingsRow[] = [
       { name: "Workspace", heading: true, desc: "Write, edit, organize and explore Markdown with your own OpenAI key. Works independently on desktop, mobile and tablets. Yoofloe Calendar is optional." },
+      { name: "Yoofloe", desc: "Discover Yoofloe apps and support at www.yoofloe.com.", aliases: ["website", "homepage", "Yoofloe"], render: setting => { setting.descEl.appendText(" "); setting.descEl.createEl("a", { text: "www.yoofloe.com", href: "https://www.yoofloe.com", attr: { target: "_blank", rel: "noopener noreferrer" } }); } },
       { name: "One workspace", desc: "Use the sparkle ribbon, note header, note menu, or Yoofloe AI: Open command. Closing the panel keeps your draft and result.", aliases: ["Yoofloe AI", "notes", "data scope", "permissions", "request limit"],
         render: setting => { setting.addButton(b => b.setButtonText("Open Yoofloe AI").onClick(() => this.yoofloe.openWorkspace())); } },
       { name: "OpenAI key, model and thinking depth", desc: "Settings make no API requests. Starting a task sends permitted note text and context directly to OpenAI; API charges apply. A task may make multiple requests.", aliases: ["API key", "effort", "custom model", "AI settings", "cost"],
