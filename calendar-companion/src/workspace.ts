@@ -65,6 +65,7 @@ export class AiWorkspace {
   get requestId() { return this.calendar?.requestId ?? null; }
   get title() { return this.source?.path.split("/").at(-1)?.replace(/\.md$/i, "") ?? (this.writeScope === "new" ? "New documents" : "No note attached"); }
   get result() { return this.task?.text ?? ""; }
+  get hasResult() { return !!this.result || (this.task?.generated.length ?? 0) > 0; }
   get canStop() { return this.busy && this.running && !this.stopRequested; }
   get stopping() { return this.busy && this.stopRequested; }
   get canContinue() { return this.current && !!this.task?.canResume && !!this.agent; }
@@ -97,13 +98,13 @@ export class AiWorkspace {
             this.source.selection = { from: selection.from, to: selection.to }; this.source.selectionVersion = saved.selectionVersion;
           }
         }
-        if (["ask", "edit", "organize", "all"].includes(String(saved.mode))) this.mode = saved.mode as WorkMode;
+        if (typeof saved.mode === "string" && ["ask", "edit", "organize", "all"].includes(saved.mode)) this.mode = saved.mode as WorkMode;
         this.sourceMode = readSourceMode(saved.sourceMode);
         this.attachments = readAttachments(saved.attachments);
         try { if (saved.onlineMaximum !== undefined) this.onlineMaximum = requestLimit(saved.onlineMaximum); } catch { this.onlineMaximum = 1; }
         if (typeof saved.customOnlineMaximum === "string") { this.customOnlineMaximum = saved.customOnlineMaximum.slice(0, 32); const count = customRequestLimit(this.customOnlineMaximum); if (count !== null) this.onlineMaximum = count; }
-        if (["current", "folder", "vault"].includes(String(saved.readScope))) this.readScope = saved.readScope as WorkScope;
-        if (["current", "new", "folder", "vault"].includes(String(saved.writeScope))) this.writeScope = saved.writeScope as WriteScope;
+        if (typeof saved.readScope === "string" && ["current", "folder", "vault"].includes(saved.readScope)) this.readScope = saved.readScope as WorkScope;
+        if (typeof saved.writeScope === "string" && ["current", "new", "folder", "vault"].includes(saved.writeScope)) this.writeScope = saved.writeScope as WriteScope;
         if (typeof saved.outputFolder === "string") this.outputFolder = saved.outputFolder.slice(0, 500);
         if (typeof saved.excluded === "string") this.excluded = saved.excluded.slice(0, 4000);
         try { if (saved.maximum !== undefined) this.maximum = requestLimit(saved.maximum); } catch { this.maximum = 1; this.message = "The saved request limit was invalid and was reset to 1. Choose your preferred limit before sending."; }
@@ -147,8 +148,10 @@ export class AiWorkspace {
   }
   bind(source: WorkspaceSource | null, force = false): void {
     if (!this.current) return;
-    if ((this.busy || this.canContinue || this.result || this.prompt.trim()) && !force) { if (source?.path !== this.source?.path) this.nextSource = source; this.changed(); return; }
-    this.source = source; this.nextSource = null; this.outputFolder = source?.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
+    if ((this.busy || this.canContinue || this.hasResult || this.prompt.trim()) && !force) { if (source?.path !== this.source?.path) this.nextSource = source; this.changed(); return; }
+    const sourceChanged = source?.path !== this.source?.path;
+    this.source = source; this.nextSource = null;
+    if (sourceChanged) this.outputFolder = source?.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
     this.preview = ""; this.changed();
   }
   setPrompt(value: string): void { if (!this.settingsLocked) { this.prompt = value; this.preview = ""; } }
@@ -165,7 +168,7 @@ export class AiWorkspace {
   }
   private rememberJournal(journal: WorkJournal): void { if (journal.operations.length) this.history = [journal, ...this.history.filter(j => j.id !== journal.id)].slice(0, 30); }
   private rememberLast(): void {
-    if (!this.result) return;
+    if (!this.hasResult) return;
     const turn = { request: this.lastRequest, answer: this.result, sourceMode: this.task?.sourceMode ?? "provided" };
     if (this.previous.at(-1)?.request !== turn.request || this.previous.at(-1)?.answer !== turn.answer) this.previous = [...this.previous, turn].slice(-2);
   }
@@ -228,7 +231,7 @@ export class AiWorkspace {
     this.message = task.message;
     if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
     if (this.source && agent.policy.selection) { this.source.selection = { ...agent.policy.selection }; this.source.selectionVersion = agent.policy.selectionVersion; }
-    if (task.state !== "paused" && (task.text || agent.operations.some(op => op.status === "done") || task.state === "completed" && task.generated.length > 0)) { this.prompt = ""; this.attachments = []; }
+    if (task.state !== "paused" && !task.fileWarnings.length && (task.text || agent.operations.some(op => op.status === "done") || task.state === "completed" && task.generated.length > 0)) { this.prompt = ""; this.attachments = []; }
     for (const journal of agent.journals) if (journal.operations.length) {
       journal.status = task.state !== "completed" || task.events.some(e => e.kind === "blocked") ? "interrupted" : "complete";
       await this.options.host(() => this.current).persist(journal); this.rememberJournal(journal);

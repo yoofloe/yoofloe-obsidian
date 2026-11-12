@@ -26,6 +26,7 @@ export function validateJournal(value: unknown): asserts value is WorkJournal {
 }
 export interface AgentHost {
   files(): AgentFile[]; read(file: AgentFile): Promise<string | null>; replace(file: AgentFile, expected: string, text: string): Promise<void>;
+  isCurrentNote?(file: AgentFile): boolean;
   create(path: string, text: string): Promise<AgentFile>; rename(file: AgentFile, path: string): Promise<void>; folder(path: string): Promise<boolean>;
   properties(file: AgentFile, expected: string, values: Record<string, unknown>): Promise<void>; affected(path: string): string[];
   trash(file: AgentFile): Promise<void>; backup(path: string, text: string): Promise<string>; readBackup(path: string): Promise<string>;
@@ -46,6 +47,7 @@ export class VaultAgent {
   readonly pendingTrash: { reference: string; title: string; version: string }[] = [];
   private refs = new Map<string, Ref>();
   private createdNotes = new Map<object, string>();
+  private editedNotes = new Set<object>();
   private next = 2;
   private sources: WebSource[] = [];
   private generated = new Map<string, GeneratedFile>();
@@ -78,9 +80,10 @@ export class VaultAgent {
     if (this.policy.writeScope !== "new" || this.createdNotes.get(ref.file.identity) !== ref.file.path || !allowedPath(this.policy, ref.file.path, "create")) return false;
     return action !== "organize" || this.policy.mode === "organize" || this.policy.mode === "all";
   }
-  hasWritableNote(): boolean {
+  hasUneditedWritableNote(): boolean {
     const ref = this.refs.get("N1");
-    return !!ref && this.allowedRef(ref, "read") && this.allowedRef(ref, "edit") && this.host.files().some(file => file.identity === ref.file.identity && file.path === ref.file.path);
+    if (!ref || this.editedNotes.has(ref.file.identity) || !this.allowedRef(ref, "read") || !this.allowedRef(ref, "edit")) return false;
+    return this.host.isCurrentNote ? this.host.isCurrentNote(ref.file) : this.host.files().some(file => file.identity === ref.file.identity && file.path === ref.file.path);
   }
   private reference(file: AgentFile): string {
     for (const [id, ref] of this.refs) if (ref.file.identity === file.identity && ref.file.path === file.path) return id;
@@ -165,7 +168,7 @@ export class VaultAgent {
       }
       await this.reserveOperations(plans.length); const ops = []; for (const plan of plans) ops.push(await this.prepareEdit(plan.ref.file, plan.before, plan.hash));
       for (const [index, plan] of plans.entries()) {
-        this.guard(); await this.host.replace(plan.ref.file, plan.before, plan.after);
+        this.guard(); await this.host.replace(plan.ref.file, plan.before, plan.after); this.editedNotes.add(plan.ref.file.identity);
         if (plan.ref.allowedRange) {
           plan.ref.allowedRange = { from: plan.ref.allowedRange.from, to: plan.ref.allowedRange.to + plan.after.length - plan.before.length };
           this.policy.selection = { ...plan.ref.allowedRange }; this.policy.selectionVersion = plan.hash;
@@ -202,7 +205,7 @@ export class VaultAgent {
       if (!ref.version || args.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("Read the current note version first.");
       const values: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
       for (const item of list(args.properties, 32)) { closedObject(item, ["key", "value"]); const key = textField(item.key, 80); if (!key || ["__proto__", "constructor", "prototype"].includes(key)) throw Error("Invalid property name."); values[key] = JSON.parse(textField(item.value, 8192)) as unknown; }
-      await this.reserveOperations(1); const op = await this.prepareEdit(ref.file, before, ""); await this.host.properties(ref.file, before, values); const after = await this.read(ref); op.afterHash = await inputDigest(after); op.status = "done"; ref.version = op.afterHash; ref.complete = false; await this.host.persist(this.journal);
+      await this.reserveOperations(1); const op = await this.prepareEdit(ref.file, before, ""); await this.host.properties(ref.file, before, values); const after = await this.read(ref); this.editedNotes.add(ref.file.identity); op.afterHash = await inputDigest(after); op.status = "done"; ref.version = op.afterHash; ref.complete = false; await this.host.persist(this.journal);
       return { status: "updated", reference: this.reference(ref.file), version: ref.version };
     }
     if (name === "rename_note") {

@@ -169,3 +169,45 @@ test('a partial file-only reply preserves the editable draft and attachment sele
   assert.equal(f.work.prompt,status==='incomplete'?'Generate and save a chart file':'');assert.equal(f.work.attachments.length,status==='incomplete'?1:0);assert.equal(f.work.task.state,status==='incomplete'?'failed':'completed');
  }
 });
+
+
+test('pure file requests and text-only replies never inspect a writable target or add a paid follow-up',async()=>{
+ for(const fileReply of [false,true]){
+  const f=fixture();await f.host.create('Current.md','Original');await f.work.initialize();await f.work.newTask({path:'Current.md'});let enumerations=0,lookups=0,calls=0;const files=f.host.files;
+  f.host.files=()=>{enumerations++;return files();};f.host.isCurrentNote=()=>{lookups++;return true;};
+  f.options.generated={stage:async()=>[{id:crypto.randomUUID(),name:'chart.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]};
+  f.options.transport=async()=>{calls++;return response(fileReply?[{type:'image_generation_call',id:'chart',result:'AA==',status:'completed'}]:[{type:'message',role:'assistant',content:[{type:'output_text',text:'Plain answer.'}]}]);};
+  f.work.maximum=1;f.work.setPrompt(fileReply?'Generate and save a chart file':'Answer this question only');await f.work.run();
+  assert.equal(f.work.task.state,'completed');assert.equal(calls,1);assert.equal(lookups,0);assert.equal(enumerations,1);assert.equal(f.files.get('Current.md').text,'Original');
+ }
+});
+
+test('a current-note edit already completed before generation is not requested again',async()=>{
+ const f=fixture();await f.host.create('Current.md','Original');await f.work.initialize();await f.work.newTask({path:'Current.md'});let calls=0;
+ f.options.generated={stage:async()=>[{id:crypto.randomUUID(),name:'chart.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]};
+ f.options.transport=async request=>{calls++;if(calls===1){const version=JSON.parse(JSON.parse(request.body).input[0].content).current_note.version;return response([{type:'function_call',call_id:'edit-first',name:'apply_changes',arguments:JSON.stringify({changes:[{reference:'N1',version,action:'append',markdown:'Summary once.'}]})}]);}return response([{type:'image_generation_call',id:'chart',result:'AA==',status:'completed'}]);};
+ f.work.maximum=2;f.work.setPrompt('Append a summary to the current note and generate a chart');await f.work.run();assert.equal(calls,2);assert.equal(f.work.task.state,'completed');assert.equal(f.files.get('Current.md').text.split('Summary once.').length-1,1);
+});
+
+test('file-only results retain their output folder and original request across rebind and a new task',async()=>{
+ const f=fixture();await f.host.create('Notes/Current.md','Original');await f.work.initialize();await f.work.newTask({path:'Notes/Current.md'});f.work.outputFolder='Chosen output';
+ f.options.generated={stage:async()=>[{id:crypto.randomUUID(),name:'chart.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]};f.options.transport=async()=>response([{type:'image_generation_call',id:'chart',result:'AA==',status:'completed'}]);
+ f.work.setPrompt('Generate a chart file');await f.work.run();assert.equal(f.work.result,'');assert.equal(f.work.hasResult,true);assert.equal(f.work.prompt,'');
+ f.work.bind({path:'Notes/Current.md'});assert.equal(f.work.outputFolder,'Chosen output');f.work.bind({path:'Other.md'});assert.equal(f.work.source.path,'Notes/Current.md');assert.equal(f.work.outputFolder,'Chosen output');
+ await f.work.newTask({path:'Notes/Current.md'});assert.equal(f.work.previous.at(-1).request,'Generate a chart file');assert.equal(f.work.previous.at(-1).answer,'');assert.equal(f.work.outputFolder,'Chosen output');
+});
+
+test('partially delivered generated files keep the request and selected inputs even with a completed response',async()=>{
+ for(const text of ['', 'Some results are ready.']){
+  const f=fixture();await f.work.initialize();f.work.writeScope='new';const file={id:crypto.randomUUID(),name:'source.txt',extension:'txt',kind:'document',mime:'text/plain',bytes:6,sha256:'a'.repeat(64)};f.work.attachments=[file];
+  f.options.attachments={forTask:()=>({prepare:async()=>({parts:[{type:'input_text',text:'Sample'}],fileIds:[]}),cleanup:async()=>true})};let staged=0;
+  f.options.generated={stage:async()=>{if(staged++===1)throw Error('Synthetic second-file delivery failure');return[{id:crypto.randomUUID(),name:'first.png',extension:'png',bytes:1,sha256:'b'.repeat(64)}];}};
+  f.options.transport=async()=>response([{type:'image_generation_call',id:'first',result:'AA==',status:'completed'},{type:'image_generation_call',id:'second',result:'AA==',status:'completed'},...(text?[{type:'message',role:'assistant',content:[{type:'output_text',text}]}]:[])]);
+  f.work.maximum=1;f.work.setPrompt('Generate two chart images');await f.work.run();assert.equal(f.work.task.state,'completed');assert.equal(f.work.task.generated.length,1);assert.equal(f.work.task.fileWarnings.length,1);assert.equal(f.work.prompt,'Generate two chart images');assert.equal(f.work.attachments.length,1);
+ }
+});
+
+
+test('non-string saved scope values cannot masquerade as selected permissions',async()=>{
+ const f=fixture();f.options.storage.load=async()=>({mode:['all'],readScope:['vault'],writeScope:['new']});await f.work.initialize();assert.equal(f.work.mode,'edit');assert.equal(f.work.readScope,'current');assert.equal(f.work.writeScope,'current');assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);
+});

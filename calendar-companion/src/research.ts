@@ -15,10 +15,17 @@ export function effectiveSourceMode(mode: SourceMode, request: string): SourceMo
   const prohibited = /\b(?:do\s+not|don['’]t|never)\s+(?:search|browse|use\s+(?:the\s+)?(?:web|internet|online|external)|access\s+(?:the\s+)?(?:web|internet))\b|\b(?:no|without)\s+(?:web|internet|online|external)\s*(?:search|sources|research|access)?\b|\bwithout\s+(?:searching|browsing)\b|\b(?:only|solely)\s+(?:use\s+)?(?:the\s+)?(?:provided|attached|supplied)\s+(?:materials?|files?|sources?|data|text)\b|(?:검색|브라우징)\s*(?:하지\s*(?:마|말)|금지|안\s*해)|(?:인터넷|외부\s*자료|웹)\s*(?:을|를)?\s*(?:쓰지|사용하지)|(?:제공된|첨부한|첨부된)\s*(?:자료|내용|파일)(?:에서)?만/i;
   return prohibited.test(request) ? "provided" : mode;
 }
+const NO_NOTE_CHANGES = /\b(?:do not|don't|don’t|never)\s+(?:change|modify|edit|save|write)|\b(?:answer|reply)\s+only\b|(?:저장|수정|변경|작성)\s*하지\s*(?:마|말)|답변만/i;
 export function requestsVaultWork(input: string): boolean {
   const request = requestText(input);
-  if (/\b(?:do not|don't|don’t|never)\s+(?:change|modify|edit|save|write)|\b(?:answer|reply)\s+only\b|(?:저장|수정|변경|작성)\s*하지\s*(?:마|말)|답변만/i.test(request)) return false;
+  if (NO_NOTE_CHANGES.test(request)) return false;
   return /\b(?:save|create|write|edit|update|append|insert|put|make)\b[\s\S]{0,80}\b(?:notes?|documents?|files?|markdown)\b|(?:노트|문서|마크다운|파일|\bmd\b)[\s\S]{0,40}(?:작성|저장|추가|수정|만들|넣)|(?:작성|저장|추가|수정|만들)[\s\S]{0,40}(?:노트|문서|마크다운|파일)/i.test(request);
+}
+/** A generated-file request alone is not a request to edit the attached Markdown note. */
+export function requestsAttachedNoteEdit(input: string): boolean {
+  const request = requestText(input);
+  if (NO_NOTE_CHANGES.test(request)) return false;
+  return /\b(?:append|edit|update|rewrite|revise|insert|add|write)\b[\s\S]{0,100}\b(?:notes?|documents?|markdown)\b|\b(?:notes?|documents?|markdown)\b[\s\S]{0,80}\b(?:append|edit|update|rewrite|revise|insert|add)\b|(?:노트|문서|마크다운)[\s\S]{0,40}(?:수정|추가|갱신|편집|고쳐|작성)|(?:수정|추가|갱신|편집|고쳐|작성)[\s\S]{0,40}(?:노트|문서|마크다운)/i.test(request);
 }
 export function onlineTools(mode: SourceMode, remaining: RequestLimit, fileIds: string[] = [], model = "gpt-6-luna", effort?: ReasoningEffort): Record<string, unknown>[] {
   if (remaining !== "none" && remaining < 1 || !supportsHostedTools(model)) return [];
