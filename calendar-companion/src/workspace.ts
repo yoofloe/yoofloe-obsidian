@@ -228,7 +228,7 @@ export class AiWorkspace {
     this.message = task.message;
     if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
     if (this.source && agent.policy.selection) { this.source.selection = { ...agent.policy.selection }; this.source.selectionVersion = agent.policy.selectionVersion; }
-    if (task.state !== "paused" && (task.text || agent.operations.some(op => op.status === "done"))) { this.prompt = ""; this.attachments = []; }
+    if (task.state !== "paused" && (task.text || agent.operations.some(op => op.status === "done") || task.state === "completed" && task.generated.length > 0)) { this.prompt = ""; this.attachments = []; }
     for (const journal of agent.journals) if (journal.operations.length) {
       journal.status = task.state !== "completed" || task.events.some(e => e.kind === "blocked") ? "interrupted" : "complete";
       await this.options.host(() => this.current).persist(journal); this.rememberJournal(journal);

@@ -172,6 +172,7 @@ export class YoofloeAiView extends ItemView {
       if (turn.sources?.length) { const sources = this.details(assistant, "sources-" + turn.id, `Sources · ${turn.sources.length}`); for (const source of turn.sources) sources.createEl("p").createEl("a", { text: source.title || source.url, href: source.url, attr: { target: "_blank", rel: "noopener noreferrer" } }); }
       for (const warning of turn.fileWarnings ?? []) assistant.createEl("p", { text: warning, cls: "y-ai-file-warning" });
       const visibleFiles = this.generatedVisible.get(turn.id) ?? 4;
+      if (turn.generated?.length) assistant.createEl("p", { text: "Generated files are cached locally. Save attachment copies a file to the output folder.", cls: "y-ai-hint" });
       for (const file of (turn.generated ?? []).slice(0, visibleFiles)) {
         const card = assistant.createDiv({ cls: "y-ai-generated" }); card.createSpan({ text: file.name });
         if (["png", "jpg", "jpeg", "webp"].includes(file.extension)) { const picture = card.createEl("img", { attr: { src: this.app.vault.adapter.getResourcePath(generatedCachePath(this.app.vault.configDir, file)), alt: file.name, loading: "lazy" } }); picture.addEventListener("error", () => { picture.hidden = true; }); picture.addEventListener("load", () => { const scroll = this.contentEl.querySelector(".y-ai-messages"); if (this.followChat && !this.chatQuery && scroll) scroll.scrollTop = scroll.scrollHeight; }); }

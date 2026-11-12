@@ -78,6 +78,10 @@ export class VaultAgent {
     if (this.policy.writeScope !== "new" || this.createdNotes.get(ref.file.identity) !== ref.file.path || !allowedPath(this.policy, ref.file.path, "create")) return false;
     return action !== "organize" || this.policy.mode === "organize" || this.policy.mode === "all";
   }
+  hasWritableNote(): boolean {
+    const ref = this.refs.get("N1");
+    return !!ref && this.allowedRef(ref, "read") && this.allowedRef(ref, "edit") && this.host.files().some(file => file.identity === ref.file.identity && file.path === ref.file.path);
+  }
   private reference(file: AgentFile): string {
     for (const [id, ref] of this.refs) if (ref.file.identity === file.identity && ref.file.path === file.path) return id;
     const id = `N${this.next++}`; this.refs.set(id, { file }); return id;

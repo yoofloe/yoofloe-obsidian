@@ -147,3 +147,25 @@ test('New documents is explicit, persists locally and advertises creation withou
  let seen=false;f.options.transport=async request=>{const body=JSON.parse(request.body);assert(body.tools.some(tool=>tool.name==='create_note'));seen=true;return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'No file change needed.'}]}]);};
  f.work.setPrompt('Answer only');await f.work.run();assert(seen);assert.equal(f.saved().writeScope,'new');assert.equal(f.files.size,0);
 });
+
+
+test('a generated file does not suppress a permitted current-note summary edit',async()=>{
+ const f=fixture();await f.host.create('Current.md','Original');await f.work.initialize();await f.work.newTask({path:'Current.md'});
+ f.options.generated={stage:async()=>[{id:crypto.randomUUID(),name:'chart.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]};let calls=0,version;
+ f.options.transport=async request=>{const body=JSON.parse(request.body);assert(!body.tools.some(tool=>tool.name==='save_generated_file'));calls++;
+  if(calls===1){version=JSON.parse(body.input[0].content).current_note.version;return response([{type:'image_generation_call',id:'chart',result:'AA==',status:'completed'},{type:'message',role:'assistant',content:[{type:'output_text',text:'Chart prepared.'}]}]);}
+  if(calls===2)return response([{type:'function_call',call_id:'append',name:'apply_changes',arguments:JSON.stringify({changes:[{reference:'N1',version,action:'append',markdown:'Requested text summary.'}]})}]);
+  return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Appended the summary.'}]}]);};
+ f.work.maximum=3;f.work.setPrompt('Generate a chart and append a text summary to the attached note');await f.work.run();assert.equal(calls,3);assert.equal(f.work.task.state,'completed');assert(f.files.get('Current.md').text.includes('Requested text summary.'));assert.equal(f.files.size,1);assert.equal(f.work.chat.at(-1).actions.length,1);
+});
+
+test('a partial file-only reply preserves the editable draft and attachment selection',async()=>{
+ for(const status of ['incomplete','completed']){
+  const f=fixture();await f.work.initialize();const file={id:crypto.randomUUID(),name:'source.txt',extension:'txt',kind:'document',mime:'text/plain',bytes:6,sha256:'a'.repeat(64)};
+  f.options.attachments={forTask:()=>({prepare:async()=>({parts:[{type:'input_text',text:'Sample'}],fileIds:[]}),cleanup:async()=>true})};f.work.attachments=[file];
+  f.options.generated={stage:async()=>[{id:crypto.randomUUID(),name:'chart.png',extension:'png',bytes:1,sha256:'b'.repeat(64)}]};let calls=0;
+  f.options.transport=async()=>{calls++;return{status:200,text:JSON.stringify({status,output:[{type:'image_generation_call',id:'chart',result:'AA==',status:'completed'}]})};};
+  f.work.maximum=1;f.work.setPrompt('Generate and save a chart file');await f.work.run();assert.equal(calls,1);assert.equal(f.work.task.text,'');assert.equal(f.work.task.generated.length,1);
+  assert.equal(f.work.prompt,status==='incomplete'?'Generate and save a chart file':'');assert.equal(f.work.attachments.length,status==='incomplete'?1:0);assert.equal(f.work.task.state,status==='incomplete'?'failed':'completed');
+ }
+});
