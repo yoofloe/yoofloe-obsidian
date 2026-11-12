@@ -34,7 +34,9 @@ Once a note is connected, browsing another note offers **Use opened note** above
 The header paperclip opens **Choose note**, including **Chat without a note**. Choosing a different note keeps the conversation, draft and permission settings.
 Running or paused tasks keep their original note.
 
-The conversation stays above the settings with a fixed-height, independently scrolling message area.
+The conversation stays above the settings, and each area scrolls independently.
+Drag the divider up or down to resize the two areas. You can also focus it with Tab and use the arrow keys.
+The split is remembered on this device; double-click the divider or press Enter to reset it.
 Choose **Expand settings** to give the settings the full available panel height, then **Back to chat** to return to the same conversation and draft.
 **Stop** stays available while a task runs with settings expanded.
 Model and permission cards sit below it; Calendar, activity, privacy and recovery remain compact.
