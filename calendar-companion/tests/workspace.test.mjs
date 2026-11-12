@@ -211,3 +211,13 @@ test('partially delivered generated files keep the request and selected inputs e
 test('non-string saved scope values cannot masquerade as selected permissions',async()=>{
  const f=fixture();f.options.storage.load=async()=>({mode:['all'],readScope:['vault'],writeScope:['new']});await f.work.initialize();assert.equal(f.work.mode,'edit');assert.equal(f.work.readScope,'current');assert.equal(f.work.writeScope,'current');assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);
 });
+
+
+test('generated-file follow-ups fulfill explicit put and Korean note-placement requests',async()=>{
+ for(const request of ['Generate a chart and put its summary in the current note','차트를 만들고 현재 노트에 요약을 넣어 줘','차트를 만들고 현재 노트에 요약을 저장해']){
+  const f=fixture();await f.host.create('Current.md','Original');await f.work.initialize();await f.work.newTask({path:'Current.md'});let calls=0,version;
+  f.options.generated={stage:async()=>[{id:crypto.randomUUID(),name:'chart.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]};
+  f.options.transport=async req=>{calls++;if(calls===1){version=JSON.parse(JSON.parse(req.body).input[0].content).current_note.version;return response([{type:'image_generation_call',id:'chart',result:'AA==',status:'completed'}]);}if(calls===2)return response([{type:'function_call',call_id:'write-summary',name:'apply_changes',arguments:JSON.stringify({changes:[{reference:'N1',version,action:'append',markdown:'Requested summary.'}]})}]);return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Summary added.'}]}]);};
+  f.work.maximum=3;f.work.setPrompt(request);await f.work.run();assert.equal(calls,3,request);assert.equal(f.work.task.state,'completed');assert(f.files.get('Current.md').text.includes('Requested summary.'));
+ }
+});
