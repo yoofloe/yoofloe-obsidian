@@ -10,7 +10,7 @@ The final behavior connects the first user-opened allowed note without clearing 
 Settings expansion reuses the same controls, preserves the draft and conversation position, displays action feedback, and exposes Stop while running. In extremely short keyboard layouts, the chat's secondary controls collapse to keep Send/Stop tappable. The Selected text indicator reflects the effective read scope.
 
 ## Verification
-- Type check, lint, production build and 195 tests: 186 pass, 9 intentionally dormant skips, 0 failures.
+- Type check, lint, production build and 197 tests: 188 pass, 9 intentionally dormant skips, 0 failures.
 - Offline plugin-event harness: layout restoration does not attach/write; generic Open preserves explicit no-note mode; navigation during initialization still reveals the workspace.
 - Physical Android SM-M135F: real file-open events, first-note connection, explicit switching, local picker, initial preview and mocked request payload, expanded settings/feedback, keyboard editing, Stop and preserved returned response. Zero actual plugin provider calls.
 - 320/384 px wide, 115–340 px tall keyboard layout fixtures in the real Android WebView: center hit test selects the 40 px primary action; secondary banner/settings bar are hidden.
@@ -18,7 +18,7 @@ Settings expansion reuses the same controls, preserves the draft and conversatio
 - Local data and payload backups remain outside Git in the task evidence directory. Synthetic Android test notes remain in the dedicated test vault; originals are not deleted.
 
 ## Review and limits
-Initial sealed security diff scan 02b1fd28-1598-4d5d-8fd6-6fabb7424efd covered the first 12-file candidate and reported no findings. It is immutable and does not represent the final corrected release. Subsequent CLI review found source-state, preview, scope and layout regressions; focused fixes and regression proofs above supersede the candidate's acceptance. The final CLI review and release/readback receipts are retained with the task evidence.
+Initial sealed security diff scan 02b1fd28-1598-4d5d-8fd6-6fabb7424efd covered the first 12-file candidate and reported no findings. It is immutable and does not represent the final corrected release. Subsequent CLI review found source-state, preview, scope and layout regressions; focused fixes and regression proofs above supersede the candidate's acceptance. Three CLI review passes identified the corrected edge cases. Follow-up source assertions and controller/physical UI regressions validate the final corrections; the immutable initial scan was not rewritten. Release/readback receipts are retained with the task evidence.
 
 This is not a live-provider response-quality test, iOS test, physical tablet test, or repository-wide security assurance. Existing key material was never displayed. Historical cloud/MCP payloads and Gemini remain dormant.
 

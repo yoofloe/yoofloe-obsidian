@@ -201,6 +201,10 @@ export class YoofloeAiView extends ItemView {
   private render(): void {
     if (!this.work.current) return;
     const w = this.work, el = this.contentEl, wasExpanded = el.classList.contains("y-ai-settings-expanded"), previousScroll = el.querySelector<HTMLElement>(".y-ai-messages"), oldScroll = wasExpanded ? this.savedChatScroll : previousScroll?.scrollTop ?? 0, oldMenuScroll = el.querySelector<HTMLElement>(".y-ai-scroll")?.scrollTop ?? 0;
+    const activeField = el.ownerDocument.activeElement;
+    const settingsFocus = activeField && el.querySelector(".y-ai-scroll")?.contains(activeField) && activeField.matches("input,textarea,select") ? activeField.getAttribute("aria-label") : null;
+    const selectionStart = settingsFocus && "selectionStart" in activeField! ? (activeField as HTMLInputElement).selectionStart : null;
+    const selectionEnd = settingsFocus && "selectionEnd" in activeField! ? (activeField as HTMLInputElement).selectionEnd : null;
     el.classList.toggle("y-ai-settings-expanded", this.settingsExpanded);
     const oldSearch = el.querySelector<HTMLInputElement>(".y-ai-chat-search"), searchFocused = el.ownerDocument.activeElement === oldSearch, searchCursor = oldSearch?.selectionStart ?? this.chatQuery.length;
     const follow = this.settingsExpanded || wasExpanded ? this.savedFollowChat : !previousScroll && w.chat.length > 0 || w.busy && w.chat.length > this.lastChatCount || !!previousScroll && previousScroll.scrollTop + previousScroll.clientHeight >= previousScroll.scrollHeight - 32; this.lastChatCount = w.chat.length; this.followChat = follow;
@@ -370,7 +374,11 @@ export class YoofloeAiView extends ItemView {
     run.title = w.busy ? "Stop future requests and file actions; keep completed work and any already-sent answer" : `Send permitted data directly to OpenAI · API charges · ${requestLimitLabel(w.maximum)}`;
     prompt.addEventListener("input", () => { w.setPrompt(prompt.value); run.disabled = !this.actionReady(); this.saveSoon(); });
     prompt.addEventListener("keydown", event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !run.disabled && !w.busy) { event.preventDefault(); run.click(); } });
-    scroll.scrollTop = this.settingsExpanded && feedback !== this.lastSettingsMessage ? 0 : oldMenuScroll; if (this.settingsExpanded) this.lastSettingsMessage = feedback; messages.scrollTop = follow && !this.chatQuery ? messages.scrollHeight : oldScroll;
+    scroll.scrollTop = this.settingsExpanded && !settingsFocus && feedback !== this.lastSettingsMessage ? 0 : oldMenuScroll; if (this.settingsExpanded) this.lastSettingsMessage = feedback; messages.scrollTop = follow && !this.chatQuery ? messages.scrollHeight : oldScroll;
+    if (settingsFocus && !w.settingsLocked) {
+      const replacement = Array.from(scroll.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")).find(field => field.getAttribute("aria-label") === settingsFocus);
+      if (replacement && !replacement.disabled) { replacement.focus({ preventScroll: true }); if (selectionStart !== null && selectionEnd !== null && "setSelectionRange" in replacement) replacement.setSelectionRange(selectionStart, selectionEnd); }
+    }
     if (searchFocused && !this.settingsExpanded) { search.focus({ preventScroll: true }); search.setSelectionRange(searchCursor, searchCursor); }
   }
   private watchViewport(): () => void {

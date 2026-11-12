@@ -296,3 +296,15 @@ test('separate archive or recovery listing errors do not lock a valid restored d
   const f=fixture();f.options.storage.load=async()=>({source:null,prompt:'Saved draft',result:'Paid answer'});if(area==='archive')f.options.storage.saveChat=async()=>{throw Error('Archive unavailable');};else f.options.storage.history=async()=>{throw Error('Recovery listing unavailable');};await f.work.initialize();assert.equal(f.work.prompt,'Saved draft');assert.equal(f.work.result,'Paid answer');assert.equal(f.work.settingsLocked,false);await f.work.persist();assert.equal(f.saved().prompt,'Saved draft');assert.equal(f.calls(),0);
  }
 });
+
+
+test('a save requested before restoration waits for the original draft and never overwrites a failed read',async()=>{
+ for(const broken of [false,true]){
+  const f=fixture();let release;f.options.storage.load=async()=>await new Promise((resolve,reject)=>{release=()=>broken?reject(Error('Unreadable')):resolve({prompt:'ORIGINAL_DRAFT',result:'PAID_ANSWER'});});const saving=f.work.persist();const failed=broken?assert.rejects(saving,/original work record/):null;await Promise.resolve();assert.equal(f.saved(),undefined);assert(f.work.settingsLocked);release();if(broken){await failed;assert.equal(f.saved(),undefined);}else{await saving;assert.equal(f.saved().prompt,'ORIGINAL_DRAFT');assert.equal(f.saved().result,'PAID_ANSWER');}
+ }
+});
+
+test('Open preserves a pending choice even when the active note or its selection differs',async()=>{
+ const f=fixture();await f.host.create('A.md','A');await f.host.create('B.md','B');await f.work.initialize();f.work.attachNote({path:'A.md'});f.work.bind({path:'B.md'});f.work.bind({path:'A.md'},false,true);assert.equal(f.work.nextSource.path,'B.md');assert.equal(f.work.source.path,'A.md');
+ const g=fixture();await g.host.create('B.md','B');await g.work.initialize();g.work.busy=true;g.work.bind({path:'B.md'});g.work.busy=false;g.work.bind({path:'B.md',selection:{from:0,to:1},selectionVersion:'0'.repeat(64)},false,true);assert.equal(g.work.source,null);assert.equal(g.work.nextSource.selection,undefined);
+});

@@ -105,7 +105,7 @@ export default class YoofloeAiPlugin extends Plugin {
     }
     const work = this.workspace(); await work.initialize(); if (!this.live) return;
     if (this.sourceEpoch === epoch && this.capturingSource === null) {
-      work.bind(selected ?? this.lastSource);
+      work.bind(selected ?? this.lastSource, false, true);
     }
     let leaf = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
     if (Platform.isPhone && leaf && leaf.getRoot() !== this.app.workspace.rootSplit) {
@@ -163,7 +163,7 @@ export default class YoofloeAiPlugin extends Plugin {
       host: current => obsidianAgentHost(this.app, owner, current), inboxHint: () => adapter.getResourcePath(`${INBOX}/`),
       transport: async request => { if (!ai.current()) throw Error("Vault changed"); const response = await requestUrl(request); return { status: response.status, text: response.text }; },
       storage: {
-        load: async () => { const path = `${root}/workspace.json`; if (!await adapter.exists(path)) return null; const stat = await adapter.stat(path); if (!stat || stat.size > 8 * 1024 * 1024) throw Error("Saved work exceeds its local size limit."); return JSON.parse(await adapter.read(path)) as unknown; },
+        load: async () => { const path = `${root}/workspace.json`; if (!await adapter.exists(path)) return null; const stat = await adapter.stat(path); if (!stat || stat.size > 8 * 1024 * 1024) throw Error("Saved work exceeds its local size limit."); const value = JSON.parse(await adapter.read(path)) as unknown; if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("The existing work record is not a workspace object."); return value; },
         save: async value => { if (!ai.current()) throw Error("Vault changed"); const text = JSON.stringify(value); if (text.length > 8 * 1024 * 1024) throw Error("Saved work exceeds its local size limit."); const path = `${root}/workspace.json`; await adapter.write(path, text); if (await adapter.read(path) !== text) throw Error("The local work record could not be confirmed."); },
         history: () => loadWorkRecords(owner),
         saveChat: (turn: ChatTurn) => {

@@ -74,7 +74,7 @@ export class AiWorkspace {
   get canStop() { return this.busy && this.running && !this.stopRequested; }
   get stopping() { return this.busy && this.stopRequested; }
   get canContinue() { return this.current && !!this.task?.canResume && !!this.agent; }
-  get settingsLocked() { return this.restoreFailed || this.busy || this.canContinue || this.addingAttachments; }
+  get settingsLocked() { return !this.ready || this.restoreFailed || this.busy || this.canContinue || this.addingAttachments; }
   get limitProblem(): string {
     if (this.customOnlineMaximum !== null && customRequestLimit(this.customOnlineMaximum) === null) return "Enter a positive tool count, or choose no tool-count limit.";
     try { requestLimit(this.onlineMaximum); } catch { return "Choose a valid built-in tool limit."; }
@@ -155,8 +155,9 @@ export class AiWorkspace {
     catch { this.message = "Open settings to save your key locally and choose a model."; }
     this.changed();
   }
-  bind(source: WorkspaceSource | null, force = false): void {
+  bind(source: WorkspaceSource | null, force = false, preservePending = false): void {
     if (!this.current) return;
+    if (preservePending && this.nextSource) return;
     if (!force) {
       if (!source) return; // Activating the AI tab is not a request to detach a note.
       if (source.path === this.source?.path && !source.selection) {
@@ -425,8 +426,9 @@ export class AiWorkspace {
     finally { this.busy = false; this.changed(); }
   }
   async removeCalendar(): Promise<void> { if (this.settingsLocked) return; await this.calendar?.dispose(); this.calendar = null; this.delivery = null; this.preview = ""; this.changed(); }
-  persist(): Promise<void> {
-    if (this.restoreFailed) return Promise.reject(Error("Saved work could not be read. The original work record was preserved."));
+  async persist(): Promise<void> {
+    if (!this.ready) await this.initialize();
+    if (this.restoreFailed) throw Error("Saved work could not be read. The original work record was preserved.");
     const value = { prompt: this.prompt, lastRequest: this.lastRequest, source: this.source?.path ?? null, selection: this.source?.selection, selectionVersion: this.source?.selectionVersion, mode: this.mode, readScope: this.readScope, writeScope: this.writeScope,
       outputFolder: this.outputFolder, outputFolderChosen: this.outputFolderChosen, excluded: this.excluded, maximum: this.maximum, result: this.result, previous: this.previous, sourceMode: this.sourceMode, onlineMaximum: this.onlineMaximum, attachments: this.attachments, autoAttachNote: this.autoAttachNote,
       ...(this.customOnlineMaximum !== null ? { customOnlineMaximum: this.customOnlineMaximum } : {}),
