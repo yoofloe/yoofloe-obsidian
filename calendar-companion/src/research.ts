@@ -1,4 +1,5 @@
 import type { RequestLimit } from "./request-limit";
+import type { ReasoningEffort } from "./effort";
 
 export type SourceMode = "expanded" | "provided";
 export const SOURCE_MODES: Record<SourceMode, string> = { expanded: "Expanded · web, analysis and images", provided: "Provided materials only" };
@@ -19,12 +20,14 @@ export function requestsVaultWork(input: string): boolean {
   if (/\b(?:do not|don't|don’t|never)\s+(?:change|modify|edit|save|write)|\b(?:answer|reply)\s+only\b|(?:저장|수정|변경|작성)\s*하지\s*(?:마|말)|답변만/i.test(request)) return false;
   return /\b(?:save|create|write|edit|update|append|insert|put|make)\b[\s\S]{0,80}\b(?:notes?|documents?|files?|markdown)\b|(?:노트|문서|마크다운|파일|\bmd\b)[\s\S]{0,40}(?:작성|저장|추가|수정|만들|넣)|(?:작성|저장|추가|수정|만들)[\s\S]{0,40}(?:노트|문서|마크다운|파일)/i.test(request);
 }
-export function onlineTools(mode: SourceMode, remaining: RequestLimit, fileIds: string[] = [], model = "gpt-6-luna"): Record<string, unknown>[] {
+export function onlineTools(mode: SourceMode, remaining: RequestLimit, fileIds: string[] = [], model = "gpt-6-luna", effort?: ReasoningEffort): Record<string, unknown>[] {
   if (remaining !== "none" && remaining < 1 || !supportsHostedTools(model)) return [];
+  // Image models reject inherited `none`; their planning control has three supported levels.
+  const complexity = effort === "medium" ? "medium" : effort === "high" || effort === "xhigh" || effort === "max" ? "high" : "low";
   return [
     ...(mode === "expanded" ? [{ type: "web_search", external_web_access: true }] : []),
     { type: "code_interpreter", container: { type: "auto", memory_limit: "1g", network_policy: { type: "disabled" }, ...(fileIds.length ? { file_ids: fileIds } : {}) } },
-    { type: "image_generation", model: "gpt-image-2.5-flare", output_format: "png" },
+    { type: "image_generation", model: "gpt-image-2.5-flare", complexity, output_format: "png" },
   ];
 }
 export function sourceInstructions(mode: SourceMode, hosted = true): string {

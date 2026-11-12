@@ -18,6 +18,13 @@ test('expanded tools include live search; supplied-material analysis has no netw
  for(const url of ['javascript:alert(1)','file:///etc/passwd','https://key@host.example','https://example.com/\nsecret'])assert.equal(publicUrl(url),null);
 });
 
+test('image planning uses valid levels without changing the selected text-model thinking depth',async()=>{
+ for(const [effort,complexity] of [['none','low'],['low','low'],['medium','medium'],['high','high'],['xhigh','high'],['max','high'],['default','low']]){
+  let calls=0;const t=task(async request=>{calls++;const body=JSON.parse(request.body);assert.equal(body.reasoning?.effort,effort==='default'?undefined:effort);assert.equal(body.tools.find(tool=>tool.type==='image_generation').complexity,complexity);return response([message('A synthetic image response.')]);});
+  await t.run('{"request":"Create an image"}',{model:'gpt-6-luna',effort},'ask',1,{mode:'provided',maximum:1});assert.equal(t.state,'completed');assert.equal(calls,1);
+ }
+});
+
 test('web citations become clickable Markdown and hosted tool state is retained for stateless continuation',()=>{
  const raw=response([{type:'web_search_call',id:'w',status:'completed',action:{type:'search',sources:[{url:'https://example.org/statistics',title:'Statistics'}]}},{type:'message',role:'assistant',content:[{type:'output_text',text:'😀 통계 결과',annotations:[{type:'url_citation',start_index:2,end_index:4,title:'Official data',url:'https://example.org/statistics'}]}]}]);
  const r=parseAgentReply(raw.status,raw.text);assert.equal(r.online.search,1);assert.match(r.text,/😀 \[통계\]\(https:\/\/example.org\/statistics\)/);assert.equal(r.sources.length,1);assert(r.output.some(x=>x.type==='web_search_call'));

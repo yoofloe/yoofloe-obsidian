@@ -37,7 +37,7 @@ function failureDetails(status: number, raw: string): string {
     const codes = new Set(["invalid_request_error", "invalid_value", "invalid_parameter", "unsupported_parameter", "unsupported_value", "model_not_found", "invalid_image", "invalid_image_format", "invalid_image_url", "image_parse_error", "invalid_file", "permission_error", "insufficient_quota", "rate_limit_exceeded", "server_error"]);
     if (error) {
       for (const field of ["type", "code"]) if (typeof error[field] === "string" && codes.has(error[field]) && !parts.includes(error[field])) parts.push(error[field]);
-      if (typeof error.param === "string" && /^(?:model|input|tools|tool_choice|reasoning|parallel_tool_calls|max_tool_calls)(?:\[\d{1,3}\]|\.(?:type|model|quality|size|output_format|file_id|image_url|detail|content|effort))*$/.test(error.param)) parts.push(`parameter: ${error.param}`);
+      if (typeof error.param === "string" && error.param.length <= 96 && /^(?:model|tool_choice|parallel_tool_calls|max_tool_calls|reasoning(?:\.effort)?|tools(?:\[\d{1,3}\](?:\.(?:type|model|quality|size|output_format))?)?|input(?:\[\d{1,3}\]\.content(?:\[\d{1,3}\](?:\.(?:type|file_id|image_url|detail))?)?)?)$/.test(error.param)) parts.push(`parameter: ${error.param}`);
     }
   } catch { /* A non-JSON error still has a useful status without exposing its body. */ }
   return parts.join("; ");

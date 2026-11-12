@@ -114,6 +114,10 @@ test('request failures expose status and allowlisted diagnostics without echoing
   for (const raw of [fakeKey, JSON.stringify({error:{type:fakeKey,code:fakeKey,param:'input.private-note.md',message:fakeKey}}), ' '.repeat(65537)+fakeKey]) {
     assert.throws(() => parseOpenAiDraft(502,raw), error => { assert.match(error.message,/HTTP 502/); assert(!error.message.includes(fakeKey)); assert(!error.message.includes('private-note')); return true; });
   }
+  for (const param of ['input'+'.content'.repeat(6000),'model.model','tools[0].model.model','input[0].file_id']) {
+    assert.throws(() => parseOpenAiDraft(400,JSON.stringify({error:{type:'invalid_request_error',param}})), error => { assert(error.message.length < 160); assert(!error.message.includes('parameter:')); return true; });
+  }
+  assert.throws(() => parseOpenAiDraft(400,JSON.stringify({error:{param:'input[0].content[1].file_id'}})), /parameter: input\[0\]\.content\[1\]\.file_id/);
 });
 function preferenceHost(binding = 'local-fixture://vault-one') {
   let value = { keep: 42 }, current = true, saves = 0; const secrets = new Map();

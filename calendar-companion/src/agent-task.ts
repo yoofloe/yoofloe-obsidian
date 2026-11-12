@@ -95,7 +95,7 @@ export class AgentTask {
       }
       while ((maximum === "none" || this.requests < maximum) && !this.stopped && this.options.current()) {
         const remaining = this.onlineMaximum === "none" ? "none" : Math.max(0, this.onlineMaximum - this.onlineCalls);
-        const hosted = onlineTools(this.sourceMode, remaining, this.fileIds, model.model);
+        const hosted = onlineTools(this.sourceMode, remaining, this.fileIds, model.model, effort);
         const body = JSON.stringify({ model: model.model, instructions: AGENT_INSTRUCTION.replace("Do not run code, call external URLs, request keys, access configuration/backup folders, or expand permissions.", "Never request keys, access configuration/backup folders, execute local code, or expand permissions.") + " " + sourceInstructions(this.sourceMode, supportsHostedTools(model.model)) + " When asked to change a document or note title, use rename_note to change its filename/tab title; adding a Markdown heading alone is not a document rename. If the user explicitly requests only a body heading, edit that heading. Report only file operations confirmed by the tools." + (remaining === 0 ? " The online tool budget is exhausted. Finish with verified evidence already obtained; disclose missing coverage without claiming further research." : ""), input: this.items, tools: [...agentTools(mode), ...hosted], parallel_tool_calls: false,
           ...(hosted.length && remaining !== "none" && remaining > 0 ? { max_tool_calls: remaining } : {}),
           store: false, stream: false, include: ["reasoning.encrypted_content", ...(this.sourceMode === "expanded" && hosted.length ? ["web_search_call.action.sources"] : [])], ...(effort ? { reasoning: { effort } } : {}) });

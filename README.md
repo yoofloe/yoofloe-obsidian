@@ -37,6 +37,7 @@ The conversation shows user requests, assistant answers, actual confirmed operat
 
 The task reads relevant excerpts as needed within your chosen data scope; it does not upload the whole vault upfront.
 The model control shows the full GPT version/name and the exact selected API model ID.
+Image planning uses Low for Fast/Light or Model default, Medium for Balanced, and High for deeper settings. This separate image setting keeps Fast text responses compatible with image generation; image rendering can still incur tool charges.
 Choose **Working / output folder** to browse a collapsible folder tree like the file explorer, including the vault root.
 Search reaches every existing subfolder; larger search results have an explicit **Show more** control.
 This picker uses local folder names only. It cannot choose an external computer/device folder, and cancelling keeps your previous choice.
