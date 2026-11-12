@@ -1,4 +1,4 @@
-import { Component, ItemView, MarkdownRenderer, Notice, Platform, setIcon, type WorkspaceLeaf } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, Notice, Platform, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
 import { AiWorkspace } from "./workspace";
 import { MODE_LABELS, SCOPE_LABELS, WRITE_SCOPE_LABELS } from "./agent-policy";
 import { EFFORT_LABELS, resolveEffort, supportedEfforts } from "./effort";
@@ -118,7 +118,7 @@ export class YoofloeAiView extends ItemView {
   private settingSummary(details: HTMLDetailsElement, title: string, value: string, icon: string): void {
     const summary = details.querySelector("summary"); if (!summary) return; summary.empty();
     const symbol = summary.createSpan({ cls: "y-ai-setting-icon" }); setIcon(symbol, icon);
-    const copy = summary.createSpan({ cls: "y-ai-setting-copy" }); copy.createEl("strong", { text: title }); if (value) copy.createEl("small", { text: value, attr: { title: value } });
+    const copy = summary.createSpan({ cls: "y-ai-setting-copy" }); copy.createEl("strong", { text: title }); if (value) setTooltip(copy.createEl("small", { text: value }), value);
     const chevron = summary.createSpan({ cls: "y-ai-setting-chevron" }); setIcon(chevron, "chevron-down");
   }
   private select<T extends string>(el: HTMLElement, label: string, values: Record<T, string>, selected: T, change: (value: T) => void, allowPaused = false): HTMLSelectElement {
@@ -295,6 +295,7 @@ export class YoofloeAiView extends ItemView {
   private libraryButton(el: HTMLElement, label: string, icon: string, action: () => void, disabled = false, iconOnly = false): HTMLButtonElement {
     const button = this.button(el, "", action, disabled, iconOnly ? "clickable-icon y-ai-library-icon" : "y-ai-library-button");
     button.setAttribute("aria-label", label);
+    if (iconOnly) setTooltip(button, label);
     setIcon(button.createSpan({ cls: "y-ai-library-symbol", attr: { "aria-hidden": "true" } }), icon);
     if (!iconOnly) button.createSpan({ text: label });
     return button;
@@ -531,7 +532,7 @@ export class YoofloeAiView extends ItemView {
         const { label, icon } = COMPOSER_ACTIONS[action];
         run.dataset.action = action;
         run.setAttribute("aria-label", label);
-        run.title = label;
+        setTooltip(run, label);
         setIcon(run, icon);
       }
       run.disabled = w.busy ? !w.canStop : !this.actionReady();
@@ -577,6 +578,7 @@ export class YoofloeAiView extends ItemView {
       this.contentEl.querySelector<HTMLButtonElement>(".y-ai-add-message:not([hidden])")?.focus({ preventScroll: true });
     }, false, "clickable-icon y-ai-close-follow-up");
     close.setAttribute("aria-label", "Close additional message");
+    setTooltip(close, "Close additional message");
     setIcon(close, "x");
     input.addEventListener("keydown", event => {
       const action = w.followUpDefault === "steer" ? steer : queue;
@@ -646,21 +648,22 @@ export class YoofloeAiView extends ItemView {
     const follow = this.settingsExpanded || wasExpanded ? this.savedFollowChat : !previousScroll && w.chat.length > 0 || w.busy && w.chat.length > this.lastChatCount || !!previousScroll && previousScroll.scrollTop + previousScroll.clientHeight >= previousScroll.scrollHeight - 32; this.lastChatCount = w.chat.length; this.followChat = follow;
     this.rendering?.unload(); this.rendering = new Component(); this.rendering.load(); el.empty();
     const header = el.createDiv({ cls: "y-ai-header" }), title = header.createDiv({ cls: "y-ai-heading" });
-    title.createEl("h2", { text: "Yoofloe" }); title.createEl("p", { text: `${w.source?.selection && w.readScope === "current" ? "Selected text · " : ""}${w.title}`, attr: { title: w.source?.path ?? "Choose a note or chat without one", "aria-live": "polite" } });
-    const note = this.button(header, "", () => this.options.chooseNote(), w.settingsLocked || !w.ready, "clickable-icon"); note.setAttribute("aria-label", "Choose note"); note.title = "Choose a note to read or edit"; setIcon(note, "paperclip");
+    title.createEl("h2", { text: "Yoofloe" }); const noteContext = title.createEl("p", { text: `${w.source?.selection && w.readScope === "current" ? "Selected text · " : ""}${w.title}`, attr: { "aria-live": "polite" } });
+    if (w.source?.path) setTooltip(noteContext, w.source.path);
+    const note = this.button(header, "", () => this.options.chooseNote(), w.settingsLocked || !w.ready, "clickable-icon"); note.setAttribute("aria-label", "Choose note"); setTooltip(note, "Choose a note to read or edit"); setIcon(note, "paperclip");
     const library = this.button(header, "", () => { this.libraryOpen = !this.libraryOpen; this.render(); }, false, "clickable-icon");
-    library.setAttribute("aria-label", "Manage conversations"); library.setAttribute("aria-expanded", String(this.libraryOpen)); setIcon(library, "messages-square");
+    library.setAttribute("aria-label", "Manage conversations"); setTooltip(library, "Manage conversations"); library.setAttribute("aria-expanded", String(this.libraryOpen)); setIcon(library, "messages-square");
     const fresh = this.button(header, "", () => void this.createConversation(), !w.canSwitchConversation || w.library.conversations.length >= MAX_CONVERSATIONS, "clickable-icon");
-    fresh.setAttribute("aria-label", "New conversation"); setIcon(fresh, "square-pen");
-    const settings = this.button(header, "", () => this.options.settings(), w.settingsLocked, "clickable-icon"); settings.setAttribute("aria-label", "Yoofloe settings"); setIcon(settings, "settings-2");
-    const compactExpand = this.button(header, "", () => this.toggleSettings(), false, "clickable-icon y-ai-header-expand"); compactExpand.setAttribute("aria-label", "Expand settings"); compactExpand.setAttribute("aria-controls", this.settingsId); compactExpand.setAttribute("aria-expanded", String(this.settingsExpanded)); compactExpand.title = "Expand settings"; setIcon(compactExpand, "maximize-2");
-    const hide = this.button(header, "", () => this.options.hide(), false, "clickable-icon"); hide.setAttribute("aria-label", "Hide Yoofloe"); setIcon(hide, "panel-right-close");
+    fresh.setAttribute("aria-label", "New conversation"); setTooltip(fresh, "New conversation"); setIcon(fresh, "square-pen");
+    const settings = this.button(header, "", () => this.options.settings(), w.settingsLocked, "clickable-icon"); settings.setAttribute("aria-label", "Yoofloe settings"); setTooltip(settings, "Yoofloe settings"); setIcon(settings, "settings-2");
+    const compactExpand = this.button(header, "", () => this.toggleSettings(), false, "clickable-icon y-ai-header-expand"); compactExpand.setAttribute("aria-label", "Expand settings"); compactExpand.setAttribute("aria-controls", this.settingsId); compactExpand.setAttribute("aria-expanded", String(this.settingsExpanded)); setTooltip(compactExpand, "Expand settings"); setIcon(compactExpand, "maximize-2");
+    const hide = this.button(header, "", () => this.options.hide(), false, "clickable-icon"); hide.setAttribute("aria-label", "Hide Yoofloe"); setTooltip(hide, "Hide Yoofloe"); setIcon(hide, "panel-right-close");
     if (this.libraryOpen) this.renderLibrary(el);
     if (w.nextSource) {
       const candidate = w.nextSource, context = el.createDiv({ cls: "y-ai-note-context" });
-      context.createSpan({ text: candidate.path.split("/").at(-1) ?? candidate.path, attr: { title: candidate.path } });
+      setTooltip(context.createSpan({ text: candidate.path.split("/").at(-1) ?? candidate.path }), candidate.path);
       const attach = this.button(context, candidate.selection ? "Use selection" : "Use opened note", () => w.attachNote(candidate), w.settingsLocked, "mod-cta");
-      attach.title = w.settingsLocked ? "Finish or stop the current task before changing its note" : "Connect this note without clearing the conversation or draft";
+      setTooltip(attach, w.settingsLocked ? "Finish or stop the current task before changing its note" : "Connect this note without clearing the conversation or draft");
     }
     const chatId = `${this.settingsId}-chat`;
     const chatPanel = el.createEl("section", { cls: "y-ai-chat-panel", attr: { id: chatId, "aria-label": "Yoofloe conversation" } });
@@ -671,7 +674,8 @@ export class YoofloeAiView extends ItemView {
     if (this.chatQuery) { const clear = this.button(searchBar, "", () => { this.chatQuery = ""; void this.searchConversation(); }, false, "clickable-icon"); clear.setAttribute("aria-label", "Clear conversation search"); setIcon(clear, "x"); }
     const messages = chatPanel.createDiv({ cls: "y-ai-messages", attr: { "aria-label": "Scrollable conversation", tabindex: "0" } });
     messages.addEventListener("wheel", () => { this.followChat = false; }, { passive: true }); messages.addEventListener("touchstart", () => { this.followChat = false; }, { passive: true });
-    const divider = el.createDiv({ cls: "y-ai-split-handle", attr: { hidden: "", role: "separator", tabindex: "0", "aria-orientation": "horizontal", "aria-controls": chatId, "aria-label": "Conversation height", title: "Drag to resize or use the arrow keys. Double-click to reset." } });
+    const divider = el.createDiv({ cls: "y-ai-split-handle", attr: { hidden: "", role: "separator", tabindex: "0", "aria-orientation": "horizontal", "aria-controls": chatId, "aria-label": "Conversation height" } });
+    setTooltip(divider, "Drag to resize or use the arrow keys. Double-click to reset.");
     const settingsBar = el.createDiv({ cls: "y-ai-settings-bar" }); settingsBar.createEl("strong", { text: "Workspace settings" });
     if (this.settingsExpanded && (w.canStop || w.stopping)) this.button(settingsBar, w.stopping ? "Stopping…" : "Stop", () => w.stop(), !w.canStop, "y-ai-settings-stop mod-warning");
     const expand = this.button(settingsBar, this.settingsExpanded ? "Back to chat" : "Expand settings", () => this.toggleSettings(), false, "y-ai-settings-toggle");
@@ -691,7 +695,7 @@ export class YoofloeAiView extends ItemView {
     if (w.model.model && !choices[w.model.model]) choices[w.model.model] = `Custom · ${w.model.model}`;
     choices.__custom__ = "Custom model…";
     const model = this.select(models, "Model", choices, w.model.model, value => { if (value === "__custom__") this.options.settings(); else void w.setModel({ model: value }); });
-    model.title = choices[w.model.model] ?? w.model.model;
+    setTooltip(model, choices[w.model.model] ?? w.model.model);
     if (w.model.model && !supportsHostedTools(w.model.model)) modelSettings.createEl("p", { text: "Hosted web, analysis and image tools are not enabled for this custom model because support is unconfirmed. Choose a listed model for those tools. Text and permitted note actions remain available.", cls: "y-ai-hint" });
     const efforts: Record<string, string> = { default: EFFORT_LABELS.default };
     for (const effort of supportedEfforts(w.model.model)) efforts[effort] = EFFORT_LABELS[effort];
@@ -704,7 +708,7 @@ export class YoofloeAiView extends ItemView {
     }
     const scope = this.details(primarySettings, "scope", "Permissions");
     this.settingSummary(scope, "Access", w.mode === "ask" ? `Read: ${SCOPE_LABELS[w.readScope]}` : w.readScope === w.writeScope ? SCOPE_LABELS[w.readScope] : `Read: ${SCOPE_LABELS[w.readScope]} · Write: ${WRITE_SCOPE_LABELS[w.writeScope]}`, "sliders-horizontal");
-    scope.querySelector("summary")?.setAttribute("title", `${MODE_LABELS[w.mode]} · Read: ${SCOPE_LABELS[w.readScope]} · Write: ${WRITE_SCOPE_LABELS[w.writeScope]}`);
+    setTooltip(scope.querySelector("summary")!, `${MODE_LABELS[w.mode]} · Read: ${SCOPE_LABELS[w.readScope]} · Write: ${WRITE_SCOPE_LABELS[w.writeScope]}`);
     this.select(scope, "Allowed actions", MODE_LABELS, w.mode, value => { w.mode = value; this.render(); });
     if (w.mode === "all") scope.createEl("p", { text: "All actions still follow the read scope and write target below. They never expand access to other notes.", cls: "y-ai-hint" });
     this.select(scope, "Notes AI can read", SCOPE_LABELS, w.readScope, value => { w.readScope = value; this.render(); });
@@ -722,7 +726,7 @@ export class YoofloeAiView extends ItemView {
         path => { w.setOutputFolder(path); this.saveSoon(); this.render(); }, w.outputFolder).open();
     }, w.settingsLocked, "y-ai-folder");
     folder.setAttribute("aria-label", `Choose working and output folder: ${w.outputFolder || "Vault root"}`);
-    folder.title = "Choose a folder inside this vault";
+    setTooltip(folder, "Choose a folder inside this vault");
     setIcon(folder.createSpan({ cls: "y-ai-folder-icon" }), "folder");
     folder.createSpan({ text: w.outputFolder || "Vault root · /", cls: "y-ai-folder-path" });
     setIcon(folder.createSpan({ cls: "y-ai-folder-icon" }), "chevron-down");
@@ -817,7 +821,7 @@ export class YoofloeAiView extends ItemView {
     const dock = chatPanel.createDiv({ cls: `y-ai-dock${this.followUpOpen ? " y-ai-follow-up-open" : ""}` });
     if (w.attachments.length) {
       const attachments = dock.createDiv({ cls: "y-ai-attachments", attr: { "aria-label": "Attached files" } });
-      for (const file of w.attachments) { const chip = attachments.createDiv({ cls: "y-ai-attachment" }); const icon = chip.createSpan(); setIcon(icon, file.kind === "audio" ? "audio-lines" : file.kind === "image" ? "image" : "file-text"); chip.createSpan({ text: file.name, cls: "y-ai-attachment-name", attr: { title: `${file.name} · ${(file.bytes / 1024).toFixed(0)} KiB${file.kind === "audio" ? " · transcription charges apply" : ""}` } }); const remove = this.button(chip, "", () => w.removeAttachment(file.id), w.settingsLocked, "clickable-icon"); remove.setAttribute("aria-label", `Remove ${file.name} from this request`); setIcon(remove, "x"); }
+      for (const file of w.attachments) { const chip = attachments.createDiv({ cls: "y-ai-attachment" }); const icon = chip.createSpan(); setIcon(icon, file.kind === "audio" ? "audio-lines" : file.kind === "image" ? "image" : "file-text"); setTooltip(chip.createSpan({ text: file.name, cls: "y-ai-attachment-name" }), `${file.name} · ${(file.bytes / 1024).toFixed(0)} KiB${file.kind === "audio" ? " · transcription charges apply" : ""}`); const remove = this.button(chip, "", () => w.removeAttachment(file.id), w.settingsLocked, "clickable-icon"); remove.setAttribute("aria-label", `Remove ${file.name} from this request`); setIcon(remove, "x"); }
     }
     const compose = dock.createDiv({ cls: "y-ai-compose" });
     const prompt = compose.createEl("textarea", { text: w.prompt, cls: "y-ai-primary-prompt", attr: { rows: "1", "aria-label": "Ask", placeholder: "Ask…" } });
@@ -825,12 +829,12 @@ export class YoofloeAiView extends ItemView {
     const controls = dock.createDiv({ cls: `y-ai-row${w.busy ? " y-ai-running-controls" : ""}` });
     const picker = controls.createEl("input", { attr: { type: "file", multiple: "", "aria-label": "Choose attachments" } }); picker.hidden = true;
     picker.addEventListener("change", () => { const files = Array.from(picker.files ?? []); picker.value = ""; void w.addAttachments(files); });
-    const attach = this.button(controls, "", () => picker.click(), w.settingsLocked, "y-ai-attach clickable-icon"); attach.setAttribute("aria-label", "Attach images, files or audio"); attach.title = ATTACHMENT_LIMIT_LABEL; setIcon(attach, "plus");
-    const mode = this.select(controls, "AI mode", { expanded: "Expanded", provided: "Provided only" }, w.sourceMode, value => w.setSourceMode(value)); mode.title = SOURCE_MODES[w.sourceMode];
+    const attach = this.button(controls, "", () => picker.click(), w.settingsLocked, "y-ai-attach clickable-icon"); attach.setAttribute("aria-label", "Attach images, files or audio"); setTooltip(attach, ATTACHMENT_LIMIT_LABEL); setIcon(attach, "plus");
+    const mode = this.select(controls, "AI mode", { expanded: "Expanded", provided: "Provided only" }, w.sourceMode, value => w.setSourceMode(value)); setTooltip(mode, SOURCE_MODES[w.sourceMode]);
     if (this.followUpOpen) this.followUpEditor(compose, controls);
     const addMessage = this.button(controls, "", () => this.openFollowUp(), false, "y-ai-add-message clickable-icon");
     addMessage.setAttribute("aria-label", "Add message");
-    addMessage.title = "Add message";
+    setTooltip(addMessage, "Add message");
     setIcon(addMessage, "message-square-plus");
     const run = this.button(controls, "", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, false, "y-ai-send");
     this.apiDisclosure(dock);

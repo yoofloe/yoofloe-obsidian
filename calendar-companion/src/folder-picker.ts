@@ -1,4 +1,4 @@
-import { Modal, Notice, Platform, SearchComponent, setIcon, type App, type TFolder } from "obsidian";
+import { Modal, Notice, Platform, SearchComponent, setIcon, setTooltip, type App, type TFolder } from "obsidian";
 import { allowedPath, type TaskPolicy } from "./agent-policy";
 import { folderRows, type FolderRow } from "./folder-tree";
 
@@ -52,7 +52,7 @@ export class VaultFolderPicker extends Modal {
   }
   onClose(): void { this.stopViewport?.(); this.stopViewport = null; this.contentEl.empty(); }
   private updateSelection(): void {
-    this.selection.textContent = this.selected || "Vault root · /"; this.confirm.title = this.selection.textContent;
+    this.selection.textContent = this.selected || "Vault root · /"; setTooltip(this.confirm, this.selection.textContent);
     this.confirm.disabled = !this.getItems().some(folder => this.path(folder) === this.selected);
     const buttons = Array.from(this.list.querySelectorAll<HTMLButtonElement>(".y-ai-folder-name"));
     const tabStop = buttons.find(button => button.dataset.path === this.selected) ?? buttons[0];
@@ -72,7 +72,8 @@ export class VaultFolderPicker extends Modal {
         const toggle = wrap.createEl("button", { cls: `y-ai-folder-toggle${row.expanded ? " is-expanded" : ""}`, attr: { type: "button", tabindex: "-1", "aria-label": `${row.expanded ? "Collapse" : "Expand"} ${row.path}`, "aria-expanded": String(row.expanded) } });
         setIcon(toggle, "chevron-right"); toggle.addEventListener("click", () => this.toggle(row.path));
       } else wrap.createSpan({ cls: "y-ai-folder-spacer" });
-      const button = wrap.createEl("button", { cls: "y-ai-folder-name", attr: { type: "button", role: "treeitem", "aria-level": String(row.depth + 1), "aria-label": row.path || "Vault root", title: row.path || "Vault root", tabindex: shown[0] === row || row.path === this.selected ? "0" : "-1" } });
+      const button = wrap.createEl("button", { cls: "y-ai-folder-name", attr: { type: "button", role: "treeitem", "aria-level": String(row.depth + 1), "aria-label": row.path || "Vault root", tabindex: shown[0] === row || row.path === this.selected ? "0" : "-1" } });
+      setTooltip(button, row.path || "Vault root");
       button.dataset.path = row.path; if (row.hasChildren) button.setAttribute("aria-expanded", String(row.expanded));
       setIcon(button.createSpan({ cls: "y-ai-folder-icon" }), row.expanded ? "folder-open" : "folder");
       button.createSpan({ text: row.path ? this.query.trim() ? row.path : row.path.split("/").at(-1) : "Vault root · /", cls: "y-ai-folder-path" });

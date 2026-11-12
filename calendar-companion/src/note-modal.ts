@@ -1,4 +1,4 @@
-import { App, Component, MarkdownRenderer, Modal, Notice, Setting, type ButtonComponent } from "obsidian";
+import { App, Component, MarkdownRenderer, Modal, Notice, Setting, setTooltip, type ButtonComponent } from "obsidian";
 import { NOTE_ACTIONS, NoteWork, type NoteAction } from "./note-work";
 import { safeNoteMarkdown } from "./note-context";
 import { noteDiff } from "./note-workspace";
@@ -72,7 +72,7 @@ export class NoteModal extends Modal {
     const work = this.work, el = this.contentEl; el.empty();
     const header = el.createDiv({ cls: "calendar-note-header" });
     const heading = header.createDiv(); heading.createEl("h2", { text: "Note AI" });
-    heading.createEl("p", { text: work.target.title, cls: "calendar-note-title", attr: { title: work.target.title } });
+    setTooltip(heading.createEl("p", { text: work.target.title, cls: "calendar-note-title" }), work.target.title);
     this.button(header, "Hide", () => this.close());
     const scroll = el.createDiv({ cls: "calendar-note-scroll" });
     scroll.createEl("p", { text: `${work.source?.scope === "selection" ? "Selected text" : work.source?.scope === "section" ? "Current section" : "Current note"} · ${work.delivery ? `+ ${work.delivery.records.length} Calendar excerpt(s)` : "Note only"}`, cls: "calendar-note-meta" });
