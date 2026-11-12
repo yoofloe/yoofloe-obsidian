@@ -25,8 +25,14 @@ export function requestsVaultWork(input: string): boolean {
 export function requestsAttachedNoteEdit(input: string): boolean {
   const request = requestText(input);
   if (NO_NOTE_CHANGES.test(request)) return false;
-  return /\b(?:append|edit|update|rewrite|revise|insert|add|write)\b[\s\S]{0,100}\b(?:notes?|documents?|markdown)\b|\b(?:notes?|documents?|markdown)\b[\s\S]{0,80}\b(?:append|edit|update|rewrite|revise|insert|add)\b|\b(?:put|save)\b[\s\S]{0,100}\b(?:in|into|to)\s+(?:(?:the|this|current|attached|existing|my)\s+)*(?:notes?|documents?|markdown)\b|(?:노트|문서|마크다운)[\s\S]{0,40}(?:수정|추가|갱신|편집|고쳐|작성)|(?:수정|추가|갱신|편집|고쳐|작성)[\s\S]{0,40}(?:노트|문서|마크다운)|(?:노트|문서|마크다운)\s*(?:에(?!서)|로|안에|내부에)[\s\S]{0,40}(?:넣|저장)/i.test(request);
+  if (/\b(?:append|edit|update|rewrite|revise|insert|add|write)\b[\s\S]{0,100}\b(?:notes?|documents?|markdown)\b|\b(?:notes?|documents?|markdown)\b[\s\S]{0,80}\b(?:append|edit|update|rewrite|revise|insert|add)\b|(?:노트|문서|마크다운)[\s\S]{0,40}(?:수정|추가|갱신|편집|고쳐|작성)|(?:수정|추가|갱신|편집|고쳐|작성)[\s\S]{0,40}(?:노트|문서|마크다운)/i.test(request)) return true;
+  if (/\b(?:put|save)\b[\s\S]{0,100}\b(?:in|into|to|on)\s+(?:(?:the|this|current|attached|existing|my)\s+)*(?:notes?|documents?|markdown)\b(?!\s+folder)/i.test(request)) return true;
+  for (const match of request.matchAll(/(?:노트|문서|마크다운)\s*(?:에(?!서)|로|안에|내부에)([\s\S]{0,40}?)(?:넣|저장)/ig)) {
+    if (!/(?:파일|png|jpe?g|webp|pdf|csv|txt)\s*(?:로|에)/i.test(match[1])) return true;
+  }
+  return false;
 }
+
 export function onlineTools(mode: SourceMode, remaining: RequestLimit, fileIds: string[] = [], model = "gpt-6-luna", effort?: ReasoningEffort): Record<string, unknown>[] {
   if (remaining !== "none" && remaining < 1 || !supportsHostedTools(model)) return [];
   // Image models reject inherited `none`; their planning control has three supported levels.

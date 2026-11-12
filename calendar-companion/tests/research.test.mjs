@@ -92,6 +92,6 @@ test('Current note stops after a generated result when automatic file saving is 
 
 
 test('attached-note edits retain common English and Korean placement phrases without treating file saves as edits',()=>{
- for(const request of ['Generate a chart and put its summary in the current note','Save the summary to the attached note','차트를 만들고 현재 노트에 요약을 넣어 줘','현재 문서에 요약을 저장해'])assert(requestsAttachedNoteEdit(JSON.stringify({request})),request);
- for(const request of ['Generate and save a chart file','Use the note as a source, then save a chart file','현재 노트에서 데이터를 읽고 차트를 파일로 저장해','현재 노트의 데이터로 차트를 만들어 파일로 저장해','Do not edit the note; generate a chart only'])assert(!requestsAttachedNoteEdit(JSON.stringify({request})),request);
+ for(const request of ['Generate a chart and put its summary in the current note','Save the summary to the attached note','차트를 만들고 현재 노트에 요약을 넣어 줘','현재 문서에 요약을 저장해','현재 노트에 있는 문단에 요약을 넣어 줘'])assert(requestsAttachedNoteEdit(JSON.stringify({request})),request);
+ for(const request of ['Generate and save a chart file','Use the note as a source, then save a chart file','현재 노트에서 데이터를 읽고 차트를 파일로 저장해','현재 노트의 데이터로 차트를 만들어 파일로 저장해','현재 노트에 있는 데이터로 차트를 만들어 파일로 저장해','현재 문서에 적힌 데이터로 차트를 만들어 파일에 저장해','Do not edit the note; generate a chart only'])assert(!requestsAttachedNoteEdit(JSON.stringify({request})),request);
 });
