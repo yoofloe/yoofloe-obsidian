@@ -115,7 +115,15 @@
 .yoofloe-ai .y-ai-heading p { font-size:var(--font-ui-smaller); color:var(--text-muted); margin:2px 0 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .yoofloe-ai button { min-height:36px; height:auto; padding:6px 10px; line-height:1.35; white-space:normal; overflow-wrap:anywhere; }
 .yoofloe-ai .y-ai-header button { flex:0 0 32px; min-width:32px; padding:6px; }
-.yoofloe-ai .y-ai-chat-panel { display:flex; flex-direction:column; flex:0 1 clamp(300px,60vh,560px); height:clamp(300px,60vh,560px); min-height:0; min-width:0; border-bottom:1px solid var(--background-modifier-border); }
+.yoofloe-ai .y-ai-chat-panel { --y-ai-default-chat-height:clamp(300px,60vh,560px); display:flex; flex-direction:column; flex:0 1 var(--y-ai-default-chat-height); height:var(--y-ai-default-chat-height); min-height:0; min-width:0; border-bottom:1px solid var(--background-modifier-border); }
+.yoofloe-ai.y-ai-splittable:not(.y-ai-compact,.y-ai-keyboard,.y-ai-settings-expanded) .y-ai-chat-panel { flex:0 0 auto; height:clamp(var(--y-ai-chat-min),var(--y-ai-chat-height,var(--y-ai-default-chat-height)),var(--y-ai-chat-max)); border-bottom:0; }
+.yoofloe-ai .y-ai-split-handle { --y-ai-divider-size:20px; position:relative; display:grid; place-items:center; flex:0 0 var(--y-ai-divider-size); cursor:row-resize; touch-action:none; user-select:none; color:var(--text-muted); }
+.yoofloe-ai .y-ai-split-handle::before { content:""; position:absolute; inset-inline:0; top:50%; height:1px; background:var(--background-modifier-border); }
+.yoofloe-ai .y-ai-split-handle::after { content:""; position:relative; width:28px; height:4px; border-radius:4px; background:currentColor; }
+.yoofloe-ai .y-ai-split-handle:hover, .yoofloe-ai.y-ai-split-dragging .y-ai-split-handle { color:var(--interactive-accent); }
+.yoofloe-ai .y-ai-split-handle:focus-visible { outline:2px solid var(--interactive-accent); outline-offset:-2px; }
+.yoofloe-ai .y-ai-split-handle[hidden], .yoofloe-ai:is(.y-ai-compact,.y-ai-keyboard,.y-ai-settings-expanded) .y-ai-split-handle { display:none; }
+@media (pointer:coarse) { .yoofloe-ai .y-ai-split-handle { --y-ai-divider-size:28px; } }
 .yoofloe-ai .y-ai-search-bar { display:flex; align-items:center; gap:6px; flex-shrink:0; margin:0 12px; padding:0 4px; border-bottom:1px solid var(--background-modifier-border); }
 .yoofloe-ai .y-ai-search-icon { display:flex; flex:0 0 16px; color:var(--text-faint); }
 .yoofloe-ai .y-ai-search-icon svg { width:16px; height:16px; }
