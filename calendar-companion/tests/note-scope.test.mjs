@@ -72,3 +72,14 @@ test('task ownership never follows an externally replaced or moved filename',asy
   await assert.rejects(append(f.agent,created.reference,created.version,'Forbidden'),/renamed|data scope/);
  }
 });
+
+
+test('Folder and Vault writes never grant task-owned reads outside Current note data scope',async()=>{
+ for(const writeScope of ['folder','vault']){
+  const f=fixture({writeScope}),created=await f.agent.execute('create_note',{path:'Output/New.md',markdown:'Generated draft'});
+  f.files.get('Output/New.md').text='Private human content added after creation';
+  await assert.rejects(read(f.agent,created.reference),/data scope/);
+  const hits=await f.agent.execute('search_notes',{query:'Private',limit:4,offset:0});assert(!hits.notes.some(note=>note.path==='Output/New.md'));
+  assert.equal(f.policy.readScope,'current');
+ }
+});

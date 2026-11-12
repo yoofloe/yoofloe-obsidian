@@ -229,7 +229,7 @@ export class YoofloeAiView extends ItemView {
       this.limitControl(pause); this.onlineLimitControl(pause); this.button(pause, "Finish here", () => void w.finishHere(), w.busy); this.button(pause, "New task", () => void w.newTask(), w.busy);
     }
     const scope = this.details(primarySettings, "scope", "Permissions");
-    this.settingSummary(scope, "Access", w.mode === "ask" ? "Read only" : WRITE_SCOPE_LABELS[w.writeScope], "sliders-horizontal");
+    this.settingSummary(scope, "Access", w.mode === "ask" ? `Read: ${SCOPE_LABELS[w.readScope]}` : w.readScope === w.writeScope ? SCOPE_LABELS[w.readScope] : `Read: ${SCOPE_LABELS[w.readScope]} · Write: ${WRITE_SCOPE_LABELS[w.writeScope]}`, "sliders-horizontal");
     scope.querySelector("summary")?.setAttribute("title", `${MODE_LABELS[w.mode]} · Read: ${SCOPE_LABELS[w.readScope]} · Write: ${WRITE_SCOPE_LABELS[w.writeScope]}`);
     this.select(scope, "Allowed actions", MODE_LABELS, w.mode, value => { w.mode = value; this.render(); });
     if (w.mode === "all") scope.createEl("p", { text: "All actions still follow the read scope and write target below. They never expand access to other notes.", cls: "y-ai-hint" });
@@ -238,7 +238,7 @@ export class YoofloeAiView extends ItemView {
     if (w.source?.selection) this.button(scope, "Use whole attached note", () => { if (!w.source) return; delete w.source.selection; delete w.source.selectionVersion; w.preview = ""; this.saveSoon(); this.render(); }, w.settingsLocked);
     if (w.mode !== "ask") {
       this.select(scope, "Write target", WRITE_SCOPE_LABELS, w.writeScope, value => { w.writeScope = value; w.preview = ""; this.render(); });
-      scope.createEl("p", { text: w.writeScope === "current" ? w.source ? "Only the attached note can change. Choose New documents to create notes." : "No note attached. Attach a note to edit it, or choose New documents to create notes." : w.writeScope === "new" ? "Create notes in the output folder and revise only notes created in this task. Existing notes stay unchanged." : "Edit notes inside this scope and create new notes in the output folder. Excluded folders remain protected.", cls: "y-ai-hint" });
+      scope.createEl("p", { text: w.writeScope === "current" ? w.source ? "Only the attached note can change. Choose New documents to create notes." : "No note attached. Attach a note to edit it, or choose New documents to create notes." : w.writeScope === "new" ? "Create notes in the output folder; read and revise this task's new notes. Existing notes stay unchanged." : "Edit notes inside this scope and create new notes in the output folder. Excluded folders remain protected.", cls: "y-ai-hint" });
     }
     const folderLabel = scope.createDiv({ cls: "y-ai-field" }); folderLabel.createSpan({ text: "Working / output folder" });
     const folder = this.button(folderLabel, "", () => {
@@ -252,7 +252,7 @@ export class YoofloeAiView extends ItemView {
     setIcon(folder.createSpan({ cls: "y-ai-folder-icon" }), "folder");
     folder.createSpan({ text: w.outputFolder || "Vault root · /", cls: "y-ai-folder-path" });
     setIcon(folder.createSpan({ cls: "y-ai-folder-icon" }), "chevron-down");
-    scope.createEl("p", { text: "Folder scope includes subfolders. Choosing a folder never expands the selected write target. Save attachment is a separate manual file save; AI permissions stay unchanged.", cls: "y-ai-hint" });
+    scope.createEl("p", { text: w.readScope === "folder" || w.writeScope === "folder" ? "Note folder uses this folder and its subfolders for existing-note access. New files are also saved here. Manual Save attachment is separate." : "This is the destination for permitted new files. The write target controls creation. Manual Save attachment keeps AI permissions unchanged.", cls: "y-ai-hint" });
     if (!w.canContinue) { this.limitControl(scope); this.onlineLimitControl(scope); }
     const exclusions = scope.createEl("label", { cls: "y-ai-field" }); exclusions.createSpan({ text: "Excluded folders · one vault path per line" });
     const excluded = exclusions.createEl("textarea", { text: w.excluded, attr: { rows: "2", "aria-label": "Excluded folders" } }); excluded.disabled = w.settingsLocked;

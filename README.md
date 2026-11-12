@@ -106,7 +106,7 @@ Other installed plugins can still interpret ordinary Markdown; review generated 
 Read scope and **Write target** are independent. Read scope offers **Current note**, **Note folder** (including subfolders), or **Vault**.
 For writing, **Current note** permits changes only to the attached note; it cannot create notes, folders or automatically save generated files, even with **All actions**. A title change stays in that note's folder. Without an attached note, no note is writable.
 Choose **New documents** explicitly to create Markdown notes in the output folder without changing existing notes. The same task can read, revise and rename only the notes it created. A later task needs an appropriate write target to edit those now-existing notes.
-**Note folder** and **Vault** allow changes within those selected scopes. New files still use the output folder. Changing that folder alone never grants write authority.
+**Note folder** and **Vault** allow changes within those selected scopes. New files still use the output folder. In **Note folder** mode the picker also sets the access boundary for existing notes and subfolders; changing it changes that boundary. **Current note** never gains creation permission from a folder selection. Broader writes do not bypass a narrower read scope.
 The manual **Save attachment** button saves only the selected verified file and does not expand AI permissions. Existing notes, keys and saved scopes are preserved on upgrade; a saved Current note scope now follows this strict behavior.
 An empty folder means the vault root. Exclude private folders with one vault-relative path per line.
 Configuration, hidden folders, AI backups/history and detected credential strings are blocked.

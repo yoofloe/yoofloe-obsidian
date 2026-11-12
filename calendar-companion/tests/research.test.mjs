@@ -79,6 +79,13 @@ test('Custom text models do not receive guessed hosted-tool configurations',asyn
  await t.run('{"request":"Rewrite this sentence"}',{model:'gpt-5.4-pro'},'edit',1,{mode:'expanded',maximum:'none'});assert.equal(calls,1);assert.equal(t.state,'completed');
 });
 test('successfully generated files count as progress across several replies',async()=>{
- let round=0;const t=task(async()=>response(++round<=3?[{type:'image_generation_call',id:'image'+round,result:'AA==',status:'completed'},message('Image prepared.')]:round===4?[{type:'function_call',call_id:'save',name:'create_note',arguments:'{}'}]:[message('Document created.')]),{generated:{stage:async()=>[{id:crypto.randomUUID(),name:'image.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]}});
+ let round=0;const t=task(async()=>response(++round<=3?[{type:'image_generation_call',id:'image'+round,result:'AA==',status:'completed'},message('Image prepared.')]:round===4?[{type:'function_call',call_id:'save',name:'create_note',arguments:'{}'}]:[message('Document created.')]),{writeScope:'new',generated:{stage:async()=>[{id:crypto.randomUUID(),name:'image.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]}});
  await t.run('{"request":"Create a Markdown note with the generated images"}',{model:'gpt-6-luna'},'edit','none',{mode:'expanded',maximum:'none'});assert.equal(t.state,'completed');assert.equal(round,5);assert.equal(t.generated.length,3);
+});
+
+
+test('Current note stops after a generated result when automatic file saving is unavailable',async()=>{
+ let calls=0;const t=task(async request=>{calls++;assert(!JSON.parse(request.body).tools.some(tool=>tool.name==='save_generated_file'));return response([{type:'image_generation_call',id:'image',result:'AA==',status:'completed'},message('Generated the image.')]);},{writeScope:'current',generated:{stage:async()=>[{id:crypto.randomUUID(),name:'image.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]}});
+ await t.run('{"request":"Create a Markdown note and save the generated image"}',{model:'gpt-6-luna'},'all',1,{mode:'provided',maximum:1});
+ assert.equal(t.state,'completed');assert.equal(t.canResume,false);assert.equal(calls,1);assert.equal(t.generated.length,1);assert(t.text.includes('Choose Save attachment'));
 });

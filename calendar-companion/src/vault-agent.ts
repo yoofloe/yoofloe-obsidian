@@ -75,7 +75,7 @@ export class VaultAgent {
   private ref(reference: unknown): Ref { const r = this.refs.get(textField(reference)); if (!r) throw Error("Read a reference returned by this task's search first."); return r; }
   private allowedRef(ref: Ref, action: "read" | "edit" | "organize"): boolean {
     if (allowedPath(this.policy, ref.file.path, action)) return true;
-    if (this.createdNotes.get(ref.file.identity) !== ref.file.path || !allowedPath(this.policy, ref.file.path, "create")) return false;
+    if (this.policy.writeScope !== "new" || this.createdNotes.get(ref.file.identity) !== ref.file.path || !allowedPath(this.policy, ref.file.path, "create")) return false;
     return action !== "organize" || this.policy.mode === "organize" || this.policy.mode === "all";
   }
   private reference(file: AgentFile): string {

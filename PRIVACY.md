@@ -101,7 +101,7 @@ Undo unavailable. Other sync/backup copies and provider-side retention are manag
 
 Read scope and write target are separate. Configuration/hidden files, excluded folders and recovery files are blocked.
 Current note permits changes only to the attached note and does not grant AI creation of notes, folders or generated-file copies. New documents is an explicit create-only choice for existing data: only notes created by that task may be read and revised under its creation authority. This authority is bound to the file identity and path and is not restored from saved conversation text.
-The output folder specifies a destination, not permission. The manual Save attachment button authorizes one selected verified attachment copy without changing the AI write target.
+The output folder does not enable creation under Current note. In Note folder mode it also specifies the boundary for existing-note reads or edits, including subfolders; changing it changes that access boundary. Broader write scope does not bypass narrower read scope. The manual Save attachment button authorizes one selected verified attachment copy without changing the AI write target.
 **All actions** enables every supported action, including creation, editing, properties, renaming, moving and folder
 organization, within the read and change scopes you choose. It does not silently change those scopes.
 Credential-pattern detection blocks recognized keys in outgoing material but cannot identify every secret or personal detail.
