@@ -221,3 +221,78 @@ test('generated-file follow-ups fulfill explicit put and Korean note-placement r
   f.work.maximum=3;f.work.setPrompt(request);await f.work.run();assert.equal(calls,3,request);assert.equal(f.work.task.state,'completed');assert(f.files.get('Current.md').text.includes('Requested summary.'));
  }
 });
+
+
+test('opening the first note connects it despite earlier no-note answers and an unsent draft',async()=>{
+ const f=fixture();await f.host.create('Economic news.md','DOCUMENT_MARKER');f.options.storage.load=async()=>({source:null,prompt:'Opened it',lastRequest:'Add a chart',result:'No note attached',mode:'all',readScope:'current',writeScope:'current',outputFolder:'Chosen output'});await f.work.initialize();
+ f.work.bind({path:'Economic news.md'});assert.equal(f.work.source.path,'Economic news.md');assert.equal(f.work.nextSource,null);assert.equal(f.work.prompt,'Opened it');assert.equal(f.work.result,'No note attached');assert.equal(f.work.outputFolder,'Chosen output');
+ await f.work.review();assert.equal(JSON.parse(f.work.preview).current_note.text,'DOCUMENT_MARKER');assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);
+});
+
+test('explicit note connection preserves work and scopes; browsing alone does not retarget an attached note',async()=>{
+ const f=fixture();await f.host.create('A.md','A');await f.host.create('B.md','B');await f.work.initialize();await f.work.newTask({path:'A.md'});f.work.outputFolder='Chosen output';f.work.setPrompt('Keep this draft');
+ f.work.bind({path:'B.md'});assert.equal(f.work.source.path,'A.md');assert.equal(f.work.nextSource.path,'B.md');
+ assert.equal(f.work.attachNote(f.work.nextSource),true);assert.equal(f.work.source.path,'B.md');assert.equal(f.work.outputFolder,'Chosen output');assert.equal(f.work.prompt,'Keep this draft');assert.equal(f.work.writeScope,'current');assert.equal(f.work.readScope,'current');assert.equal(f.calls(),0);
+});
+
+test('running and paused tasks keep their note; queued first-note connection remains explicit after completion',async()=>{
+ const f=fixture();await f.host.create('A.md','A');await f.work.initialize();let finish;
+ f.options.transport=async()=>await new Promise(resolve=>{finish=resolve;});f.work.setPrompt('Answer a question');const running=f.work.run();while(!finish)await new Promise(resolve=>setTimeout(resolve,1));
+ f.work.bind({path:'A.md'});assert.equal(f.work.source,null);assert.equal(f.work.attachNote({path:'A.md'}),false);
+ finish(response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Answer.'}]}]));await running;assert.equal(f.work.source,null);assert.equal(f.work.nextSource.path,'A.md');assert.equal(f.work.result,'Answer.');await f.work.initialize();f.work.bind(f.work.nextSource);assert.equal(f.work.source,null);assert.equal(f.work.attachNote(f.work.nextSource),true);
+ const g=fixture();await g.host.create('A.md','A');await g.work.initialize();g.work.maximum=1;g.work.setPrompt('Read');g.options.transport=async()=>response([{type:'function_call',call_id:'read',name:'search_notes',arguments:JSON.stringify({query:'A',limit:1,offset:0})}]);await g.work.run();assert(g.work.canContinue);g.work.bind({path:'A.md'});assert.equal(g.work.source,null);await g.work.finishHere();assert.equal(g.work.source,null);assert.equal(g.work.attachNote(g.work.nextSource),true);
+});
+
+test('explicit chat-without-note choice is retained and source selection obeys read exclusions',async()=>{
+ const f=fixture();await f.host.create('A.md','A');await f.host.create('Private/B.md','B');await f.work.initialize();f.work.excluded='Private';assert.equal(f.work.attachNote(null),true);
+ f.work.bind({path:'A.md'});assert.equal(f.work.source,null);assert.equal(f.work.nextSource.path,'A.md');assert.equal(f.work.autoAttachNote,false);assert.equal(f.work.attachNote({path:'Private/B.md'}),false);
+ assert(f.work.availableNotes().some(note=>note.path==='A.md'));assert(!f.work.availableNotes().some(note=>note.path==='Private/B.md'));
+ assert.equal(f.work.attachNote({path:'A.md'}),true);assert.equal(f.work.autoAttachNote,true);await f.work.persist();assert.equal(f.saved().autoAttachNote,true);
+});
+
+test('a removed attached note fails locally before key access or a provider request',async()=>{
+ const f=fixture();await f.host.create('Gone.md','Original');await f.work.initialize();await f.work.newTask({path:'Gone.md'});f.files.delete('Gone.md');f.work.setPrompt('Read my note');await f.work.run();assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);assert.match(f.work.message,/attached note is unavailable/);assert.equal(f.work.prompt,'Read my note');
+});
+
+
+test('failed restoration keeps the original record and blocks automatic saves and sends',async()=>{
+ const f=fixture();await f.host.create('A.md','A');f.options.storage.load=async()=>{throw Error('Unreadable original');};let saves=0;f.options.storage.save=async()=>{saves++;};await f.work.initialize();f.work.bind({path:'A.md'});await f.work.newTask({path:'A.md'});f.work.setPrompt('Read');await f.work.run();await assert.rejects(f.work.persist(),/original work record/);assert.equal(saves,0);assert.equal(f.calls(),0);assert.equal(f.work.source,null);assert(f.work.settingsLocked);
+});
+
+test('a missing saved note remains identifiable and cannot silently bind another note',async()=>{
+ const f=fixture();await f.host.create('Other.md','OTHER');f.options.storage.load=async()=>({source:'Missing.md',prompt:'Revise original'});await f.work.initialize();f.work.bind({path:'Other.md'});assert.equal(f.work.source.path,'Missing.md');await f.work.run();assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);assert.match(f.work.message,/attached note is unavailable/);assert.equal(f.work.prompt,'Revise original');
+});
+
+test('changing scope after a blocked connection does not silently attach that note on Send',async()=>{
+ const f=fixture();await f.host.create('Outside.md','NOT_PREVIEWED');await f.work.initialize();f.work.outputFolder='Allowed';f.work.readScope='folder';f.work.bind({path:'Outside.md'});assert.equal(f.work.source,null);f.work.readScope='current';f.work.setPrompt('Answer');await f.work.review();assert(!JSON.parse(f.work.preview).current_note.reference);let input;f.options.transport=async req=>{input=JSON.parse(JSON.parse(req.body).input[0].content);return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Answer'}]}]);};await f.work.run();assert(!input.current_note.reference);assert(!JSON.stringify(input).includes('NOT_PREVIEWED'));assert.equal(f.work.source,null);
+});
+
+test('a late preview for note A cannot replace the current preview after connecting note B',async()=>{
+ const f=fixture();await f.host.create('A.md','A');await f.host.create('B.md','B');await f.work.initialize();f.work.attachNote({path:'A.md'});let release;const read=f.host.read;f.host.read=async file=>file.path==='A.md'?await new Promise(r=>{release=()=>r('A');}):read(file);const first=f.work.review();while(!release)await new Promise(r=>setTimeout(r,1));f.work.attachNote({path:'B.md'});await f.work.review();release();await first;assert.equal(JSON.parse(f.work.preview).current_note.text,'B');assert.equal(f.calls(),0);
+});
+
+test('New task retains its selected folder and keeps an out-of-scope browsed note pending',async()=>{
+ const f=fixture();await f.host.create('Allowed/A.md','A');await f.host.create('Outside.md','B');await f.work.initialize();await f.work.newTask({path:'Allowed/A.md'});f.work.readScope='folder';f.work.writeScope='folder';f.work.outputFolder='Allowed';f.work.bind({path:'Outside.md'});await f.work.newTask();assert.equal(f.work.source.path,'Allowed/A.md');assert.equal(f.work.outputFolder,'Allowed');assert.equal(f.work.nextSource.path,'Outside.md');await f.work.newTask({path:'Outside.md'});assert.equal(f.work.source.path,'Allowed/A.md');assert.equal(f.work.outputFolder,'Allowed');
+});
+
+test('pending Trash proposals survive first-note browsing until an explicit new task',async()=>{
+ const f=fixture();await f.host.create('A.md','A');await f.work.initialize();f.work.agent={pendingTrash:[{reference:'N1',title:'Pending review',version:'v'}]};const agent=f.work.agent;f.work.bind({path:'A.md'});await f.work.initialize();assert.equal(f.work.source,null);assert.equal(f.work.agent,agent);assert.equal(f.work.attachNote({path:'A.md'}),false);await f.work.newTask();assert.equal(f.work.agent,null);assert.equal(f.work.source,null);assert.equal(f.work.nextSource.path,'A.md');
+});
+
+
+test('an unfinished selection cannot become a request source',async()=>{
+ const f=fixture();await f.host.create('A.md','PRIVATE REMAINDER');await f.work.initialize();const source={path:'A.md',selection:{from:0,to:5}};assert.equal(f.work.attachNote(source),false);await f.work.newTask(source);assert.equal(f.work.source,null);assert.equal(f.calls(),0);assert.match(f.work.message,/selection is not ready/);
+});
+
+
+test('the first note defaults to its parent folder without replacing an explicit root choice',async()=>{
+ const f=fixture();await f.host.create('Notes/A.md','A');await f.host.create('Private/B.md','B');await f.work.initialize();f.work.bind({path:'Notes/A.md'});assert.equal(f.work.outputFolder,'Notes');f.work.readScope='folder';assert.deepEqual(f.work.availableNotes().map(n=>n.path),['Notes/A.md']);
+ const g=fixture();await g.host.create('Notes/A.md','A');await g.work.initialize();g.work.setOutputFolder('');g.work.bind({path:'Notes/A.md'});assert.equal(g.work.outputFolder,'');await g.work.persist();assert.equal(g.saved().outputFolderChosen,true);
+ const h=fixture();await h.host.create('Notes/A.md','A');h.options.storage.load=async()=>({source:null,outputFolder:''});await h.work.initialize();h.work.bind({path:'Notes/A.md'});assert.equal(h.work.outputFolder,'','legacy saved folders remain unchanged');
+});
+
+test('separate archive or recovery listing errors do not lock a valid restored draft',async()=>{
+ for(const area of ['archive','history']){
+  const f=fixture();f.options.storage.load=async()=>({source:null,prompt:'Saved draft',result:'Paid answer'});if(area==='archive')f.options.storage.saveChat=async()=>{throw Error('Archive unavailable');};else f.options.storage.history=async()=>{throw Error('Recovery listing unavailable');};await f.work.initialize();assert.equal(f.work.prompt,'Saved draft');assert.equal(f.work.result,'Paid answer');assert.equal(f.work.settingsLocked,false);await f.work.persist();assert.equal(f.saved().prompt,'Saved draft');assert.equal(f.calls(),0);
+ }
+});

@@ -29,7 +29,14 @@ the same model, original scopes, tool results and cumulative usage. Completed wr
 ends continuation without sending another request. Continuation is available while the current vault session stays open;
 closing/restarting the app keeps saved answers and completed changes but does not automatically resume requests.
 
+Opening the first note connects it to a conversation that has no note, even when an earlier answer or unsent draft is present.
+Once a note is connected, browsing another note offers **Use opened note** above the conversation; it never silently switches the active task.
+The header paperclip opens **Choose note**, including **Chat without a note**. Choosing a different note keeps the conversation, draft and permission settings.
+Running or paused tasks keep their original note.
+
 The conversation stays above the settings with a fixed-height, independently scrolling message area.
+Choose **Expand settings** to give the settings the full available panel height, then **Back to chat** to return to the same conversation and draft.
+**Stop** stays available while a task runs with settings expanded.
 Model and permission cards sit below it; Calendar, activity, privacy and recovery remain compact.
 Conversation search is local: it searches saved requests, answers and attachment names, highlights matches,
 and pages through older archived conversations without an AI request. Previews remain bounded for mobile performance.

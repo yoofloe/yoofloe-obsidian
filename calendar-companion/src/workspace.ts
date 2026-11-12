@@ -1,6 +1,6 @@
 import { AgentTask, type AgentExecutor } from "./agent-task";
 import { VaultAgent, type AgentHost, type WorkJournal } from "./vault-agent";
-import { safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
+import { allowedPath, safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
 import type { AiPreferences } from "./ai-preferences";
 import type { AiModelOptions, AiTransport } from "./ai-session";
 import type { CalendarSession } from "./session";
@@ -14,12 +14,14 @@ import { readGeneratedFiles, type GeneratedStore } from "./generated-files";
 import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, readAttachments, type Attachment, type AttachmentStore } from "./attachments";
 
 export interface WorkspaceSource { path: string; selection?: { from: number; to: number }; selectionVersion?: string }
+const sameSource = (a: WorkspaceSource | null, b: WorkspaceSource | null) => a === b || !!a && !!b && a.path === b.path && a.selection?.from === b.selection?.from && a.selection?.to === b.selection?.to && a.selectionVersion === b.selectionVersion;
 export interface WorkspaceStorage { load(): Promise<unknown>; save(value: unknown): Promise<void>; history(): Promise<WorkJournal[]>; saveChat?(turn: ChatTurn): Promise<void>; loadChat?(id: string): Promise<ChatTurn>; searchChats?(query: string, offset: number): Promise<{ turns: ChatTurn[]; nextOffset: number | null }> }
 /** One vault-owned controller. Views only subscribe; hiding one never discards paid work. */
 export class AiWorkspace {
   prompt = "";
   source: WorkspaceSource | null = null;
   nextSource: WorkspaceSource | null = null;
+  autoAttachNote = true;
   mode: WorkMode = "edit";
   readScope: WorkScope = "current";
   writeScope: WriteScope = "current";
@@ -54,6 +56,9 @@ export class AiWorkspace {
   private saveQueue: Promise<void> = Promise.resolve();
   private lastRequest = "";
   private initialization: Promise<void> | null = null;
+  private restoreFailed = false;
+  private previewEpoch = 0;
+  private outputFolderChosen = false;
   private runEpoch = 0;
   private running = false;
   private stopRequested = false;
@@ -69,7 +74,7 @@ export class AiWorkspace {
   get canStop() { return this.busy && this.running && !this.stopRequested; }
   get stopping() { return this.busy && this.stopRequested; }
   get canContinue() { return this.current && !!this.task?.canResume && !!this.agent; }
-  get settingsLocked() { return this.busy || this.canContinue || this.addingAttachments; }
+  get settingsLocked() { return this.restoreFailed || this.busy || this.canContinue || this.addingAttachments; }
   get limitProblem(): string {
     if (this.customOnlineMaximum !== null && customRequestLimit(this.customOnlineMaximum) === null) return "Enter a positive tool count, or choose no tool-count limit.";
     try { requestLimit(this.onlineMaximum); } catch { return "Choose a valid built-in tool limit."; }
@@ -87,11 +92,12 @@ export class AiWorkspace {
     if (this.ready) return;
     try {
       const raw = await this.options.storage.load(); if (!this.current) return;
+      if (raw !== null && raw !== undefined && (typeof raw !== "object" || Array.isArray(raw))) throw Error("Invalid saved workspace");
       if (raw && typeof raw === "object") {
         const saved = raw as Record<string, unknown>;
         if (typeof saved.prompt === "string" && saved.prompt.length <= 32000) this.prompt = saved.prompt;
         if (typeof saved.lastRequest === "string") this.lastRequest = saved.lastRequest.slice(0, 32000);
-        if (typeof saved.source === "string" && this.options.host(() => this.current).files().some(file => file.path === saved.source)) this.source = { path: saved.source };
+        if (typeof saved.source === "string") this.source = { path: vaultPath(saved.source) };
         if (this.source && saved.selection && typeof saved.selection === "object") {
           const selection = saved.selection as Record<string, unknown>;
           if (typeof selection.from === "number" && typeof selection.to === "number" && Number.isSafeInteger(selection.from) && Number.isSafeInteger(selection.to) && selection.from >= 0 && selection.to >= selection.from && typeof saved.selectionVersion === "string" && /^[a-f0-9]{64}$/.test(saved.selectionVersion)) {
@@ -106,6 +112,8 @@ export class AiWorkspace {
         if (typeof saved.readScope === "string" && ["current", "folder", "vault"].includes(saved.readScope)) this.readScope = saved.readScope as WorkScope;
         if (typeof saved.writeScope === "string" && ["current", "new", "folder", "vault"].includes(saved.writeScope)) this.writeScope = saved.writeScope as WriteScope;
         if (typeof saved.outputFolder === "string") this.outputFolder = saved.outputFolder.slice(0, 500);
+        this.outputFolderChosen = typeof saved.outputFolderChosen === "boolean" ? saved.outputFolderChosen : typeof saved.outputFolder === "string";
+        if (typeof saved.autoAttachNote === "boolean") this.autoAttachNote = saved.autoAttachNote;
         if (typeof saved.excluded === "string") this.excluded = saved.excluded.slice(0, 4000);
         try { if (saved.maximum !== undefined) this.maximum = requestLimit(saved.maximum); } catch { this.maximum = 1; this.message = "The saved request limit was invalid and was reset to 1. Choose your preferred limit before sending."; }
         if (typeof saved.customMaximum === "string") { this.customMaximum = saved.customMaximum.slice(0, 32); const count = customRequestLimit(this.customMaximum); if (count !== null) this.maximum = count; }
@@ -132,14 +140,15 @@ export class AiWorkspace {
             const usage = saved.taskUsage && typeof saved.taskUsage === "object" ? saved.taskUsage as Record<string, unknown> : {};
             const latest = turn.answer === this.result && turn.request === this.lastRequest;
             const record: ChatTurn = { id: crypto.randomUUID(), request: turn.request, answer: turn.answer, startedAt: null, sourcePath: latest ? this.source?.path ?? "" : "", model: latest ? this.task?.modelId ?? "" : "", status: latest && (usage.state === "paused" || usage.state === "running") ? "stopped" : "completed", requests: latest ? this.task?.requests ?? 0 : 0, inputTokens: latest ? this.task?.usage.input ?? 0 : 0, outputTokens: latest ? this.task?.usage.output ?? 0 : 0, actions: [] };
-            this.chat.push(record); await this.options.storage.saveChat?.(record);
+            this.chat.push(record);
+            try { await this.options.storage.saveChat?.(record); } catch { this.message = "Your draft and conversation were restored. The separate chat archive could not be updated; keep this vault open."; }
           }
         }
       }
-      this.history = await this.options.storage.history();
+      try { this.history = await this.options.storage.history(); } catch { this.message = "Your draft and conversation were restored. Recovery history could not be listed; its existing files were kept."; }
       await this.refreshSettings();
-    } catch { this.message = "Saved work could not be read. Existing files and keys were kept."; }
-    finally { this.ready = true; this.changed(); }
+    } catch { this.restoreFailed = true; this.message = "Saved work could not be read. Existing files and keys were kept; saving is disabled to preserve the original work record. Reopen this vault after restoring the record."; }
+    finally { this.ready = true; this.attachFirstPending(); this.changed(); }
   }
   async refreshSettings(): Promise<void> {
     try { const [model, configured] = await Promise.all([this.options.preferences.read("openai"), this.options.preferences.hasKey("openai")]); if (!this.current) return; this.model = model; this.configured = configured; }
@@ -148,12 +157,47 @@ export class AiWorkspace {
   }
   bind(source: WorkspaceSource | null, force = false): void {
     if (!this.current) return;
-    if ((this.busy || this.canContinue || this.hasResult || this.prompt.trim()) && !force) { if (source?.path !== this.source?.path) this.nextSource = source; this.changed(); return; }
+    if (!force) {
+      if (!source) return; // Activating the AI tab is not a request to detach a note.
+      if (source.path === this.source?.path && !source.selection) {
+        if (this.nextSource && this.nextSource.path !== source.path) { this.nextSource = null; this.changed(); }
+        return;
+      }
+      if (sameSource(source, this.source) || sameSource(source, this.nextSource)) return;
+      this.nextSource = { ...source, ...(source.selection ? { selection: { ...source.selection } } : {}) };
+      if (!this.source && this.autoAttachNote && !this.settingsLocked && this.ready) { this.attachNote(this.nextSource); return; }
+      this.changed(); return;
+    }
     const sourceChanged = source?.path !== this.source?.path;
     this.source = source; this.nextSource = null;
-    if (sourceChanged) this.outputFolder = source?.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
+    if (sourceChanged && !this.outputFolder && !this.outputFolderChosen) this.outputFolder = source?.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
     this.preview = ""; this.changed();
   }
+  availableNotes(): { path: string; title: string }[] {
+    if (!this.current || !this.ready) return [];
+    const policy = this.policy();
+    return this.options.host(() => this.current).files().filter(file => allowedPath({ ...policy, sourcePath: file.path }, file.path, "read")).map(file => ({ path: file.path, title: file.title }));
+  }
+  /** A source choice affects the next request, never an in-flight or paused task. */
+  attachNote(source: WorkspaceSource | null): boolean {
+    if (!this.current || !this.ready) return false;
+    if (source && sameSource(source, this.source)) return true;
+    if (this.settingsLocked) { if (source) this.nextSource = source; this.message = "Finish or stop the current task before changing its note."; this.changed(); return false; }
+    if (this.agent?.pendingTrash.length) { this.message = "Review the pending Trash proposal, or choose New task to leave it, before connecting another note."; this.changed(); return false; }
+    try {
+      if (source?.selection && !/^[a-f0-9]{64}$/.test(source.selectionVersion ?? "")) throw Error("The selection is not ready. Select it again before connecting the note.");
+      if (source && !this.availableNotes().some(file => file.path === source.path)) throw Error("This note is unavailable or outside the selected read scope. Check Access or choose another note.");
+      this.runEpoch++; this.agent = null;
+      if (source && !this.source && !this.outputFolder && !this.outputFolderChosen) this.outputFolder = source.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
+      this.source = source ? { ...source, ...(source.selection ? { selection: { ...source.selection } } : {}) } : null;
+      this.nextSource = null; this.autoAttachNote = source !== null; this.preview = "";
+      this.message = source ? `Note connected: ${source.path}. Your conversation and draft are kept.` : "No note attached. Your conversation and draft are kept.";
+      this.changed(); void this.persist().catch(() => { if (this.current) { this.message = "The note choice could not be saved locally. Keep this vault open."; this.changed(); } });
+      return true;
+    } catch (error) { this.message = error instanceof Error ? error.message : "The note could not be connected."; this.changed(); return false; }
+  }
+  private attachFirstPending(): void { if (!this.source && this.nextSource && this.autoAttachNote && !this.settingsLocked && !this.agent?.pendingTrash.length) this.attachNote(this.nextSource); }
+  setOutputFolder(folder: string): void { if (!this.settingsLocked) { this.outputFolder = folder; this.outputFolderChosen = true; this.preview = ""; } }
   setPrompt(value: string): void { if (!this.settingsLocked) { this.prompt = value; this.preview = ""; } }
   async setModel(model: AiModelOptions): Promise<void> { if (this.settingsLocked) return; try { await this.options.preferences.save(model, "openai"); this.model = model; } catch { this.message = "Model settings could not be saved. No request was sent."; } this.changed(); }
   private policy(): TaskPolicy {
@@ -186,12 +230,16 @@ export class AiWorkspace {
   }
   async review(): Promise<void> {
     if (this.settingsLocked || !this.current) return;
-    try { const agent = new VaultAgent(this.options.host(() => this.current), this.policy(), () => this.current); this.preview = await this.prepare(agent); this.message = "Initial data below. During this task, relevant excerpts within the data scope may also be sent to OpenAI. Settings and excluded folders cannot be read."; }
-    catch (error) { this.message = error instanceof Error ? error.message : "The data preview could not be prepared."; }
+    const epoch = ++this.previewEpoch, run = this.runEpoch;
+    const state = () => JSON.stringify([this.source, this.prompt, this.readScope, this.writeScope, this.mode, this.outputFolder, this.excluded, this.sourceMode, this.attachments, this.delivery, this.calendarQuestion, this.area, this.period]);
+    const before = state(), current = () => this.current && !this.settingsLocked && epoch === this.previewEpoch && run === this.runEpoch && before === state();
+    try { const agent = new VaultAgent(this.options.host(current), this.policy(), current); const preview = await this.prepare(agent); if (!current()) return; this.preview = preview; this.message = "Initial data below. During this task, relevant excerpts within the data scope may also be sent to OpenAI. Settings and excluded folders cannot be read."; }
+    catch (error) { if (!current()) return; this.preview = ""; this.message = error instanceof Error ? error.message : "The data preview could not be prepared."; }
     this.changed();
   }
   async run(): Promise<void> {
     if (this.canContinue) { await this.continueTask(); return; }
+    if (this.restoreFailed) return;
     if (!this.current || this.busy || this.addingAttachments || !this.prompt.trim()) return;
     if (this.attachments.length && !this.options.attachments) { this.message = "Attachment processing is unavailable. Existing files are kept."; this.changed(); return; }
     if (this.limitProblem) { this.message = this.limitProblem; this.changed(); return; }
@@ -278,12 +326,15 @@ export class AiWorkspace {
     await this.persist(); this.changed();
   }
   stop(): void { if (!this.canStop) return; this.stopRequested = true; this.runEpoch++; this.task?.stop(); this.message = "Stopping. Completed work is kept. An already-sent request may still finish and incur charges; no further request or file action will start."; this.changed(); }
-  async newTask(source: WorkspaceSource | null = this.nextSource ?? this.source): Promise<void> {
-    if (this.addingAttachments) return;
+  async newTask(source: WorkspaceSource | null = this.source): Promise<void> {
+    if (this.restoreFailed || this.addingAttachments) return;
     if (this.busy) return;
+    if (source?.selection && !/^[a-f0-9]{64}$/.test(source.selectionVersion ?? "")) { this.message = "The selection is not ready. Select it again before starting a new task."; this.changed(); return; }
+    if (source && !sameSource(source, this.source) && !this.availableNotes().some(file => file.path === source.path)) { this.message = "This note is outside the selected read scope. Choose an allowed note before starting a new task."; this.changed(); return; }
     if (this.canContinue) await this.finishHere();
     this.rememberLast();
-    this.prompt = ""; this.task = null; this.agent = null; this.activeChatId = null; this.attachments = []; this.message = "Ready. No data is sent until you start."; this.bind(source, true); await this.persist(); this.changed();
+    const pending = this.nextSource;
+    this.prompt = ""; this.task = null; this.agent = null; this.activeChatId = null; this.attachments = []; this.message = "Ready. No data is sent until you start."; this.bind(source, true); if (pending?.path !== source?.path) this.nextSource = pending; await this.persist(); this.changed();
   }
   async addAttachments(files: readonly File[]): Promise<void> {
     if (this.settingsLocked || !this.current || !files.length) return;
@@ -375,8 +426,9 @@ export class AiWorkspace {
   }
   async removeCalendar(): Promise<void> { if (this.settingsLocked) return; await this.calendar?.dispose(); this.calendar = null; this.delivery = null; this.preview = ""; this.changed(); }
   persist(): Promise<void> {
+    if (this.restoreFailed) return Promise.reject(Error("Saved work could not be read. The original work record was preserved."));
     const value = { prompt: this.prompt, lastRequest: this.lastRequest, source: this.source?.path ?? null, selection: this.source?.selection, selectionVersion: this.source?.selectionVersion, mode: this.mode, readScope: this.readScope, writeScope: this.writeScope,
-      outputFolder: this.outputFolder, excluded: this.excluded, maximum: this.maximum, result: this.result, previous: this.previous, sourceMode: this.sourceMode, onlineMaximum: this.onlineMaximum, attachments: this.attachments,
+      outputFolder: this.outputFolder, outputFolderChosen: this.outputFolderChosen, excluded: this.excluded, maximum: this.maximum, result: this.result, previous: this.previous, sourceMode: this.sourceMode, onlineMaximum: this.onlineMaximum, attachments: this.attachments, autoAttachNote: this.autoAttachNote,
       ...(this.customOnlineMaximum !== null ? { customOnlineMaximum: this.customOnlineMaximum } : {}),
       ...(this.customMaximum !== null ? { customMaximum: this.customMaximum } : {}),
       ...(this.chat.length ? { chat: this.chat.slice(-CHAT_HISTORY_LIMIT).map(chatPreview) } : {}),
