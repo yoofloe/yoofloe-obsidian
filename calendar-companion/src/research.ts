@@ -27,7 +27,7 @@ export function onlineTools(mode: SourceMode, remaining: RequestLimit, fileIds: 
   return [
     ...(mode === "expanded" ? [{ type: "web_search", external_web_access: true }] : []),
     { type: "code_interpreter", container: { type: "auto", memory_limit: "1g", network_policy: { type: "disabled" }, ...(fileIds.length ? { file_ids: fileIds } : {}) } },
-    { type: "image_generation", model: "gpt-image-2.5-flare", complexity, output_format: "png" },
+    { type: "image_generation", model: "gpt-image-2.6-flare", complexity, output_format: "png" },
   ];
 }
 export function sourceInstructions(mode: SourceMode, hosted = true): string {

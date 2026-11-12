@@ -14,6 +14,7 @@ test('expanded tools include live search; supplied-material analysis has no netw
  const full=onlineTools('expanded','none'),restricted=onlineTools('provided','none');
  assert(full.some(x=>x.type==='web_search'&&x.external_web_access===true));assert(!restricted.some(x=>x.type==='web_search'));
  assert.equal(restricted.find(x=>x.type==='code_interpreter').container.network_policy.type,'disabled');
+ assert.equal(restricted.find(x=>x.type==='image_generation').model,'gpt-image-2.6-flare');
  assert.deepEqual(onlineTools('expanded',0),[]);assert.match(sourceInstructions('provided'),/Do not search/);
  for(const url of ['javascript:alert(1)','file:///etc/passwd','https://key@host.example','https://example.com/\nsecret'])assert.equal(publicUrl(url),null);
 });
