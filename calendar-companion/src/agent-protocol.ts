@@ -1,4 +1,4 @@
-import type { WorkMode } from "./agent-policy";
+import type { WorkMode, WriteScope } from "./agent-policy";
 import type { AiDraft } from "./ai-session";
 import { parseOpenAiDraft } from "./openai";
 import { emptyOnlineUsage, sourceList, sourceLink, publicUrl, withSources, type WebSource, type OnlineUsage } from "./research";
@@ -59,7 +59,7 @@ const str = { type: "string" }, integer = { type: "integer" };
 const array = (items: unknown) => ({ type: "array", items });
 const object = (properties: Record<string, unknown>) => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
 const tool = (name: string, description: string, properties: Record<string, unknown>) => ({ type: "function", name, description, strict: true, parameters: object(properties) });
-export function agentTools(mode: WorkMode) {
+export function agentTools(mode: WorkMode, writeScope?: WriteScope) {
   const read = [tool("search_notes", "Find relevant Markdown notes inside the permitted data scope. Returns references, titles and relative paths, not entire bodies. Start offset at 0; use next_offset for another bounded search page when coverage is partial.", { query: str, limit: integer, offset: integer }),
     tool("read_notes", "Read permitted notes or line ranges. Use returned versions for edits. Partial notes must be read further before a full replacement.", { notes: array(object({ reference: str, from_line: integer, through_line: integer })) }),
     tool("read_outline", "Inspect headings and line numbers before reading a large note.", { reference: str })];
@@ -69,9 +69,10 @@ export function agentTools(mode: WorkMode) {
     tool("save_generated_file", "Save a returned generated-file reference from this task's local cache to the permitted output folder. Use its exact extension and a new path. Embed saved images with ![[the confirmed vault path]]. This cannot download an arbitrary URL or overwrite an existing file.", { reference: str, path: str }),
     tool("update_properties", "Update requested YAML properties, preserving other keys. Each value is a JSON string.", { reference: str, version: str, properties: array(object({ key: str, value: str })) })];
   const rename = tool("rename_note", "Change the Markdown filename and document/tab title, rather than just a heading inside its body. Write and edit mode permits same-folder renaming; organizing modes may also move a note. Links are not changed automatically. Review returned in-scope backlinks separately.", { reference: str, version: str, path: str });
-  if (mode !== "organize" && mode !== "all") return [...read, ...edit, rename];
-  return [...read, ...edit, rename,
-    tool("create_folder", "Create a folder within the allowed work scope.", { path: str }),
+  const allowedEdits = writeScope === "current" ? edit.filter(item => item.name !== "create_note" && item.name !== "save_generated_file") : edit;
+  if (mode !== "organize" && mode !== "all") return [...read, ...allowedEdits, rename];
+  return [...read, ...allowedEdits, rename,
+    ...(writeScope === "current" ? [] : [tool("create_folder", "Create a folder within the permitted output folder.", { path: str })]),
     tool("propose_trash", "Propose moving notes to Trash. This never deletes; the user must select the concrete Trash action.", { references: array(str) })];
 }
 export function asDraft(text: string, usage: AgentReply["usage"], incomplete = false): AiDraft { return { text, incomplete, inputTokens: usage.input, outputTokens: usage.output, thinkingTokens: usage.reasoning }; }

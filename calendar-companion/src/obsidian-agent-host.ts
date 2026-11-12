@@ -16,6 +16,7 @@ export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean
   const read = async (file: AgentFile) => { const item = fileFor(file), editor = editorFor(item); const value = editor ? editor.getValue() : await vault.read(item); fileFor(file); return editorFor(item)?.getValue() ?? value; };
   return {
     files: () => { guard(); return vault.getMarkdownFiles().map(record); },
+    isCurrentNote: file => { try { fileFor(file); return true; } catch { return false; } },
     read: async file => { try { return await read(file); } catch { return null; } },
     async replace(file, expected, text) {
       const item = fileFor(file), view = viewFor(item), editor = view?.editor;

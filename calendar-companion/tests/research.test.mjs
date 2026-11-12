@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentTask } from '../dist/agent-task.js';
 import { parseAgentReply } from '../dist/agent-protocol.js';
-import { effectiveSourceMode, onlineTools, publicUrl, sourceInstructions } from '../dist/research.js';
+import { effectiveSourceMode, onlineTools, publicUrl, sourceInstructions, requestsAttachedNoteEdit } from '../dist/research.js';
 import { AiWorkspace } from '../dist/workspace.js';
 import { chatMatches, searchChatPreview } from '../dist/chat-history.js';
 
@@ -79,6 +79,19 @@ test('Custom text models do not receive guessed hosted-tool configurations',asyn
  await t.run('{"request":"Rewrite this sentence"}',{model:'gpt-5.4-pro'},'edit',1,{mode:'expanded',maximum:'none'});assert.equal(calls,1);assert.equal(t.state,'completed');
 });
 test('successfully generated files count as progress across several replies',async()=>{
- let round=0;const t=task(async()=>response(++round<=3?[{type:'image_generation_call',id:'image'+round,result:'AA==',status:'completed'},message('Image prepared.')]:round===4?[{type:'function_call',call_id:'save',name:'create_note',arguments:'{}'}]:[message('Document created.')]),{generated:{stage:async()=>[{id:crypto.randomUUID(),name:'image.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]}});
+ let round=0;const t=task(async()=>response(++round<=3?[{type:'image_generation_call',id:'image'+round,result:'AA==',status:'completed'},message('Image prepared.')]:round===4?[{type:'function_call',call_id:'save',name:'create_note',arguments:'{}'}]:[message('Document created.')]),{writeScope:'new',generated:{stage:async()=>[{id:crypto.randomUUID(),name:'image.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]}});
  await t.run('{"request":"Create a Markdown note with the generated images"}',{model:'gpt-6-luna'},'edit','none',{mode:'expanded',maximum:'none'});assert.equal(t.state,'completed');assert.equal(round,5);assert.equal(t.generated.length,3);
+});
+
+
+test('Current note stops after a generated result when automatic file saving is unavailable',async()=>{
+ let calls=0;const t=task(async request=>{calls++;assert(!JSON.parse(request.body).tools.some(tool=>tool.name==='save_generated_file'));return response([{type:'image_generation_call',id:'image',result:'AA==',status:'completed'},message('Generated the image.')]);},{writeScope:'current',generated:{stage:async()=>[{id:crypto.randomUUID(),name:'image.png',extension:'png',bytes:1,sha256:'a'.repeat(64)}]}});
+ await t.run('{"request":"Create a Markdown note and save the generated image"}',{model:'gpt-6-luna'},'all',1,{mode:'provided',maximum:1});
+ assert.equal(t.state,'completed');assert.equal(t.canResume,false);assert.equal(calls,1);assert.equal(t.generated.length,1);assert(t.message.includes('Save attachment'));assert.equal(t.text,'Generated the image.');
+});
+
+
+test('attached-note edits retain common English and Korean placement phrases without treating file saves as edits',()=>{
+ for(const request of ['Generate a chart and put its summary in the current note','Save the summary to the attached note','차트를 만들고 현재 노트에 요약을 넣어 줘','현재 문서에 요약을 저장해','현재 노트에 있는 문단에 요약을 넣어 줘'])assert(requestsAttachedNoteEdit(JSON.stringify({request})),request);
+ for(const request of ['Generate and save a chart file','Use the note as a source, then save a chart file','현재 노트에서 데이터를 읽고 차트를 파일로 저장해','현재 노트의 데이터로 차트를 만들어 파일로 저장해','현재 노트에 있는 데이터로 차트를 만들어 파일로 저장해','현재 문서에 적힌 데이터로 차트를 만들어 파일에 저장해','Do not edit the note; generate a chart only'])assert(!requestsAttachedNoteEdit(JSON.stringify({request})),request);
 });

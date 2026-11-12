@@ -1,4 +1,4 @@
-import { allowedPath, closedObject, safeOutbound, textField, vaultPath, type TaskPolicy } from "./agent-policy";
+import { allowedPath, validTaskPath, closedObject, safeOutbound, textField, vaultPath, type TaskPolicy } from "./agent-policy";
 import { inputDigest } from "./question-input";
 import { safeNoteMarkdown } from "./note-context";
 import { noteTerms, rankNote } from "./note-workspace";
@@ -26,6 +26,7 @@ export function validateJournal(value: unknown): asserts value is WorkJournal {
 }
 export interface AgentHost {
   files(): AgentFile[]; read(file: AgentFile): Promise<string | null>; replace(file: AgentFile, expected: string, text: string): Promise<void>;
+  isCurrentNote?(file: AgentFile): boolean;
   create(path: string, text: string): Promise<AgentFile>; rename(file: AgentFile, path: string): Promise<void>; folder(path: string): Promise<boolean>;
   properties(file: AgentFile, expected: string, values: Record<string, unknown>): Promise<void>; affected(path: string): string[];
   trash(file: AgentFile): Promise<void>; backup(path: string, text: string): Promise<string>; readBackup(path: string): Promise<string>;
@@ -45,6 +46,8 @@ export class VaultAgent {
   readonly sent: { title: string; path: string; bytes: number }[] = [];
   readonly pendingTrash: { reference: string; title: string; version: string }[] = [];
   private refs = new Map<string, Ref>();
+  private createdNotes = new Map<object, string>();
+  private editedNotes = new Set<object>();
   private next = 2;
   private sources: WebSource[] = [];
   private generated = new Map<string, GeneratedFile>();
@@ -53,7 +56,7 @@ export class VaultAgent {
   private markdown(value: string, original = "", inline = false, append = false): string {
     const images = new Set(this.savedImages);
     for (const match of original.matchAll(/!\[\[([^\]\n|#]+)\]\]/g)) {
-      try { const path = generatedPath(match[1]); if (["png", "jpg", "jpeg", "webp"].includes(generatedExtension(path)) && allowedPath(this.policy, path, "create", true)) images.add(path); } catch { /* Preserve only safe existing local image paths. */ }
+      try { const path = generatedPath(match[1]); if (["png", "jpg", "jpeg", "webp"].includes(generatedExtension(path)) && validTaskPath(this.policy, path, true)) images.add(path); } catch { /* Preserve only safe existing local image paths. */ }
     }
     const sources = inline ? [] : this.sources.filter(source => !append || !original.includes(source.url));
     return safeNoteMarkdown(withSources(value, sources), images);
@@ -72,12 +75,22 @@ export class VaultAgent {
     await this.host.persist(this.currentJournal); this.guard();
   }
   private ref(reference: unknown): Ref { const r = this.refs.get(textField(reference)); if (!r) throw Error("Read a reference returned by this task's search first."); return r; }
+  private allowedRef(ref: Ref, action: "read" | "edit" | "organize"): boolean {
+    if (allowedPath(this.policy, ref.file.path, action)) return true;
+    if (this.policy.writeScope !== "new" || this.createdNotes.get(ref.file.identity) !== ref.file.path || !allowedPath(this.policy, ref.file.path, "create")) return false;
+    return action !== "organize" || this.policy.mode === "organize" || this.policy.mode === "all";
+  }
+  hasUneditedWritableNote(): boolean {
+    const ref = this.refs.get("N1");
+    if (!ref || this.editedNotes.has(ref.file.identity) || !this.allowedRef(ref, "read") || !this.allowedRef(ref, "edit")) return false;
+    return this.host.isCurrentNote ? this.host.isCurrentNote(ref.file) : this.host.files().some(file => file.identity === ref.file.identity && file.path === ref.file.path);
+  }
   private reference(file: AgentFile): string {
     for (const [id, ref] of this.refs) if (ref.file.identity === file.identity && ref.file.path === file.path) return id;
     const id = `N${this.next++}`; this.refs.set(id, { file }); return id;
   }
   private async read(ref: Ref): Promise<string> {
-    this.guard(); if (!allowedPath(this.policy, ref.file.path, "read")) throw Error("This note is outside the permitted data scope.");
+    this.guard(); if (!this.allowedRef(ref, "read")) throw Error("This note is outside the permitted data scope.");
     const text = await this.host.read(ref.file); this.guard(); if (text === null) throw Error("The note was renamed, deleted or replaced."); return text;
   }
   private async excerpt(ref: Ref, fromLine = 1, throughLine = 0) {
@@ -101,7 +114,7 @@ export class VaultAgent {
     return { reference: this.reference(ref.file), title: ref.file.title, path: ref.file.path, version, text, from_line: original.slice(0, from).split("\n").length,
       through_line: original.slice(0, to).split("\n").length, total_lines: original.split("\n").length, partial: !ref.complete, selection_only: !!ref.allowedRange };
   }
-  async initialContext(): Promise<unknown> { const source = this.refs.get("N1"); return source ? await this.excerpt(source) : { source: "New document. No existing note is attached." }; }
+  async initialContext(): Promise<unknown> { const source = this.refs.get("N1"); return source ? await this.excerpt(source) : { source: "No existing note is attached.", write_target: this.policy.writeScope, note: this.policy.writeScope === "current" ? "Current note has no writable target. The user must attach a note or explicitly choose New documents before creating notes." : "Only the selected write target grants changes." }; }
   async finish(): Promise<void> { this.journal.status = "complete"; if (this.journal.operations.length) await this.host.persist(this.journal); }
   private async prepareEdit(file: AgentFile, before: string, afterHash: string): Promise<JournalOp> {
     this.guard(); const beforeHash = await inputDigest(before); this.guard();
@@ -111,12 +124,12 @@ export class VaultAgent {
     await this.host.persist(this.journal); this.guard(); return op;
   }
   async execute(name: string, args: unknown): Promise<unknown> {
-    this.guard(); if (!agentTools(this.policy.mode).some(tool => tool.name === name)) throw Error("That action is not enabled in this task's mode.");
+    this.guard(); if (!agentTools(this.policy.mode, this.policy.writeScope).some(tool => tool.name === name)) throw Error("That action is not enabled for this task's mode and write target.");
     if (name === "search_notes") {
       closedObject(args, ["query", "limit", "offset"]); const terms = noteTerms(textField(args.query, 4000)); const count = Number(args.limit), offset = Number(args.offset);
       if (!Number.isInteger(count) || count < 1 || count > 32) throw Error("Search returns 1–32 note references.");
       if (!Number.isInteger(offset) || offset < 0 || offset > 2000) throw Error("Use the returned bounded search offset.");
-      const allowed = this.host.files().filter(file => allowedPath(this.policy, file.path, "read"));
+      const allowed = this.host.files().filter(file => this.allowedRef({ file }, "read"));
       const candidates = allowed.slice(0, 2000).map(file => ({ file, score: rankNote(file.title, terms) * 10 })).sort((a, b) => b.score - a.score).slice(offset, offset + 32);
       const hits = []; let scanned = 0;
       for (const item of candidates) {
@@ -143,7 +156,7 @@ export class VaultAgent {
       closedObject(args, ["changes"]); const plans = [], seen = new Set<string>();
       for (const change of list(args.changes)) {
         closedObject(change, ["reference", "version", "action", "markdown"]); const ref = this.ref(change.reference), before = await this.read(ref);
-        if (!allowedPath(this.policy, ref.file.path, "edit")) throw Error("This note is outside the permitted edit scope.");
+        if (!this.allowedRef(ref, "edit")) throw Error("This note is outside the permitted edit scope.");
         if (seen.has(ref.file.path)) throw Error("Use one change per note in a batch."); seen.add(ref.file.path);
         if (!ref.version || change.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("The note changed. Read its new version before editing.");
         const markdown = this.markdown(textField(change.markdown, 4 * 1024 * 1024), before, change.action === "replace_selection", change.action === "append"); let after: string;
@@ -155,7 +168,7 @@ export class VaultAgent {
       }
       await this.reserveOperations(plans.length); const ops = []; for (const plan of plans) ops.push(await this.prepareEdit(plan.ref.file, plan.before, plan.hash));
       for (const [index, plan] of plans.entries()) {
-        this.guard(); await this.host.replace(plan.ref.file, plan.before, plan.after);
+        this.guard(); await this.host.replace(plan.ref.file, plan.before, plan.after); this.editedNotes.add(plan.ref.file.identity);
         if (plan.ref.allowedRange) {
           plan.ref.allowedRange = { from: plan.ref.allowedRange.from, to: plan.ref.allowedRange.to + plan.after.length - plan.before.length };
           this.policy.selection = { ...plan.ref.allowedRange }; this.policy.selectionVersion = plan.hash;
@@ -171,7 +184,7 @@ export class VaultAgent {
       const markdown = this.markdown(textField(args.markdown, 4 * 1024 * 1024)); const hash = await inputDigest(markdown);
       await this.reserveOperations(1);
       const op: JournalOp = { kind: "create", path, beforeHash: "", afterHash: hash, previousHash: "", status: "pending" }; this.journal.operations.push(op); await this.host.persist(this.journal); this.guard();
-      const file = await this.host.create(path, markdown); op.status = "done"; await this.host.persist(this.journal); const ref = this.reference(file); this.refs.get(ref)!.version = hash;
+      const file = await this.host.create(path, markdown); this.createdNotes.set(file.identity, path); op.status = "done"; await this.host.persist(this.journal); const ref = this.reference(file); this.refs.get(ref)!.version = hash;
       return { status: "created", reference: ref, path, version: hash, undo_available: true };
     }
     if (name === "save_generated_file") {
@@ -188,11 +201,11 @@ export class VaultAgent {
     }
     if (name === "update_properties") {
       closedObject(args, ["reference", "version", "properties"]); const ref = this.ref(args.reference), before = await this.read(ref);
-      if (!allowedPath(this.policy, ref.file.path, "edit") || ref.allowedRange) throw Error("Properties require the complete note's edit permission.");
+      if (!this.allowedRef(ref, "edit") || ref.allowedRange) throw Error("Properties require the complete note's edit permission.");
       if (!ref.version || args.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("Read the current note version first.");
       const values: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
       for (const item of list(args.properties, 32)) { closedObject(item, ["key", "value"]); const key = textField(item.key, 80); if (!key || ["__proto__", "constructor", "prototype"].includes(key)) throw Error("Invalid property name."); values[key] = JSON.parse(textField(item.value, 8192)) as unknown; }
-      await this.reserveOperations(1); const op = await this.prepareEdit(ref.file, before, ""); await this.host.properties(ref.file, before, values); const after = await this.read(ref); op.afterHash = await inputDigest(after); op.status = "done"; ref.version = op.afterHash; ref.complete = false; await this.host.persist(this.journal);
+      await this.reserveOperations(1); const op = await this.prepareEdit(ref.file, before, ""); await this.host.properties(ref.file, before, values); const after = await this.read(ref); this.editedNotes.add(ref.file.identity); op.afterHash = await inputDigest(after); op.status = "done"; ref.version = op.afterHash; ref.complete = false; await this.host.persist(this.journal);
       return { status: "updated", reference: this.reference(ref.file), version: ref.version };
     }
     if (name === "rename_note") {
@@ -200,26 +213,29 @@ export class VaultAgent {
       const sourceAction = this.policy.mode === "edit" ? "edit" : "organize";
       const parent = (value: string) => value.includes("/") ? value.slice(0, value.lastIndexOf("/")) : "";
       const sameFolder = parent(ref.file.path) === parent(path);
-      // Renaming the same file stays in its current folder; the output folder governs new notes.
-      const destinationPolicy = sameFolder ? { ...this.policy, folder: parent(ref.file.path) } : this.policy;
-      if (!allowedPath(this.policy, ref.file.path, sourceAction) || !allowedPath(destinationPolicy, path, "create") || ref.allowedRange) throw Error("Document renaming must stay inside the permitted change scope and requires the complete note.");
+      // A rename keeps the same identity. Current note never grants a move or a new file.
+      const destinationAllowed = this.policy.writeScope === "current" ? sameFolder && validTaskPath(this.policy, path) : this.policy.writeScope === "new" ? allowedPath(this.policy, path, "create") : allowedPath(this.policy, path, sourceAction);
+      if (!this.allowedRef(ref, sourceAction) || !destinationAllowed || ref.allowedRange) throw Error("Document renaming must stay inside the permitted change scope and requires the complete note.");
       if (this.policy.mode === "edit" && !sameFolder) throw Error("Write and edit can rename this document in its current folder. Choose an organizing mode explicitly to move it to another folder.");
       if (!ref.version || args.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("Read the current note version first.");
       const affected = this.host.affected(ref.file.path).filter(item => item !== ref.file.path);
-      if (affected.some(item => !allowedPath(this.policy, item, "edit"))) throw Error("Backlinks outside the edit scope may change. Expand the scope explicitly before renaming.");
+      const filesByPath = new Map(this.host.files().map(file => [file.path, file]));
+      const permittedBacklink = (path: string, action: "read" | "edit") => { const file = filesByPath.get(path); return !!file && this.allowedRef({ file }, action); };
+      if (affected.some(item => !permittedBacklink(item, "edit"))) throw Error("Backlinks outside the edit scope may change. Expand the scope explicitly before renaming.");
       await this.reserveOperations(1);
       const oldPath = ref.file.path, op: JournalOp = { kind: "rename", path: oldPath, target: path, beforeHash: ref.version, afterHash: ref.version, previousHash: ref.version, status: "pending" };
       this.journal.operations.push(op); await this.host.persist(this.journal); this.guard(); await this.host.rename(ref.file, path); op.status = "done";
+      if (this.createdNotes.get(ref.file.identity) === oldPath) this.createdNotes.set(ref.file.identity, path);
       if (this.policy.sourcePath === oldPath) this.policy.sourcePath = path;
-      ref.version = await inputDigest(await this.read(ref)); await this.host.persist(this.journal); return { status: "renamed", reference: this.reference(ref.file), path, version: ref.version, links_to_review: affected.filter(item => allowedPath(this.policy, item, "read")), meaning: "The filename and document/tab title changed. Body headings are separate. Links are not changed automatically; review only permitted backlink notes." };
+      ref.version = await inputDigest(await this.read(ref)); await this.host.persist(this.journal); return { status: "renamed", reference: this.reference(ref.file), path, version: ref.version, links_to_review: affected.filter(item => permittedBacklink(item, "read")), meaning: "The filename and document/tab title changed. Body headings are separate. Links are not changed automatically; review only permitted backlink notes." };
     }
     if (name === "create_folder") {
-      closedObject(args, ["path"]); const path = vaultPath(textField(args.path), true); if (!allowedPath(this.policy, path, "organize")) throw Error("The folder is outside the organize scope.");
+      closedObject(args, ["path"]); const path = vaultPath(textField(args.path), true); if (!allowedPath(this.policy, path, "create", true)) throw Error("The folder is outside the permitted output folder.");
       await this.reserveOperations(1); const created = await this.host.folder(path); if (created) { this.journal.operations.push({ kind: "folder", path, beforeHash: "", afterHash: "", previousHash: "", status: "done" }); await this.host.persist(this.journal); } return { status: created ? "created" : "existing", path };
     }
     if (name === "propose_trash") {
       closedObject(args, ["references"]);
-      for (const value of list(args.references)) { const ref = this.ref(value), before = await this.read(ref); if (!allowedPath(this.policy, ref.file.path, "organize") || ref.allowedRange) throw Error("This note cannot be proposed for Trash in the current scope."); this.pendingTrash.push({ reference: textField(value), title: ref.file.title, version: await inputDigest(before) }); }
+      for (const value of list(args.references)) { const ref = this.ref(value), before = await this.read(ref); if (!this.allowedRef(ref, "organize") || ref.allowedRange) throw Error("This note cannot be proposed for Trash in the current scope."); this.pendingTrash.push({ reference: textField(value), title: ref.file.title, version: await inputDigest(before) }); }
       return { status: "awaiting_user_choice", notes: this.pendingTrash.map(item => ({ reference: item.reference, title: item.title })) };
     }
     throw Error("Unknown workspace tool.");

@@ -1,6 +1,6 @@
 import { AgentTask, type AgentExecutor } from "./agent-task";
 import { VaultAgent, type AgentHost, type WorkJournal } from "./vault-agent";
-import { safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope } from "./agent-policy";
+import { safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
 import type { AiPreferences } from "./ai-preferences";
 import type { AiModelOptions, AiTransport } from "./ai-session";
 import type { CalendarSession } from "./session";
@@ -22,7 +22,7 @@ export class AiWorkspace {
   nextSource: WorkspaceSource | null = null;
   mode: WorkMode = "edit";
   readScope: WorkScope = "current";
-  writeScope: WorkScope = "current";
+  writeScope: WriteScope = "current";
   outputFolder = "";
   excluded = "";
   maximum: RequestLimit = "none";
@@ -63,8 +63,9 @@ export class AiWorkspace {
   }) {}
   get current() { return this.alive && this.options.current(); }
   get requestId() { return this.calendar?.requestId ?? null; }
-  get title() { return this.source?.path.split("/").at(-1)?.replace(/\.md$/i, "") ?? "New document"; }
+  get title() { return this.source?.path.split("/").at(-1)?.replace(/\.md$/i, "") ?? (this.writeScope === "new" ? "New documents" : "No note attached"); }
   get result() { return this.task?.text ?? ""; }
+  get hasResult() { return !!this.result || (this.task?.generated.length ?? 0) > 0; }
   get canStop() { return this.busy && this.running && !this.stopRequested; }
   get stopping() { return this.busy && this.stopRequested; }
   get canContinue() { return this.current && !!this.task?.canResume && !!this.agent; }
@@ -97,12 +98,13 @@ export class AiWorkspace {
             this.source.selection = { from: selection.from, to: selection.to }; this.source.selectionVersion = saved.selectionVersion;
           }
         }
-        if (["ask", "edit", "organize", "all"].includes(String(saved.mode))) this.mode = saved.mode as WorkMode;
+        if (typeof saved.mode === "string" && ["ask", "edit", "organize", "all"].includes(saved.mode)) this.mode = saved.mode as WorkMode;
         this.sourceMode = readSourceMode(saved.sourceMode);
         this.attachments = readAttachments(saved.attachments);
         try { if (saved.onlineMaximum !== undefined) this.onlineMaximum = requestLimit(saved.onlineMaximum); } catch { this.onlineMaximum = 1; }
         if (typeof saved.customOnlineMaximum === "string") { this.customOnlineMaximum = saved.customOnlineMaximum.slice(0, 32); const count = customRequestLimit(this.customOnlineMaximum); if (count !== null) this.onlineMaximum = count; }
-        for (const key of ["readScope", "writeScope"] as const) if (["current", "folder", "vault"].includes(String(saved[key]))) this[key] = saved[key] as WorkScope;
+        if (typeof saved.readScope === "string" && ["current", "folder", "vault"].includes(saved.readScope)) this.readScope = saved.readScope as WorkScope;
+        if (typeof saved.writeScope === "string" && ["current", "new", "folder", "vault"].includes(saved.writeScope)) this.writeScope = saved.writeScope as WriteScope;
         if (typeof saved.outputFolder === "string") this.outputFolder = saved.outputFolder.slice(0, 500);
         if (typeof saved.excluded === "string") this.excluded = saved.excluded.slice(0, 4000);
         try { if (saved.maximum !== undefined) this.maximum = requestLimit(saved.maximum); } catch { this.maximum = 1; this.message = "The saved request limit was invalid and was reset to 1. Choose your preferred limit before sending."; }
@@ -146,8 +148,10 @@ export class AiWorkspace {
   }
   bind(source: WorkspaceSource | null, force = false): void {
     if (!this.current) return;
-    if ((this.busy || this.canContinue || this.result || this.prompt.trim()) && !force) { if (source?.path !== this.source?.path) this.nextSource = source; this.changed(); return; }
-    this.source = source; this.nextSource = null; this.outputFolder = source?.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
+    if ((this.busy || this.canContinue || this.hasResult || this.prompt.trim()) && !force) { if (source?.path !== this.source?.path) this.nextSource = source; this.changed(); return; }
+    const sourceChanged = source?.path !== this.source?.path;
+    this.source = source; this.nextSource = null;
+    if (sourceChanged) this.outputFolder = source?.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
     this.preview = ""; this.changed();
   }
   setPrompt(value: string): void { if (!this.settingsLocked) { this.prompt = value; this.preview = ""; } }
@@ -158,14 +162,14 @@ export class AiWorkspace {
     return { sourcePath: this.source?.path ?? null, folder: this.outputFolder.trim().replace(/\/$/, ""), readScope: this.readScope, writeScope: this.writeScope, mode: this.mode,
       configDir: this.options.configDir, excluded, ...(this.source?.selection && this.readScope === "current" ? { selection: { ...this.source.selection }, selectionVersion: this.source.selectionVersion } : {}) };
   }
-  private createTask(executor: AgentExecutor, current = () => this.current): AgentTask {
-    return new AgentTask({ current, preserve: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate, generated: this.options.generated,
+  private createTask(executor: AgentExecutor, current = () => this.current, writeScope = this.writeScope): AgentTask {
+    return new AgentTask({ current, preserve: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate, generated: this.options.generated, writeScope,
       ...(this.attachments.length && this.options.attachments ? { attachments: this.options.attachments.forTask(this.attachments) } : {}) });
   }
   private rememberJournal(journal: WorkJournal): void { if (journal.operations.length) this.history = [journal, ...this.history.filter(j => j.id !== journal.id)].slice(0, 30); }
   private rememberLast(): void {
-    if (!this.result) return;
-    const turn = { request: this.lastRequest, answer: this.result, sourceMode: this.task?.sourceMode ?? "provided" as SourceMode };
+    if (!this.hasResult) return;
+    const turn = { request: this.lastRequest, answer: this.result, sourceMode: this.task?.sourceMode ?? "provided" };
     if (this.previous.at(-1)?.request !== turn.request || this.previous.at(-1)?.answer !== turn.answer) this.previous = [...this.previous, turn].slice(-2);
   }
   private async prepare(agent: VaultAgent): Promise<string> {
@@ -201,7 +205,7 @@ export class AiWorkspace {
       const input = await this.prepare(agent); if (!current()) return;
       await this.persist(); // Draft is recoverable before the first billable request.
       if (!current()) return;
-      task = this.createTask(agent, () => this.current && epoch === this.runEpoch); this.task = task; this.agent = agent; this.lastRequest = this.prompt;
+      task = this.createTask(agent, () => this.current && epoch === this.runEpoch, agent.policy.writeScope); this.task = task; this.agent = agent; this.lastRequest = this.prompt;
       this.activeChatId = crypto.randomUUID(); const turn: ChatTurn = { id: this.activeChatId, request: this.prompt.trim(), answer: "", startedAt: Date.now(), model: this.model.model, status: "running", requests: 0, inputTokens: 0, outputTokens: 0, actions: [], attachments: [...this.attachments], sourceMode: this.sourceMode }; this.chat = [...this.chat, turn].slice(-CHAT_HISTORY_LIMIT);
       const unsubscribe = this.watchTask(task);
       try { await task.run(input, { ...this.model }, this.mode, this.maximum, { mode: this.sourceMode, maximum: this.onlineMaximum }); }
@@ -227,7 +231,7 @@ export class AiWorkspace {
     this.message = task.message;
     if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
     if (this.source && agent.policy.selection) { this.source.selection = { ...agent.policy.selection }; this.source.selectionVersion = agent.policy.selectionVersion; }
-    if (task.state !== "paused" && (task.text || agent.operations.some(op => op.status === "done"))) { this.prompt = ""; this.attachments = []; }
+    if (task.state !== "paused" && !task.fileWarnings.length && (task.text || agent.operations.some(op => op.status === "done") || task.state === "completed" && task.generated.length > 0)) { this.prompt = ""; this.attachments = []; }
     for (const journal of agent.journals) if (journal.operations.length) {
       journal.status = task.state !== "completed" || task.events.some(e => e.kind === "blocked") ? "interrupted" : "complete";
       await this.options.host(() => this.current).persist(journal); this.rememberJournal(journal);
@@ -312,7 +316,8 @@ export class AiWorkspace {
       const turn = this.options.storage.loadChat ? await this.options.storage.loadChat(turnId) : this.chat.find(item => item.id === turnId);
       if (!this.current || !turn || turn.id !== turnId || turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated) throw Error("The full saved conversation could not be verified. Its original text is kept.");
       const file = turn.generated?.find(item => item.id === fileId); if (!file) throw Error("This generated file is not available in the saved conversation.");
-      const original = this.policy(), policy = { ...original, mode: original.mode === "ask" ? "edit" as const : original.mode };
+      // This button authorizes one explicit attachment save, never a broader AI task.
+      const original = this.policy(), policy: TaskPolicy = { ...original, mode: "edit", writeScope: "new" };
       const agent = new VaultAgent(this.options.host(() => this.current), policy, () => this.current); agent.research([], [file]);
       const path = `${this.outputFolder ? this.outputFolder.replace(/\/$/, "") + "/" : ""}Yoofloe assets/${file.id}.${file.extension}`;
       await agent.execute("save_generated_file", { reference: file.id, path }); await agent.finish();

@@ -9,7 +9,7 @@ const reply=output=>({status:200,text:JSON.stringify({status:'completed',output,
 const call=(id='c1')=>({type:'function_call',call_id:id,name:'read_notes',arguments:'{"notes":[]}'});
 const text=message=>({type:'message',role:'assistant',content:[{type:'output_text',text:message}]});
 test('data scope and write scope are independent, paths/secrets/configuration never bypass local guards',()=>{
- assert(allowedPath(policy,'Other/B.md','read'));assert(!allowedPath(policy,'Other/B.md','edit'));assert(allowedPath(policy,'Work/New.md','create'));
+ assert(allowedPath(policy,'Other/B.md','read'));assert(!allowedPath(policy,'Other/B.md','edit'));assert(!allowedPath(policy,'Work/New.md','create'));
  for(const path of ['../A.md','/A.md','C:/A.md','Work/../A.md','.obsidian/settings.md','Private/A.md','Yoofloe AI/Backups/a.md'])assert(!allowedPath(policy,path,'read'));
  assert.throws(()=>vaultPath('Work\\A.md'));assert.throws(()=>safeOutbound('sk-proj-'+ 'a'.repeat(40)));
  assert(!agentTools('ask').some(t=>t.name==='apply_changes'));assert(agentTools('edit').some(t=>t.name==='rename_note'));assert(!agentTools('edit').some(t=>t.name==='propose_trash'));
