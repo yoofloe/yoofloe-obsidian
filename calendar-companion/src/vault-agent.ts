@@ -114,7 +114,7 @@ export class VaultAgent {
     return { reference: this.reference(ref.file), title: ref.file.title, path: ref.file.path, version, text, from_line: original.slice(0, from).split("\n").length,
       through_line: original.slice(0, to).split("\n").length, total_lines: original.split("\n").length, partial: !ref.complete, selection_only: !!ref.allowedRange };
   }
-  async initialContext(): Promise<unknown> { const source = this.refs.get("N1"); return source ? await this.excerpt(source) : { source: "No existing note is attached.", write_target: this.policy.writeScope, note: this.policy.writeScope === "current" ? "Current note has no writable target. The user must attach a note or explicitly choose New documents before creating notes." : "Only the selected write target grants changes." }; }
+  async initialContext(): Promise<unknown> { const source = this.refs.get("N1"); if (this.policy.sourcePath && !source) throw Error("The attached note is unavailable. Open it again or choose another note before sending."); return source ? await this.excerpt(source) : { source: "No existing note is attached.", write_target: this.policy.writeScope, note: this.policy.writeScope === "current" ? "Current note has no writable target. The user must attach a note or explicitly choose New documents before creating notes." : "Only the selected write target grants changes." }; }
   async finish(): Promise<void> { this.journal.status = "complete"; if (this.journal.operations.length) await this.host.persist(this.journal); }
   private async prepareEdit(file: AgentFile, before: string, afterHash: string): Promise<JournalOp> {
     this.guard(); const beforeHash = await inputDigest(before); this.guard();

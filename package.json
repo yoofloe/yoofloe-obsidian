@@ -1,6 +1,6 @@
 {
   "name": "obsidian-yoofloe",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Research, write and organize Markdown with your own OpenAI key. Optional Yoofloe Calendar context. Visit www.yoofloe.com.",
   "private": true,
   "type": "module",

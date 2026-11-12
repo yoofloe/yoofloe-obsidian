@@ -275,3 +275,29 @@
 .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock { display:grid; grid-template-columns:minmax(0,1fr) max-content; align-items:end; gap:6px; }
 .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock > .y-ai-hint, .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-attachments, .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-row .y-ai-field, .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-row .y-ai-attach { display:none; }
 .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-compose textarea { height:max(40px,calc(1.45em + 8px)); min-height:max(40px,calc(1.45em + 8px)); }
+
+
+/* Expand the same settings controls; keep the conversation and draft in memory. */
+.yoofloe-ai .y-ai-note-context { display:flex; align-items:center; gap:8px; flex-shrink:0; padding:0 12px 8px; min-width:0; }
+.yoofloe-ai .y-ai-note-context > span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--font-ui-small); }
+.yoofloe-ai .y-ai-note-context button { flex:0 0 auto; max-width:50%; }
+.yoofloe-ai .y-ai-settings-bar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; flex-shrink:0; padding:6px 12px; border-bottom:1px solid var(--background-modifier-border); }
+.yoofloe-ai .y-ai-settings-bar strong { flex:1; min-width:0; font-size:var(--font-ui-small); font-weight:600; }
+.yoofloe-ai .y-ai-settings-toggle { flex:0 1 auto; min-width:116px; max-width:70%; font-size:var(--font-ui-small); }
+.yoofloe-ai .y-ai-settings-stop { flex:0 0 max(88px,calc(5.3em + 8px)); width:max(88px,calc(5.3em + 8px)); height:max(40px,calc(1.35em + 8px)); min-height:max(40px,calc(1.35em + 8px)); }
+.yoofloe-ai.y-ai-settings-expanded .y-ai-chat-panel { display:none; }
+.yoofloe-ai.y-ai-settings-expanded .y-ai-scroll { display:block; flex:1; min-height:0; padding-bottom:16px; }
+.yoofloe-ai.y-ai-settings-expanded.y-ai-tiny .y-ai-note-context { display:none; }
+
+.yoofloe-ai .y-ai-settings-status { max-height:4.4em; overflow:auto; margin:0 0 8px; font-size:var(--font-ui-small); }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-settings-expanded) .y-ai-settings-bar,
+.yoofloe-ai.y-ai-tiny:not(.y-ai-settings-expanded) .y-ai-note-context { display:none; }
+.yoofloe-ai.y-ai-tiny.y-ai-settings-expanded .y-ai-settings-bar > strong { display:none; }
+
+.yoofloe-ai .y-ai-header-expand { display:none; }
+.yoofloe-ai.y-ai-compact:not(.y-ai-settings-expanded) .y-ai-header-expand { display:inline-flex; }
+.yoofloe-ai.y-ai-compact .y-ai-heading h2 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.yoofloe-ai.y-ai-compact:not(.y-ai-settings-expanded) .y-ai-settings-bar,
+.yoofloe-ai.y-ai-compact:not(.y-ai-settings-expanded) .y-ai-note-context,
+.yoofloe-ai.y-ai-keyboard:not(.y-ai-settings-expanded) .y-ai-settings-bar,
+.yoofloe-ai.y-ai-keyboard:not(.y-ai-settings-expanded) .y-ai-note-context { display:none; }

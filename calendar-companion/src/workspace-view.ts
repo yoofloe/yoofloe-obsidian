@@ -16,7 +16,7 @@ import { chatMatches, searchChatPreview, type ChatTurn } from "./chat-history";
 
 export const AI_VIEW = "yoofloe-ai";
 const STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
-type ViewOptions = { settings(): void; hide(): void };
+type ViewOptions = { settings(): void; chooseNote(): void; hide(): void };
 /** One compact, theme-native surface shared by desktop and mobile. No data is read on view construction. */
 export class YoofloeAiView extends ItemView {
   private unsubscribe: (() => void) | null = null;
@@ -34,6 +34,11 @@ export class YoofloeAiView extends ItemView {
   private searchEpoch = 0;
   private searchTimer: number | undefined;
   private generatedVisible = new Map<string, number>();
+  private settingsExpanded = false;
+  private savedChatScroll = 0;
+  private savedFollowChat = false;
+  private lastSettingsMessage = "";
+  private readonly settingsId = `yoofloe-settings-${crypto.randomUUID()}`;
   constructor(leaf: WorkspaceLeaf, readonly work: AiWorkspace, private readonly options: ViewOptions) { super(leaf); }
   getViewType(): string { return AI_VIEW; }
   getDisplayText(): string { return "Yoofloe AI"; }
@@ -73,6 +78,16 @@ export class YoofloeAiView extends ItemView {
   }
   private actionReady(): boolean {
     const w = this.work; return !w.busy && !w.addingAttachments && w.ready && w.configured && !w.limitProblem && (w.canContinue ? w.canResumeWithLimit : !!w.prompt.trim());
+  }
+  private toggleSettings(): void {
+    if (!this.settingsExpanded) {
+      const messages = this.contentEl.querySelector<HTMLElement>(".y-ai-messages");
+      this.savedChatScroll = messages?.scrollTop ?? 0;
+      this.savedFollowChat = !!messages && messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 32;
+    }
+    this.settingsExpanded = !this.settingsExpanded; this.render();
+    const toggle = !this.settingsExpanded && this.contentEl.classList.contains("y-ai-compact") ? ".y-ai-header-expand" : ".y-ai-settings-toggle";
+    this.contentEl.querySelector<HTMLButtonElement>(toggle)?.focus({ preventScroll: true });
   }
   private refreshLimitDisclosure(): void {
     const w = this.work, label = requestLimitLabel(w.maximum);
@@ -185,15 +200,28 @@ export class YoofloeAiView extends ItemView {
   }
   private render(): void {
     if (!this.work.current) return;
-    const w = this.work, el = this.contentEl, previousScroll = el.querySelector<HTMLElement>(".y-ai-messages"), oldScroll = previousScroll?.scrollTop ?? 0, oldMenuScroll = el.querySelector<HTMLElement>(".y-ai-scroll")?.scrollTop ?? 0;
+    const w = this.work, el = this.contentEl, wasExpanded = el.classList.contains("y-ai-settings-expanded"), previousScroll = el.querySelector<HTMLElement>(".y-ai-messages"), oldScroll = wasExpanded ? this.savedChatScroll : previousScroll?.scrollTop ?? 0, oldMenuScroll = el.querySelector<HTMLElement>(".y-ai-scroll")?.scrollTop ?? 0;
+    const activeField = el.ownerDocument.activeElement;
+    const settingsFocus = activeField && el.querySelector(".y-ai-scroll")?.contains(activeField) && activeField.matches("input,textarea,select") ? activeField.getAttribute("aria-label") : null;
+    const selectionStart = settingsFocus && "selectionStart" in activeField! ? (activeField as HTMLInputElement).selectionStart : null;
+    const selectionEnd = settingsFocus && "selectionEnd" in activeField! ? (activeField as HTMLInputElement).selectionEnd : null;
+    el.classList.toggle("y-ai-settings-expanded", this.settingsExpanded);
     const oldSearch = el.querySelector<HTMLInputElement>(".y-ai-chat-search"), searchFocused = el.ownerDocument.activeElement === oldSearch, searchCursor = oldSearch?.selectionStart ?? this.chatQuery.length;
-    const follow = !previousScroll && w.chat.length > 0 || w.busy && w.chat.length > this.lastChatCount || !!previousScroll && previousScroll.scrollTop + previousScroll.clientHeight >= previousScroll.scrollHeight - 32; this.lastChatCount = w.chat.length; this.followChat = follow;
+    const follow = this.settingsExpanded || wasExpanded ? this.savedFollowChat : !previousScroll && w.chat.length > 0 || w.busy && w.chat.length > this.lastChatCount || !!previousScroll && previousScroll.scrollTop + previousScroll.clientHeight >= previousScroll.scrollHeight - 32; this.lastChatCount = w.chat.length; this.followChat = follow;
     this.rendering?.unload(); this.rendering = new Component(); this.rendering.load(); el.empty();
     const header = el.createDiv({ cls: "y-ai-header" }), title = header.createDiv({ cls: "y-ai-heading" });
-    title.createEl("h2", { text: "Yoofloe AI" }); title.createEl("p", { text: w.title, attr: { title: w.source?.path ?? "Create a document without opening a note" } });
+    title.createEl("h2", { text: "Yoofloe AI" }); title.createEl("p", { text: `${w.source?.selection && w.readScope === "current" ? "Selected text · " : ""}${w.title}`, attr: { title: w.source?.path ?? "Choose a note or chat without one", "aria-live": "polite" } });
+    const note = this.button(header, "", () => this.options.chooseNote(), w.settingsLocked || !w.ready, "clickable-icon"); note.setAttribute("aria-label", "Choose note"); note.title = "Choose a note to read or edit"; setIcon(note, "paperclip");
     const fresh = this.button(header, "", () => void w.newTask(), w.settingsLocked, "clickable-icon"); fresh.setAttribute("aria-label", "New conversation task"); fresh.title = "New task"; setIcon(fresh, "square-pen");
     const settings = this.button(header, "", () => this.options.settings(), w.settingsLocked, "clickable-icon"); settings.setAttribute("aria-label", "Yoofloe AI settings"); setIcon(settings, "settings-2");
+    const compactExpand = this.button(header, "", () => this.toggleSettings(), false, "clickable-icon y-ai-header-expand"); compactExpand.setAttribute("aria-label", "Expand settings"); compactExpand.setAttribute("aria-controls", this.settingsId); compactExpand.setAttribute("aria-expanded", String(this.settingsExpanded)); compactExpand.title = "Expand settings"; setIcon(compactExpand, "maximize-2");
     const hide = this.button(header, "", () => this.options.hide(), false, "clickable-icon"); hide.setAttribute("aria-label", "Hide Yoofloe AI"); setIcon(hide, "panel-right-close");
+    if (w.nextSource) {
+      const candidate = w.nextSource, context = el.createDiv({ cls: "y-ai-note-context" });
+      context.createSpan({ text: candidate.path.split("/").at(-1) ?? candidate.path, attr: { title: candidate.path } });
+      const attach = this.button(context, candidate.selection ? "Use selection" : "Use opened note", () => w.attachNote(candidate), w.settingsLocked, "mod-cta");
+      attach.title = w.settingsLocked ? "Finish or stop the current task before changing its note" : "Connect this note without clearing the conversation or draft";
+    }
     const chatPanel = el.createEl("section", { cls: "y-ai-chat-panel", attr: { "aria-label": "Yoofloe AI conversation" } });
     const searchBar = chatPanel.createDiv({ cls: "y-ai-search-bar" }), searchIcon = searchBar.createSpan({ cls: "y-ai-search-icon" }); setIcon(searchIcon, "search");
     const search = searchBar.createEl("input", { value: this.chatQuery, cls: "y-ai-chat-search", attr: { type: "search", placeholder: "Search conversations", "aria-label": "Search conversations", autocomplete: "off" } }); search.maxLength = 200;
@@ -202,13 +230,16 @@ export class YoofloeAiView extends ItemView {
     if (this.chatQuery) { const clear = this.button(searchBar, "", () => { this.chatQuery = ""; void this.searchConversation(); }, false, "clickable-icon"); clear.setAttribute("aria-label", "Clear conversation search"); setIcon(clear, "x"); }
     const messages = chatPanel.createDiv({ cls: "y-ai-messages", attr: { "aria-label": "Scrollable conversation", tabindex: "0" } });
     messages.addEventListener("wheel", () => { this.followChat = false; }, { passive: true }); messages.addEventListener("touchstart", () => { this.followChat = false; }, { passive: true });
-    const scroll = el.createDiv({ cls: "y-ai-scroll" });
+    const settingsBar = el.createDiv({ cls: "y-ai-settings-bar" }); settingsBar.createEl("strong", { text: "Workspace settings" });
+    if (this.settingsExpanded && (w.canStop || w.stopping)) this.button(settingsBar, w.stopping ? "Stopping…" : "Stop", () => w.stop(), !w.canStop, "y-ai-settings-stop mod-warning");
+    const expand = this.button(settingsBar, this.settingsExpanded ? "Back to chat" : "Expand settings", () => this.toggleSettings(), false, "y-ai-settings-toggle");
+    expand.setAttribute("aria-expanded", String(this.settingsExpanded)); expand.setAttribute("aria-controls", this.settingsId);
+    const scroll = el.createDiv({ cls: "y-ai-scroll", attr: { id: this.settingsId, "aria-label": "Workspace settings" } });
     if (!w.configured && w.ready) {
       const intro = scroll.createDiv({ cls: "y-ai-setup" }), copy = intro.createDiv({ cls: "y-ai-setup-copy" });
       copy.createEl("strong", { text: "Connect OpenAI" }); copy.createEl("p", { text: "Your key · API charges apply" });
       this.button(intro, "Set up", () => this.options.settings(), false, "mod-cta");
     }
-    if (w.nextSource) this.button(scroll, `New task for ${w.nextSource.path.split("/").at(-1)}`, () => void w.newTask(w.nextSource), w.busy, "y-ai-next");
     const primarySettings = scroll.createDiv({ cls: "y-ai-settings-grid" }), secondarySettings = scroll.createDiv({ cls: "y-ai-settings-secondary" });
     const modelSettings = this.details(primarySettings, "model-settings", "Model");
     const selectedModel = modelCatalog("openai").models.find(item => item.id === w.model.model);
@@ -246,7 +277,7 @@ export class YoofloeAiView extends ItemView {
       if (w.settingsLocked || !w.current) return;
       new VaultFolderPicker(this.app, () => w.current && !w.settingsLocked && folder.isConnected,
         () => w.excluded.split("\n").map(path => path.trim()).filter(Boolean),
-        path => { w.outputFolder = path; w.preview = ""; this.saveSoon(); this.render(); }, w.outputFolder).open();
+        path => { w.setOutputFolder(path); this.saveSoon(); this.render(); }, w.outputFolder).open();
     }, w.settingsLocked, "y-ai-folder");
     folder.setAttribute("aria-label", `Choose working and output folder: ${w.outputFolder || "Vault root"}`);
     folder.title = "Choose a folder inside this vault";
@@ -291,7 +322,11 @@ export class YoofloeAiView extends ItemView {
     if (w.chat.length || this.chatQuery) this.conversation(messages);
     else if (w.result) this.markdown(messages, w.result);
     else { const empty = messages.createDiv({ cls: "y-ai-empty" }); empty.createEl("strong", { text: "What would you like to work on?" }); empty.createEl("p", { text: "Ask, write, research, or attach a file." }); }
-    if ((w.message || w.task?.message) && (w.busy || !w.task || w.task.state !== "completed" || w.message !== w.task.message)) messages.createEl("p", { text: w.busy && w.task?.busy ? w.task.message : w.message, cls: "y-ai-status", attr: { role: "status", "aria-live": "polite" } });
+    const feedback = w.busy && w.task?.busy ? w.task.message : w.message;
+    if ((w.message || w.task?.message) && (w.busy || !w.task || w.task.state !== "completed" || w.message !== w.task.message)) {
+      const status = (this.settingsExpanded ? scroll : messages).createEl("p", { text: feedback, cls: this.settingsExpanded ? "y-ai-status y-ai-settings-status" : "y-ai-status", attr: { role: "status", "aria-live": "polite" } });
+      if (this.settingsExpanded) scroll.prepend(status);
+    }
     if (w.result) {
       const resultActions = messages.createDiv({ cls: "y-ai-result-actions" });
       this.button(resultActions, "Copy Markdown", () => { void navigator.clipboard.writeText(w.result).then(() => new Notice("Markdown copied"), () => new Notice("Copy was unavailable; the result is kept.")); });
@@ -339,8 +374,12 @@ export class YoofloeAiView extends ItemView {
     run.title = w.busy ? "Stop future requests and file actions; keep completed work and any already-sent answer" : `Send permitted data directly to OpenAI · API charges · ${requestLimitLabel(w.maximum)}`;
     prompt.addEventListener("input", () => { w.setPrompt(prompt.value); run.disabled = !this.actionReady(); this.saveSoon(); });
     prompt.addEventListener("keydown", event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !run.disabled && !w.busy) { event.preventDefault(); run.click(); } });
-    scroll.scrollTop = oldMenuScroll; messages.scrollTop = follow && !this.chatQuery ? messages.scrollHeight : oldScroll;
-    if (searchFocused) { search.focus({ preventScroll: true }); search.setSelectionRange(searchCursor, searchCursor); }
+    scroll.scrollTop = this.settingsExpanded && !settingsFocus && feedback !== this.lastSettingsMessage ? 0 : oldMenuScroll; if (this.settingsExpanded) this.lastSettingsMessage = feedback; messages.scrollTop = follow && !this.chatQuery ? messages.scrollHeight : oldScroll;
+    if (settingsFocus && !w.settingsLocked) {
+      const replacement = Array.from(scroll.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")).find(field => field.getAttribute("aria-label") === settingsFocus);
+      if (replacement && !replacement.disabled) { replacement.focus({ preventScroll: true }); if (selectionStart !== null && selectionEnd !== null && "setSelectionRange" in replacement) replacement.setSelectionRange(selectionStart, selectionEnd); }
+    }
+    if (searchFocused && !this.settingsExpanded) { search.focus({ preventScroll: true }); search.setSelectionRange(searchCursor, searchCursor); }
   }
   private watchViewport(): () => void {
     const root = this.contentEl, doc = root.ownerDocument, win = doc.defaultView; if (!win) return () => {};
