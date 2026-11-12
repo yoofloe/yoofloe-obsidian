@@ -308,3 +308,282 @@ test('Open preserves a pending choice even when the active note or its selection
  const f=fixture();await f.host.create('A.md','A');await f.host.create('B.md','B');await f.work.initialize();f.work.attachNote({path:'A.md'});f.work.bind({path:'B.md'});f.work.bind({path:'A.md'},false,true);assert.equal(f.work.nextSource.path,'B.md');assert.equal(f.work.source.path,'A.md');
  const g=fixture();await g.host.create('B.md','B');await g.work.initialize();g.work.busy=true;g.work.bind({path:'B.md'});g.work.busy=false;g.work.bind({path:'B.md',selection:{from:0,to:1},selectionVersion:'0'.repeat(64)},false,true);assert.equal(g.work.source,null);assert.equal(g.work.nextSource.selection,undefined);
 });
+
+async function waitForWorkspace(predicate) {
+  for (let i = 0; i < 80 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 1));
+  assert(predicate(), 'The workspace did not reach the expected checkpoint');
+}
+const fixtureAnswer = value => response([{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: value }] }]);
+
+test('follow-ups dispatch in order as distinct tasks and are saved before sending', async () => {
+  const f = fixture(), calls = [];
+  let release;
+  await f.work.initialize();
+  f.options.transport = async req => {
+    const input = JSON.parse(JSON.parse(req.body).input[0].content);
+    calls.push(input.request);
+    if (calls.length === 1) return await new Promise(resolve => { release = resolve; });
+    assert.equal(f.saved().followUps[0].status, 'sending');
+    assert.equal(f.saved().followUps[0].text, input.request);
+    assert.equal(input.attached_files.length, 0);
+    return fixtureAnswer(input.request);
+  };
+  f.work.setPrompt('First task');
+  const first = f.work.run();
+  await waitForWorkspace(() => !!release);
+  for (const message of ['Second task', 'Third task']) {
+    f.work.setFollowUpDraft(message);
+    assert.equal(await f.work.submitFollowUp('queue'), true);
+  }
+  assert.deepEqual(calls, ['First task']);
+  assert.equal(f.work.prompt, 'First task');
+  release(fixtureAnswer('First task'));
+  await first;
+  assert.deepEqual(calls, ['First task', 'Second task', 'Third task']);
+  assert.deepEqual(f.work.chat.map(turn => turn.request), calls);
+  assert.deepEqual(f.work.followUps, []);
+  assert(f.saved().chat.every(turn => Number.isSafeInteger(turn.durationMs) && turn.activity.length));
+});
+
+test('Stop holds the queue across reload and an explicit resume preserves a separate draft and files', async () => {
+  const f = fixture(), calls = [];
+  let release;
+  await f.work.initialize();
+  f.work.setFollowUpDefault('steer');
+  f.options.transport = async req => {
+    const input = JSON.parse(JSON.parse(req.body).input[0].content);
+    calls.push(input.request);
+    assert.equal(input.attached_files.length, 0);
+    if (calls.length === 1) return await new Promise(resolve => { release = resolve; });
+    return fixtureAnswer('Queued result');
+  };
+  f.work.setPrompt('Original task');
+  const running = f.work.run();
+  await waitForWorkspace(() => !!release);
+  f.work.setFollowUpDraft('Saved follow-up');
+  assert(await f.work.submitFollowUp('queue'));
+  f.work.stop();
+  release(fixtureAnswer('Paid answer kept'));
+  await running;
+  assert.deepEqual(calls, ['Original task']);
+  f.work.setPrompt('Separate unsent draft');
+  const file = { id: crypto.randomUUID(), name: 'separate.txt', extension: 'txt', kind: 'document', mime: 'text/plain', bytes: 6, sha256: 'b'.repeat(64) };
+  f.work.attachments = [file];
+  await f.work.persist();
+  const saved = f.saved();
+  const reopened = new AiWorkspace({ ...f.options, storage: { ...f.options.storage, load: async () => saved } });
+  await reopened.initialize();
+  assert.equal(reopened.followUpDefault, 'steer');
+  assert.equal(reopened.queueHeld, true);
+  assert.equal(reopened.followUps[0].text, 'Saved follow-up');
+  assert.equal(calls.length, 1);
+  await reopened.resumeQueue();
+  assert.deepEqual(calls, ['Original task', 'Saved follow-up']);
+  assert.equal(reopened.prompt, 'Separate unsent draft');
+  assert.deepEqual(reopened.attachments, [file]);
+  assert.equal(reopened.followUps.length, 0);
+});
+
+test('restored sending messages and changed note access require review before any dispatch', async () => {
+  const f = fixture();
+  await f.host.create('A.md', 'A');
+  await f.host.create('B.md', 'B');
+  await f.work.initialize();
+  assert(f.work.attachNote({ path: 'A.md' }));
+  f.work.pauseQueue();
+  f.work.setFollowUpDraft('Work on A');
+  assert(await f.work.submitFollowUp('queue'));
+  assert(f.work.attachNote({ path: 'B.md' }));
+  await f.work.resumeQueue();
+  assert(f.work.queueHeld);
+  assert.match(f.work.queueMessage, /confirm its note/);
+  assert.equal(f.keyReads(), 0);
+  const saved = f.saved();
+  saved.followUps[0].status = 'sending';
+  const reopened = new AiWorkspace({ ...f.options, storage: { ...f.options.storage, load: async () => saved } });
+  await reopened.initialize();
+  assert.equal(reopened.followUps[0].status, 'review');
+  await reopened.resumeQueue();
+  assert.equal(f.keyReads(), 0);
+});
+
+test('a steer awaiting local persistence is held for review if Stop wins the race', async () => {
+  const f = fixture();
+  let release, releaseSave, calls = 0;
+  await f.work.initialize();
+  const save = f.options.storage.save;
+  let blocking = true;
+  f.options.storage.save = async value => {
+    if (blocking && value.followUps.some(entry => entry.status === 'steer-pending')) {
+      blocking = false;
+      await new Promise(resolve => { releaseSave = resolve; });
+    }
+    await save(value);
+  };
+  f.options.transport = async () => {
+    calls++;
+    return await new Promise(resolve => { release = resolve; });
+  };
+  f.work.setPrompt('Original task');
+  const running = f.work.run();
+  await waitForWorkspace(() => !!release);
+  f.work.setFollowUpDraft('Redirect this task');
+  const steering = f.work.submitFollowUp('steer');
+  await waitForWorkspace(() => !!releaseSave);
+  f.work.stop();
+  releaseSave();
+  release(fixtureAnswer('Original paid result'));
+  await steering;
+  await running;
+  assert.equal(calls, 1);
+  assert.equal(f.work.followUps[0].status, 'review');
+  assert.equal(f.work.followUps[0].text, 'Redirect this task');
+  assert.deepEqual(f.work.chat[0].steers, []);
+});
+
+test('pasted text is stored locally and can form an explicit request within its source restriction', async () => {
+  const f = fixture();
+  const text = 'Do not browse the web. ' + 'Long clipboard text. '.repeat(2000);
+  let paste, addedText, calls = 0;
+  f.options.attachments = {
+    add: async file => {
+      addedText = await file.text();
+      paste = { id: crypto.randomUUID(), name: file.name, extension: 'txt', kind: 'document', mime: 'text/plain', bytes: file.size, sha256: 'a'.repeat(64) };
+      return paste;
+    },
+    forTask: (files, pastedTextIsRequest) => {
+      assert.equal(files.length, 1);
+      assert.deepEqual(files[0].pastedText, { providedOnly: true });
+      assert(pastedTextIsRequest);
+      return { prepare: async () => ({ parts: [{ type: 'input_file', file_id: 'synthetic-text' }], fileIds: [] }), cleanup: async () => true };
+    },
+  };
+  f.options.transport = async req => {
+    calls++;
+    const body = JSON.parse(req.body);
+    assert(!body.tools.some(tool => tool.type === 'web_search'));
+    const input = JSON.parse(body.input[0].content[0].text);
+    assert.match(input.request, /message supplied as pasted text/);
+    assert.equal(input.source_mode, 'provided');
+    return fixtureAnswer('Used the pasted text');
+  };
+  await f.work.initialize();
+  await f.work.addPastedText(text);
+  assert.equal(addedText, text);
+  assert.equal(f.work.prompt, '');
+  assert.equal(f.work.hasDraft, true);
+  assert.equal(f.keyReads(), 0);
+  assert.equal(calls, 0);
+  const saved = f.saved();
+  const reopened = new AiWorkspace({ ...f.options, storage: { ...f.options.storage, load: async () => saved } });
+  await reopened.initialize();
+  assert.deepEqual(reopened.attachments, [paste]);
+  await reopened.run();
+  assert.equal(calls, 1);
+  assert.equal(reopened.chat[0].attachments[0].name, 'Pasted text.txt');
+  assert.equal(reopened.attachments.length, 0);
+});
+
+test('conversation folders and archives keep drafts, queues, transcripts and note connections isolated', async () => {
+  const f = fixture(), sidecars = new Map(), archivedTurns = new Map();
+  f.options.storage.load = async () => ({ prompt: 'Legacy unsent draft', source: 'A.md', result: 'Legacy reply', lastRequest: 'Legacy question' });
+  f.options.storage.loadConversation = async id => structuredClone(sidecars.get(id));
+  f.options.storage.saveConversation = async (id, state) => sidecars.set(id, structuredClone(state));
+  f.options.storage.saveChat = async turn => archivedTurns.set(turn.id, structuredClone(turn));
+  await f.host.create('A.md', 'First note');
+  await f.host.create('B.md', 'Second note');
+  await f.work.initialize();
+  const inbox = f.work.library.active;
+  assert.equal(f.work.activeConversation.name, 'Previous conversations');
+  assert.equal(f.work.chat[0].answer, 'Legacy reply');
+  f.work.pauseQueue();
+  f.work.setFollowUpDraft('First chat only');
+  assert(await f.work.submitFollowUp('queue'));
+  assert(await f.work.changeFolder(null, 'Study'));
+  const folder = f.work.library.folders[0].id;
+  assert(await f.work.changeConversation(inbox, { folderId: folder, pinned: true, name: 'Older work' }));
+  assert(await f.work.createConversation(folder));
+  const other = f.work.library.active;
+  assert.notEqual(other, inbox);
+  assert(f.work.attachNote({ path: 'B.md' }));
+  assert.equal(f.work.prompt, '');
+  assert.deepEqual(f.work.chat, []);
+  assert.deepEqual(f.work.followUps, []);
+  f.options.transport = async req => {
+    assert(!req.body.includes('Legacy question'));
+    return fixtureAnswer('Second thread only');
+  };
+  f.work.setPrompt('Second task');
+  await f.work.run();
+  assert.equal(archivedTurns.get(f.work.chat[0].id).conversationId, other);
+  assert(await f.work.changeConversation(other, { archived: true }));
+  assert.equal(f.work.library.active, inbox);
+  assert.equal(f.work.source.path, 'A.md');
+  assert.equal(f.work.prompt, 'Legacy unsent draft');
+  assert.equal(f.work.chat[0].answer, 'Legacy reply');
+  assert.equal(f.work.followUps[0].text, 'First chat only');
+  assert.equal(f.work.queueHeld, true);
+  assert(!await f.work.openConversation(other));
+  const saved = f.saved();
+  const reopened = new AiWorkspace({ ...f.options, storage: { ...f.options.storage, load: async () => saved } });
+  await reopened.initialize();
+  assert(await reopened.changeConversation(other, { archived: false }));
+  assert(await reopened.openConversation(other));
+  assert.equal(reopened.chat[0].answer, 'Second thread only');
+  assert.equal(reopened.source.path, 'B.md');
+  assert(await reopened.removeFolder(folder));
+  assert(reopened.library.conversations.every(conversation => conversation.folderId === null));
+  assert.equal(archivedTurns.size, 2);
+});
+
+test('a failed conversation read keeps the active draft and its saved transcript', async () => {
+  const f = fixture();
+  const states = new Map();
+  f.options.storage.saveConversation = async (id, state) => states.set(id, structuredClone(state));
+  f.options.storage.loadConversation = async () => { throw Error('Synthetic read failure'); };
+  await f.work.initialize();
+  const previous = f.work.library.active;
+  assert(await f.work.createConversation());
+  const current = f.work.library.active;
+  f.work.setPrompt('Keep this draft');
+  assert(!await f.work.openConversation(previous));
+  assert.equal(f.work.library.active, current);
+  assert.equal(f.work.prompt, 'Keep this draft');
+  assert.equal(f.saved().prompt, 'Keep this draft');
+  assert.equal(f.keyReads(), 0);
+});
+
+test('a saved compaction is reused only in the same conversation with matching access', async () => {
+  const f = fixture(), bodies = [];
+  await f.work.initialize();
+  f.work.mode = 'ask';
+  const compaction = { type: 'compaction', id: 'cmp_scoped', encrypted_content: 'opaque-session-context' };
+  f.options.transport = async req => {
+    bodies.push(JSON.parse(req.body));
+    return bodies.length === 1 ? response([compaction, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Original conversation answer' }] }])
+      : fixtureAnswer('Fresh result');
+  };
+  f.work.setPrompt('Context before compaction');
+  await f.work.run();
+  const saved = f.saved();
+  assert.equal(saved.contextCheckpoint.item.encrypted_content, compaction.encrypted_content);
+  assert.equal(saved.chat[0].answer, 'Original conversation answer');
+  const reopened = new AiWorkspace({ ...f.options, storage: { ...f.options.storage, load: async () => saved } });
+  await reopened.initialize();
+  reopened.setPrompt('Continue this conversation');
+  await reopened.run();
+  assert.equal(bodies[1].input[0].encrypted_content, compaction.encrypted_content);
+  assert(bodies[1].input.some(item => item.content === 'Original conversation answer'));
+  reopened.readScope = 'folder';
+  reopened.setPrompt('New access scope');
+  await reopened.run();
+  assert(!JSON.stringify(bodies[2].input).includes('opaque-session-context'));
+  assert(!JSON.stringify(bodies[2].input).includes('Original conversation answer'));
+  assert(await reopened.createConversation());
+  reopened.setAutoCompact(false);
+  reopened.setPrompt('Another conversation');
+  await reopened.run();
+  assert.equal(bodies[3].context_management, undefined);
+  assert(!JSON.stringify(bodies[3].input).includes('opaque-session-context'));
+  assert.equal(f.saved().autoCompact, false);
+});

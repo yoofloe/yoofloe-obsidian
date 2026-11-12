@@ -115,7 +115,7 @@ export class AiSettingsModal extends Modal {
     if (!this.current()) return;
     if (this.keyInput) this.keyInput.value = "";
     const el = this.contentEl, name = providerLabel(this.provider), catalog = modelCatalog(this.provider);
-    el.empty(); el.createEl("h2", { text: "Yoofloe AI settings" });
+    el.empty(); el.createEl("h2", { text: "Yoofloe settings" });
     el.createEl("p", { text: DATA_FLOW_NOTICE });
     if (PUBLIC_AI_PROVIDERS.length > 1) new Setting(el).setName("AI provider").setDesc("Your key is stored separately for each provider. Switching providers turns AI off.").addDropdown(dropdown => {
       for (const provider of PUBLIC_AI_PROVIDERS) dropdown.addOption(provider, providerLabel(provider));
@@ -158,7 +158,7 @@ export class AiSettingsModal extends Modal {
       .addButton(button => { this.saveModelButton = button; button.setButtonText("Save").setCta().onClick(() => void this.saveSettings()); })
       .addButton(button => button.setButtonText("Remove saved key").setDisabled(this.busy || !this.configured).onClick(() => void this.change(() => this.ai.preferences.clearKey(this.provider), true)));
     this.updateModelSave();
-    if (this.manualDrafts) new Setting(el).setName(`Enable ${name} for this session`).setDesc("For advanced manual-import drafts only. The Yoofloe AI workspace starts with its send button. Disabling cannot recall an already-sent request.")
+    if (this.manualDrafts) new Setting(el).setName(`Enable ${name} for this session`).setDesc("For advanced manual-import drafts only. The Yoofloe workspace starts with its send button. Disabling cannot recall an already-sent request.")
       .addToggle(toggle => toggle.setValue(this.ai.session.enabled).setDisabled(this.busy || !this.configured).onChange(value => this.ai.session.enableForSession(value)));
   }
 }

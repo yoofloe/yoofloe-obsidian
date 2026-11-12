@@ -62,3 +62,51 @@ test('recognized credentials are blocked in both small and uploaded-size plainte
  for(const length of [20,40000]){const f=fixture(),file=await f.store.add(new File(['x'.repeat(length)+'\n'+'sk-proj-'+'A'.repeat(40)],'export.txt'),()=>true);await assert.rejects(f.store.forTask([file]).prepare('not-logged',()=>true,()=>{}),/possible API key/);assert.equal(f.counts().uploads,0);}
  const f=fixture();await assert.rejects(f.store.add(new File(['GIF89a'],'animated.gif'),()=>true),/Choose an image/);assert.equal(f.counts().uploads,0);
 });
+
+test('a composer paste retains all Unicode text and distinguishes it from ordinary source files', async () => {
+  const f = fixture(), text = '검색하지 마. ' + '한글🙂'.repeat(1250);
+  const paste = await f.store.add(new File([text], 'Pasted text.txt'), () => true);
+  paste.pastedText = { providedOnly: true };
+  const ordinary = await f.store.add(new File(['Ordinary reference text'], 'reference.txt'), () => true);
+  assert.deepEqual(readAttachments([paste])[0].pastedText, { providedOnly: true });
+  assert.equal(readAttachments([{ ...ordinary, pastedText: { providedOnly: true } }])[0].pastedText, undefined);
+  assert.deepEqual(f.counts(), { uploads: 0, transcriptions: 0, removals: 0 });
+  const prepared = await f.store.forTask([ordinary, paste], true).prepare('synthetic', () => true, () => {});
+  const [source, message] = prepared.parts.map(part => JSON.parse(part.text));
+  assert.match(source.note, /source content/);
+  assert.match(message.note, /pasting it into the composer/);
+  assert.equal(message.text, text);
+  const context = await f.store.forTask([paste]).prepare('synthetic', () => true, () => {});
+  assert.match(JSON.parse(context.parts[0].text).note, /source content/);
+});
+
+test('a pasted message longer than the inline budget uses a file with its content unchanged', async () => {
+  const f = fixture(), text = '한'.repeat(36000);
+  const item = await f.store.add(new File([text], 'Pasted text.txt'), () => true);
+  item.pastedText = { providedOnly: false };
+  assert.equal(item.bytes, new TextEncoder().encode(text).length);
+  assert.equal(new TextDecoder().decode([...f.bytes.values()][0]), text);
+  assert.equal(f.counts().uploads, 0);
+  const run = f.store.forTask([item], true);
+  const prepared = await run.prepare('synthetic', () => true, () => {});
+  assert.match(prepared.parts[0].text, /message the user pasted/);
+  assert.deepEqual(prepared.parts[1], { type: 'input_file', file_id: 'file-test' });
+  assert.equal(f.counts().uploads, 1);
+  await run.cleanup('synthetic');
+  assert.equal(f.counts().removals, 1);
+});
+
+test('the widened selection budget keeps the per-file image and transcription boundaries', async () => {
+  const f = fixture(), mib = 1024 * 1024;
+  const doc = await f.store.add(new File([new Uint8Array(21 * mib)], 'large.pdf'), () => true);
+  assert.equal(doc.bytes, 21 * mib);
+  const tooLarge = (name, size) => ({ name, size, arrayBuffer: async () => { assert.fail('Oversized files must be rejected before reading their contents'); } });
+  await assert.rejects(f.store.add(tooLarge('sample.png', 20 * mib + 1), () => true), /20 MiB/);
+  await assert.rejects(f.store.add(tooLarge('sample.wav', 25000001), () => true), /25 MB/);
+  await assert.rejects(f.store.add(tooLarge('large.pdf', 45 * mib + 1), () => true), /45 MiB/);
+  const audio = { ...doc, id: crypto.randomUUID(), name: 'audio.wav', extension: 'wav', kind: 'audio', mime: 'audio/wav', bytes: 25000000 };
+  const overflow = { ...doc, id: crypto.randomUUID(), bytes: 45 * mib - doc.bytes - audio.bytes + 1 };
+  assert.equal(readAttachments([doc, audio, overflow]).length, 2);
+  assert.equal(readAttachments([doc, { ...audio, bytes: 25000001 }]).length, 1);
+  assert.deepEqual(f.counts(), { uploads: 0, transcriptions: 0, removals: 0 });
+});

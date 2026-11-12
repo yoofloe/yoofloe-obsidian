@@ -1,3 +1,5 @@
+import { turnConversation } from "./conversation-library";
+import { openDesktopResponse } from "./desktop-responses";
 import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, requestUrl, requireApiVersion, type SettingDefinitionRender } from "obsidian";
 import { ACTION, INBOX } from "./protocol";
 import { CalendarSession } from "./session";
@@ -37,13 +39,13 @@ export default class YoofloeAiPlugin extends Plugin {
     this.registerView(AI_VIEW, leaf => new YoofloeAiView(leaf, this.workspace(), { settings: () => this.openAiSettings(), chooseNote: () => { void this.chooseNote(); }, hide: () => { leaf.detach(); } }));
     for (const type of ["yoofloe-ai-writer", "yoofloe-capture"]) this.registerView(type, leaf => new LegacyYoofloeView(leaf, type, () => this.openWorkspace()));
     this.addCommand({ id: "note-ai", name: "Open", icon: "sparkles", callback: () => this.openWorkspace() });
-    this.addRibbonIcon("sparkles", "Yoofloe AI", () => this.openWorkspace());
+    this.addRibbonIcon("sparkles", "Yoofloe", () => this.openWorkspace());
     if (this.app.workspace) {
       this.registerEvent(this.app.workspace.on("editor-menu", (menu, _editor, info) => {
-        if (info instanceof MarkdownView) menu.addItem(item => item.setTitle("Yoofloe AI").setIcon("sparkles").onClick(() => this.openWorkspace(info)));
+        if (info instanceof MarkdownView) menu.addItem(item => item.setTitle("Yoofloe").setIcon("sparkles").onClick(() => this.openWorkspace(info)));
       }));
       this.registerEvent(this.app.workspace.on("file-menu", (menu, file, _source, leaf) => {
-        const view = leaf?.view; if (view instanceof MarkdownView && view.file === file) menu.addItem(item => item.setTitle("Yoofloe AI").setIcon("sparkles").onClick(() => this.openWorkspace(view)));
+        const view = leaf?.view; if (view instanceof MarkdownView && view.file === file) menu.addItem(item => item.setTitle("Yoofloe").setIcon("sparkles").onClick(() => this.openWorkspace(view)));
       }));
       const update = () => this.updateActions();
       const trackNote = () => this.updateActions(this.notesReady);
@@ -54,12 +56,12 @@ export default class YoofloeAiPlugin extends Plugin {
       this.register(() => { for (const action of this.actions.values()) action.remove(); this.actions.clear(); });
     }
     this.registerObsidianProtocolHandler(ACTION, params => {
-      if (!this.live || !Platform.isAndroidApp) { new Notice("Direct Calendar lookup requires both apps on the same Android phone or tablet. Yoofloe AI itself works without Calendar."); return; }
+      if (!this.live || !Platform.isAndroidApp) { new Notice("Direct Calendar lookup requires both apps on the same Android phone or tablet. Yoofloe itself works without Calendar."); return; }
       if (!params.requestId) { this.openWorkspace(); return; }
       if (params.vault !== this.app.vault.getName()) { new Notice("This Calendar request belongs to another vault."); return; }
       if (this.work?.requestId === params.requestId) { void this.work.receiveCalendar(params.requestId); this.openWorkspace(); return; }
       if (this.manual) { void this.manual.receive(params.requestId); return; }
-      new Notice("No matching local request. Start a new Calendar lookup in Yoofloe AI.");
+      new Notice("No matching local request. Start a new Calendar lookup in Yoofloe.");
     });
   }
   private capture(view: MarkdownView): WorkspaceSource | null {
@@ -83,10 +85,10 @@ export default class YoofloeAiPlugin extends Plugin {
     }
     const views = this.app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).filter((view): view is MarkdownView => view instanceof MarkdownView);
     for (const [view, action] of this.actions) if (!views.includes(view)) { action.remove(); this.actions.delete(view); }
-    for (const view of views) if (!this.actions.has(view)) this.actions.set(view, view.addAction("sparkles", "Yoofloe AI", () => this.openWorkspace(view)));
+    for (const view of views) if (!this.actions.has(view)) this.actions.set(view, view.addAction("sparkles", "Yoofloe", () => this.openWorkspace(view)));
   }
   openWorkspace(sourceView?: MarkdownView): void {
-    void this.showWorkspace(sourceView).catch(() => new Notice("Yoofloe AI could not open. Existing notes and saved work are kept."));
+    void this.showWorkspace(sourceView).catch(() => new Notice("Yoofloe could not open. Existing notes and saved work are kept."));
   }
   private async showWorkspace(sourceView?: MarkdownView): Promise<void> {
     if (!this.live) return;
@@ -134,7 +136,7 @@ export default class YoofloeAiPlugin extends Plugin {
         if (!current) { await leaf.setViewState({ type: AI_VIEW, active: false }); current = leaf; }
         else leaf.detach();
       }
-    } catch { new Notice("The old panel state could not be backed up. It was kept; open Yoofloe AI from the sparkle icon."); }
+    } catch { new Notice("The old panel state could not be backed up. It was kept; open Yoofloe from the sparkle icon."); }
   }
   private context(): AiContext {
     if (!this.ai) {
@@ -153,8 +155,30 @@ export default class YoofloeAiPlugin extends Plugin {
     const ai = this.context(), owner = this.app.vault, adapter = owner.adapter, root = `${owner.configDir}/plugins/yoofloe`;
     const provider = providerFiles(async request => { const response = await requestUrl(request); return { status: response.status, text: response.text, arrayBuffer: response.arrayBuffer }; }, boundedOpenAiDownload);
     const localFiles = { configDir: owner.configDir, exists: (path: string) => adapter.exists(path), mkdir: async (path: string) => { if (!ai.current()) throw Error("Vault changed"); await adapter.mkdir(path); }, read: (path: string) => adapter.readBinary(path), write: async (path: string, bytes: ArrayBuffer) => { if (!ai.current()) throw Error("Vault changed"); await adapter.writeBinary(path, bytes); } };
+    const workspaceLimit = 8 * 1024 * 1024;
+    const readLocalState = async (path: string): Promise<unknown> => {
+      if (!ai.current()) throw Error("Vault changed");
+      if (!await adapter.exists(path)) return null;
+      const stat = await adapter.stat(path);
+      if (!stat || stat.size > workspaceLimit) throw Error("Saved work exceeds its local size limit.");
+      const value = JSON.parse(await adapter.read(path)) as unknown;
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("The existing work record is not a workspace object.");
+      return value;
+    };
+    const saveLocalState = async (path: string, value: unknown): Promise<void> => {
+      if (!ai.current()) throw Error("Vault changed");
+      const text = JSON.stringify(value);
+      if (new TextEncoder().encode(text).length > workspaceLimit) throw Error("Saved work exceeds its local size limit.");
+      await adapter.write(path, text);
+      if (!ai.current() || await adapter.read(path) !== text) throw Error("The local work record could not be confirmed.");
+    };
+    const conversationPath = (id: string) => {
+      if (!validChatId(id)) throw Error("Invalid local conversation identifier.");
+      return `${root}/conversations/${id}.json`;
+    };
     let chatQueue: Promise<void> = Promise.resolve();
     this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
+      ...(Platform.isDesktopApp ? { liveResponse: openDesktopResponse } : {}),
       generated: generatedStore({ ...localFiles, download: provider.download }),
       attachments: attachmentStore({ ...localFiles, upload: provider.upload, transcribe: provider.transcribe, removeUpload: provider.removeUpload,
         transcript: async path => { if (!await adapter.exists(path)) return null; const stat = await adapter.stat(path); if (!stat || stat.size > 512 * 1024) throw Error("The saved transcript exceeds its limit."); return adapter.read(path); },
@@ -163,12 +187,19 @@ export default class YoofloeAiPlugin extends Plugin {
       host: current => obsidianAgentHost(this.app, owner, current), inboxHint: () => adapter.getResourcePath(`${INBOX}/`),
       transport: async request => { if (!ai.current()) throw Error("Vault changed"); const response = await requestUrl(request); return { status: response.status, text: response.text }; },
       storage: {
-        load: async () => { const path = `${root}/workspace.json`; if (!await adapter.exists(path)) return null; const stat = await adapter.stat(path); if (!stat || stat.size > 8 * 1024 * 1024) throw Error("Saved work exceeds its local size limit."); const value = JSON.parse(await adapter.read(path)) as unknown; if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("The existing work record is not a workspace object."); return value; },
-        save: async value => { if (!ai.current()) throw Error("Vault changed"); const text = JSON.stringify(value); if (text.length > 8 * 1024 * 1024) throw Error("Saved work exceeds its local size limit."); const path = `${root}/workspace.json`; await adapter.write(path, text); if (await adapter.read(path) !== text) throw Error("The local work record could not be confirmed."); },
+        load: () => readLocalState(`${root}/workspace.json`),
+        save: value => saveLocalState(`${root}/workspace.json`, value),
+        loadConversation: id => readLocalState(conversationPath(id)),
+        saveConversation: async (id, value) => {
+          if (!ai.current()) throw Error("Vault changed");
+          const path = conversationPath(id), folder = `${root}/conversations`;
+          if (!await adapter.exists(folder)) await adapter.mkdir(folder);
+          await saveLocalState(path, value);
+        },
         history: () => loadWorkRecords(owner),
         saveChat: (turn: ChatTurn) => {
           if (!validChatId(turn.id)) return Promise.reject(Error("Invalid local chat record."));
-          if (turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated) return Promise.reject(Error("Load the full conversation before updating its archive."));
+          if (turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated || turn.workDetailsTruncated) return Promise.reject(Error("Load the full conversation before updating its archive."));
           const text = JSON.stringify({ ...turn, requestTruncated: false, answerTruncated: false, generatedTruncated: false });
           if (new TextEncoder().encode(text).length > 6 * 1024 * 1024) return Promise.reject(Error("The full chat record exceeds its local size limit. The current answer is kept."));
           const next = chatQueue.then(async () => {
@@ -182,15 +213,15 @@ export default class YoofloeAiPlugin extends Plugin {
           if (!stat || stat.size > 6 * 1024 * 1024) throw Error("This full chat record cannot be read safely.");
           const turn = readChat(JSON.parse(await adapter.read(path)) as unknown); if (!ai.current() || turn?.id !== id) throw Error("The local chat record could not be confirmed."); return turn;
         },
-        searchChats: async (query, offset) => {
-          if (!ai.current() || !query.trim() || query.length > 200 || !Number.isSafeInteger(offset) || offset < 0) return { turns: [], nextOffset: null };
+        searchChats: async (query, offset, conversationId) => {
+          if (!ai.current() || !query.trim() && !conversationId || conversationId && !validChatId(conversationId) || query.length > 200 || !Number.isSafeInteger(offset) || offset < 0) return { turns: [], nextOffset: null };
           const folder = `${root}/chats`; if (!await adapter.exists(folder)) return { turns: [], nextOffset: null };
           const listing = await adapter.list(folder), paths = listing.files.filter(path => { const name = path.slice(folder.length + 1); return path.startsWith(folder + "/") && name.endsWith(".json") && validChatId(name.slice(0, -5)); }).sort().reverse();
           const turns: ChatTurn[] = []; let index = offset, bytes = 0;
           for (; index < Math.min(paths.length, offset + 20); index++) {
             if (!ai.current()) break; const stat = await adapter.stat(paths[index]); if (!stat || stat.size > 6 * 1024 * 1024) continue;
             if (bytes && bytes + stat.size > 8 * 1024 * 1024) break; bytes += stat.size;
-            try { const turn = readChat(JSON.parse(await adapter.read(paths[index])) as unknown); if (turn && chatMatches(turn, query)) turns.push(searchChatPreview(turn, query)); } catch { /* An unreadable archive stays untouched. */ }
+            try { const turn = readChat(JSON.parse(await adapter.read(paths[index])) as unknown); if (turn && (!conversationId || turnConversation(turn.conversationId) === conversationId) && (!query || chatMatches(turn, query))) turns.push(query ? searchChatPreview(turn, query) : turn); } catch { /* An unreadable archive stays untouched. */ }
           }
           return { turns, nextOffset: index < paths.length ? index : null };
         },
@@ -233,13 +264,13 @@ class YoofloeSettings extends PluginSettingTab {
     const rows: SettingsRow[] = [
       { name: "Workspace", heading: true, desc: "Write, edit, organize and explore Markdown with your own OpenAI key. Works independently on desktop, mobile and tablets. Yoofloe Calendar is optional." },
       { name: "Yoofloe", desc: "Discover Yoofloe apps and support at www.yoofloe.com.", aliases: ["website", "homepage", "Yoofloe"], render: setting => { setting.descEl.appendText(" "); setting.descEl.createEl("a", { text: "www.yoofloe.com", href: "https://www.yoofloe.com", attr: { target: "_blank", rel: "noopener noreferrer" } }); } },
-      { name: "One workspace", desc: "Use the sparkle ribbon, note header, note menu, or Yoofloe AI: Open command. Closing the panel keeps your draft and result.", aliases: ["Yoofloe AI", "notes", "data scope", "permissions", "request limit"],
-        render: setting => { setting.addButton(b => b.setButtonText("Open Yoofloe AI").onClick(() => this.yoofloe.openWorkspace())); } },
+      { name: "One workspace", desc: "Use the sparkle ribbon, note header, note menu, or Yoofloe: Open command. Closing the panel keeps your draft and result.", aliases: ["Yoofloe", "notes", "data scope", "permissions", "request limit"],
+        render: setting => { setting.addButton(b => b.setButtonText("Open Yoofloe").onClick(() => this.yoofloe.openWorkspace())); } },
       { name: "OpenAI key, model and thinking depth", desc: "Settings make no API requests. Starting a task sends permitted note text and context directly to OpenAI; API charges apply. A task may make multiple requests.", aliases: ["API key", "effort", "custom model", "AI settings", "cost"],
         render: setting => { setting.addButton(b => b.setButtonText("AI settings").onClick(() => this.yoofloe.openAiSettings())); } },
       { name: "Privacy and local data", desc: `${DATA_FLOW_NOTICE} ${LOCAL_DATA_NOTICE}`, aliases: ["privacy", "backups", "Undo", "data sharing", "servers", "OpenAI retention"],
         render: setting => { setting.descEl.appendText(" "); setting.descEl.createEl("a", { text: "Privacy and data controls", href: PRIVACY_URL, attr: { target: "_blank", rel: "noopener noreferrer" } }); } },
-      { name: "Yoofloe Calendar · optional Android app", desc: "Plans, tasks, notes, study, projects and focus. Direct local lookup requires both apps on the same Android phone or tablet and profile, Calendar 1.8.5+, Obsidian 1.11.5+, and a vault in shared device storage. Yoofloe AI works independently on other platforms.", aliases: ["Calendar", "Android", "local records"],
+      { name: "Yoofloe Calendar · optional Android app", desc: "Plans, tasks, notes, study, projects and focus. Direct local lookup requires both apps on the same Android phone or tablet and profile, Calendar 1.8.5+, Obsidian 1.11.5+, and a vault in shared device storage. Yoofloe works independently on other platforms.", aliases: ["Calendar", "Android", "local records"],
         render: setting => { setting.addButton(b => b.setButtonText("Discover Calendar").onClick(() => this.containerEl.ownerDocument.defaultView?.open(STORE_URL, "_blank"))); } },
     ];
     if (Platform.isAndroidApp) rows.push({ name: "Manual Calendar import (advanced)", desc: "Save complete Markdown snapshots without AI. Calendar records remain unchanged.", aliases: ["Calendar import", "snapshots"],
