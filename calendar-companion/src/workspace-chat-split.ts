@@ -13,8 +13,9 @@ interface SplitDrag {
   anchorY: number;
   y: number;
   height: number;
-  moved: boolean;
+  resized: boolean;
   original: number | null;
+  originalHeight: number | null;
 }
 
 const MIN_MESSAGES = 48;
@@ -89,14 +90,23 @@ export class WorkspaceChatSplit {
     if (this.drag && previous && (previous.available !== this.bounds.available || previous.min !== this.bounds.min || previous.max !== this.bounds.max)) {
       this.drag.anchorY = this.drag.y;
       this.drag.height = p.panel.getBoundingClientRect().height;
+      this.drag.originalHeight = this.ratio === this.drag.original
+        ? this.drag.height
+        : this.requestedHeight(this.drag.original);
     }
+  }
+
+  private requestedHeight(ratio: number | null): number | null {
+    if (ratio === null || !this.bounds) return null;
+    const { available, min, max } = this.bounds;
+    return Math.max(min, Math.min(max, Math.round(available * ratio)));
   }
 
   private apply(): void {
     if (!this.parts || !this.bounds) return;
-    const { messages, divider, panel } = this.parts, { available, min, max } = this.bounds;
+    const { messages, divider, panel } = this.parts, { available } = this.bounds;
     const follow = this.followConversation() && messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 24;
-    const requested = this.ratio === null ? null : Math.max(min, Math.min(max, Math.round(available * this.ratio)));
+    const requested = this.requestedHeight(this.ratio);
     if (requested === null) this.root.style.removeProperty(HEIGHT_PROP);
     else this.root.setCssProps({ [HEIGHT_PROP]: `${requested}px` });
     if (follow) messages.scrollTop = messages.scrollHeight;
@@ -119,9 +129,10 @@ export class WorkspaceChatSplit {
     if (!this.parts || event.target !== this.parts.divider || !this.bounds || this.drag || !event.isPrimary || event.button !== 0) return;
     event.preventDefault();
     this.root.setPointerCapture(event.pointerId);
+    const height = this.parts.panel.getBoundingClientRect().height;
     this.drag = {
       id: event.pointerId, initialY: event.clientY, anchorY: event.clientY, y: event.clientY,
-      height: this.parts.panel.getBoundingClientRect().height, moved: false, original: this.ratio,
+      height, resized: false, original: this.ratio, originalHeight: height,
     };
     this.root.classList.add("y-ai-split-dragging");
   };
@@ -142,21 +153,24 @@ export class WorkspaceChatSplit {
     drag.y = event.clientY;
     this.applyDrag(drag);
     this.endDrag(true);
-    if (!drag.moved && event.pointerType === "mouse") this.parts?.divider.focus({ preventScroll: true });
+    if (!drag.resized && Math.abs(drag.y - drag.initialY) < DRAG_THRESHOLD && event.pointerType === "mouse") {
+      this.parts?.divider.focus({ preventScroll: true });
+    }
   };
 
   private applyDrag(drag: SplitDrag): void {
     if (!this.parts) return;
     if (Math.abs(drag.y - drag.initialY) < DRAG_THRESHOLD) {
-      if (!drag.moved) return;
-      this.ratio = drag.original;
-      this.apply();
+      if (this.ratio !== drag.original) {
+        this.ratio = drag.original;
+        this.apply();
+      }
       drag.anchorY = drag.y;
       drag.height = this.parts.panel.getBoundingClientRect().height;
+      drag.originalHeight = drag.height;
       return;
     }
-    drag.moved = true;
-    if (drag.y !== drag.anchorY) this.resizeTo(drag.height + drag.y - drag.anchorY);
+    if (drag.y !== drag.anchorY && this.resizeTo(drag.height + drag.y - drag.anchorY)) drag.resized = true;
   }
 
   private onCancel = (event: PointerEvent): void => { if (this.drag?.id === event.pointerId) this.endDrag(false); };
@@ -169,8 +183,14 @@ export class WorkspaceChatSplit {
     this.frame = 0;
     this.root.classList.remove("y-ai-split-dragging");
     if (this.root.hasPointerCapture(drag.id)) this.root.releasePointerCapture(drag.id);
-    if (commit) { if (this.ratio !== drag.original) this.save(this.ratio); }
-    else { this.ratio = drag.original; this.apply(); }
+    if (this.ratio === drag.original) return;
+    const height = this.parts?.panel.getBoundingClientRect().height;
+    const sameHeight = height !== undefined && drag.originalHeight !== null && Math.abs(height - drag.originalHeight) < 0.5;
+    if (commit && !sameHeight) this.save(this.ratio);
+    else {
+      this.ratio = drag.original;
+      this.apply();
+    }
   }
 
   private onKey = (event: KeyboardEvent): void => {
