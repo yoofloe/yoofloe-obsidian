@@ -3,15 +3,17 @@ import type { AiDraft } from "./ai-session";
 import { parseOpenAiDraft } from "./openai";
 import { emptyOnlineUsage, sourceList, sourceLink, publicUrl, withSources, type WebSource, type OnlineUsage } from "./research";
 import type { PendingGeneratedFile } from "./generated-files";
+import { readCompaction } from "./conversation-context";
+import { workText } from "./work-activity";
 export interface AgentCall { id: string; name: string; arguments: string }
-export interface AgentReply { output: Record<string, unknown>[]; calls: AgentCall[]; text: string; incomplete: boolean; sources: WebSource[]; citations: WebSource[]; generated: PendingGeneratedFile[]; online: OnlineUsage; usage: { input: number; output: number; reasoning: number } }
+export interface AgentReply { output: Record<string, unknown>[]; calls: AgentCall[]; text: string; summaries: string[]; incomplete: boolean; sources: WebSource[]; citations: WebSource[]; generated: PendingGeneratedFile[]; online: OnlineUsage; usage: { input: number; output: number; reasoning: number } }
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const num = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0 ? v as number : 0;
-export function parseAgentReply(status: number, raw: string): AgentReply {
+export function parseAgentReply(status: number, raw: string, superseded = false): AgentReply {
   if (status < 200 || status >= 300) { parseOpenAiDraft(status, raw); throw Error("OpenAI did not return a usable response."); }
   if (new TextEncoder().encode(raw).length > 32 * 1024 * 1024) throw Error("The response is too large for this device.");
   const data: unknown = JSON.parse(raw); if (!obj(data) || !Array.isArray(data.output) || !["completed", "incomplete"].includes(String(data.status))) throw Error("OpenAI did not complete this step. No retry was made.");
-  const output = data.output.filter(obj), calls: AgentCall[] = []; const texts: string[] = [], candidates: unknown[] = [], citations: unknown[] = [], generated = new Map<string, PendingGeneratedFile>(), online = emptyOnlineUsage();
+  const output = data.output.filter(obj), calls: AgentCall[] = []; const texts: string[] = [], summaries: string[] = [], candidates: unknown[] = [], citations: unknown[] = [], generated = new Map<string, PendingGeneratedFile>(), online = emptyOnlineUsage();
   for (const item of output) {
     if (item.type === "web_search_call") { online.search++; if (obj(item.action) && Array.isArray(item.action.sources)) candidates.push(...item.action.sources as unknown[]); }
     if (item.type === "code_interpreter_call") online.analysis++;
@@ -21,7 +23,10 @@ export function parseAgentReply(status: number, raw: string): AgentReply {
         const origin = "image:" + item.id; generated.set(origin, { origin, name: `Generated image ${online.image}.png`, base64: item.result });
       }
     }
-    if (item.type === "function_call") {
+    if (item.type === "reasoning" && Array.isArray(item.summary)) for (const part of item.summary) {
+      if (summaries.length < 8 && obj(part) && part.type === "summary_text" && typeof part.text === "string" && part.text.trim()) summaries.push(workText(part.text));
+    }
+    if (item.type === "function_call" && !superseded) {
       if (typeof item.call_id !== "string" || item.call_id.length > 200 || typeof item.name !== "string" || typeof item.arguments !== "string" || item.arguments.length > 4 * 1024 * 1024) throw Error("An invalid tool request was returned.");
       calls.push({ id: item.call_id, name: item.name, arguments: item.arguments });
     }
@@ -48,11 +53,19 @@ export function parseAgentReply(status: number, raw: string): AgentReply {
       texts.push(chars.join(""));
     }
   }
-  if (calls.length > 16 || generated.size > 16 || (!calls.length && !texts.length && !generated.size)) throw Error("No text or supported work was returned.");
+  if (calls.length > 16 || generated.size > 16 || (!superseded && !calls.length && !texts.length && !generated.size)) throw Error("No text or supported work was returned.");
   const usage = obj(data.usage) ? data.usage : {}, details = obj(usage.output_tokens_details) ? usage.output_tokens_details : {};
   const cited = sourceList(citations), sources = sourceList([...citations, ...candidates]);
-  return { output: output.filter(item => ["message", "reasoning", "function_call", "web_search_call", "code_interpreter_call", "image_generation_call"].includes(String(item.type))).map(item => item.type === "image_generation_call" ? { ...item, result: null } : item), calls,
-    text: texts.length ? withSources(texts.join("\n\n"), cited) : "", incomplete: data.status === "incomplete", sources, citations: cited, generated: [...generated.values()], online,
+  const replay = output.flatMap(item => {
+    if (item.type === "compaction") {
+      const compaction = readCompaction(item);
+      return compaction ? [compaction] : [];
+    }
+    return ["message", "reasoning", "function_call", "web_search_call", "code_interpreter_call", "image_generation_call"].includes(String(item.type))
+      ? [item.type === "image_generation_call" ? { ...item, result: null } : item] : [];
+  });
+  return { output: replay, calls,
+    text: texts.length ? withSources(texts.join("\n\n"), cited) : "", summaries, incomplete: data.status === "incomplete", sources, citations: cited, generated: [...generated.values()], online,
     usage: { input: num(usage.input_tokens), output: num(usage.output_tokens), reasoning: num(details.reasoning_tokens) } };
 }
 const str = { type: "string" }, integer = { type: "integer" };

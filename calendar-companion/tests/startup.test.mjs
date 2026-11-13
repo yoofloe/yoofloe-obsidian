@@ -38,7 +38,7 @@ for(const platform of ['desktop','ios','android-tablet'])for(const declarative o
   if(declarative)for(const definition of definitions)definition.render(new Setting());else tabs[0].display();
   if(platform!=='android-tablet')plugin.handler({requestId:'external-untrusted-value'});
   assert.equal(io,0);assert.equal(commands.length,1);assert.equal(commands[0].id,'note-ai');assert.equal(commands[0].mobileOnly,undefined);
-  assert.deepEqual(ribbons,['Yoofloe AI']);assert(views.includes('yoofloe-ai'));assert(views.includes('yoofloe-ai-writer'));assert(views.includes('yoofloe-capture'));
+  assert.deepEqual(ribbons,['Yoofloe']);assert(views.includes('yoofloe-ai'));assert(views.includes('yoofloe-ai-writer'));assert(views.includes('yoofloe-capture'));
   assert(messages.some(text=>text.includes('Yoofloe Calendar is optional')));
   plugin.onunload();assert.equal(io,0);
 });

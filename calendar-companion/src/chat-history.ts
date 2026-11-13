@@ -1,6 +1,8 @@
 import { sourceList, type SourceMode, type WebSource, type OnlineUsage } from "./research";
 import { readGeneratedFiles, type GeneratedFile } from "./generated-files";
 import { readAttachments, type Attachment } from "./attachments";
+import { readActivity, readSteerNotes, type SteerNote, type WorkEvent } from "./work-activity";
+import { validContextScope } from "./conversation-context";
 export interface ChatAction { kind: string; path: string; target?: string }
 export interface ChatTurn {
   id: string; request: string; answer: string; startedAt: number | null; model: string;
@@ -12,11 +14,17 @@ export interface ChatTurn {
   sourceMode?: SourceMode; sources?: WebSource[]; online?: OnlineUsage; generated?: GeneratedFile[];
   attachments?: Attachment[]; transcriptions?: number; fileWarnings?: string[];
   generatedTruncated?: boolean;
+  conversationId?: string; contextScope?: string | null;
+  durationMs?: number; activity?: WorkEvent[]; steers?: SteerNote[]; workDetailsTruncated?: boolean;
 }
 export const CHAT_HISTORY_LIMIT = 50;
 export function validChatId(id: string): boolean { return /^[a-zA-Z0-9_-]{1,80}$/.test(id); }
 export function chatPreview(turn: ChatTurn): ChatTurn {
   return { ...turn, request: turn.request.slice(0, 4000), answer: turn.answer.slice(0, 16000), actions: turn.actions.slice(-100), generated: turn.generated?.slice(0, 16), generatedTruncated: !!turn.generatedTruncated || (turn.generated?.length ?? 0) > 16,
+    activity: turn.activity?.slice(-24).map(event => ({ ...event, text: event.text.slice(0, 360) })),
+    steers: turn.steers?.slice(-5).map(note => ({ ...note, text: note.text.slice(0, 1000) })),
+    workDetailsTruncated: !!turn.workDetailsTruncated || (turn.activity?.length ?? 0) > 24 || (turn.steers?.length ?? 0) > 5 ||
+      !!turn.activity?.some(event => event.text.length > 360) || !!turn.steers?.some(note => note.text.length > 1000),
     requestTruncated: !!turn.requestTruncated || turn.request.length > 4000, answerTruncated: !!turn.answerTruncated || turn.answer.length > 16000 };
 }
 export function readChat(value: unknown): ChatTurn | null {
@@ -33,6 +41,10 @@ export function readChat(value: unknown): ChatTurn | null {
   }
   return { id: v.id, request: v.request, answer: v.answer, startedAt: typeof v.startedAt === "number" && Number.isFinite(v.startedAt) ? v.startedAt : null,
     model: typeof v.model === "string" ? v.model.slice(0, 128) : "", status, requests: count(v.requests), inputTokens: count(v.inputTokens), outputTokens: count(v.outputTokens), actions,
+    ...(typeof v.durationMs === "number" && Number.isSafeInteger(v.durationMs) && v.durationMs >= 0 ? { durationMs: v.durationMs } : {}),
+    ...(typeof v.conversationId === "string" && validChatId(v.conversationId) ? { conversationId: v.conversationId } : {}),
+    ...(v.contextScope === null || validContextScope(v.contextScope) ? { contextScope: v.contextScope } : {}),
+    activity: readActivity(v.activity), steers: readSteerNotes(v.steers), workDetailsTruncated: v.workDetailsTruncated === true,
     requestTruncated: v.requestTruncated === true, answerTruncated: v.answerTruncated === true,
     ...(typeof v.sourcePath === "string" ? { sourcePath: v.sourcePath.slice(0, 500) } : {}), actionsKnown: v.actionsKnown === true, actionTotal: Math.max(count(v.actionTotal), actions.length),
     sourceMode: v.sourceMode === "expanded" ? "expanded" : "provided", sources: sourceList(v.sources), generated: readGeneratedFiles(v.generated), generatedTruncated: v.generatedTruncated === true,
@@ -40,7 +52,7 @@ export function readChat(value: unknown): ChatTurn | null {
     online: v.online && typeof v.online === "object" ? { search: count((v.online as OnlineUsage).search), analysis: count((v.online as OnlineUsage).analysis), image: count((v.online as OnlineUsage).image) } : undefined };
 }
 export function chatMatches(turn: ChatTurn, query: string): boolean {
-  return [turn.request,turn.answer,...turn.actions.map(action=>action.path),...(turn.attachments??[]).map(file=>file.name)].join("\n").toLocaleLowerCase().includes(query.toLocaleLowerCase());
+  return [turn.request,turn.answer,...(turn.steers ?? []).map(note => note.text),...turn.actions.map(action=>action.path),...(turn.attachments??[]).map(file=>file.name)].join("\n").toLocaleLowerCase().includes(query.toLocaleLowerCase());
 }
 export function searchChatPreview(turn: ChatTurn, query: string): ChatTurn {
   const excerpt = (text: string) => { const index=text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()), start=Math.max(0,index-160); return (start?"…":"")+text.slice(start,start+1600)+(text.length>start+1600?"…":""); };

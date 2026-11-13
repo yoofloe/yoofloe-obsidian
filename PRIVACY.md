@@ -1,11 +1,11 @@
-# Yoofloe AI — privacy and data flow
+# Yoofloe — privacy and data flow
 
 Updated 10 November 2026. Applies to the standalone plugin beginning with 0.7.0.
 The plugin ID is `yoofloe`; historical cloud/MCP releases have different behavior.
 
 ## What leaves the device
 
-**Yoofloe AI has no Yoofloe-operated server, relay or cloud database. Yoofloe does not receive or store your notes, prompts or answers through this plugin.**
+**Yoofloe has no Yoofloe-operated server, relay or cloud database. Yoofloe does not receive or store your notes, prompts or answers through this plugin.**
 The plugin keeps working data on your device, and optional AI sends selected material directly to OpenAI.
 Local storage and OpenAI processing are separate from Yoofloe receiving that content.
 
@@ -89,7 +89,7 @@ Removing the plugin alone may leave vault notes, backups, sync copies and Obsidi
 Use **Remove saved key** to remove that plugin's current vault-bound key from local secret storage.
 
 To remove local conversation state, first finish or stop the task, use **Remove saved key** if you also want to remove
-the key, and disable Yoofloe AI. You can then remove `.obsidian/plugins/yoofloe/workspace.json` to clear the saved
+the key, and disable Yoofloe. You can then remove `.obsidian/plugins/yoofloe/workspace.json` to clear the saved
 draft, latest answer, conversation previews and recent context. Remove `plugins/yoofloe/chats/` in that configuration
 directory as well if you want to remove full archived conversations. Older chat files are not purged automatically when
 their previews leave the recent 50-task display. For a custom configuration directory, substitute that directory for `.obsidian`.

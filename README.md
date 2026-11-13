@@ -1,8 +1,8 @@
-# Yoofloe AI
+# Yoofloe
 
 Research, write and organize your Obsidian Markdown with your own OpenAI API key.
 Visit [www.yoofloe.com](https://www.yoofloe.com) for Yoofloe apps and support.
-Use one workspace from the sparkle ribbon, note header, note menu, or **Yoofloe AI: Open** command.
+Use one workspace from the sparkle ribbon, note header, note menu, or **Yoofloe: Open** command.
 Yoofloe Calendar is optional: the plugin is useful on its own, including when no note is open.
 
 Requires Obsidian **1.11.5+**. The same implementation runs on desktop and mobile.
@@ -11,7 +11,7 @@ iOS and physical tablet verification are not included in that evidence.
 
 ## Start
 
-1. Install **Yoofloe AI**, plugin ID `yoofloe`, and open its sparkle workspace.
+1. Install **Yoofloe**, plugin ID `yoofloe`, and open its sparkle workspace.
 2. Open settings, choose a model, enter **your own OpenAI key**, and choose **Save** once.
    The same button stores model/thinking settings and the new key together. An empty key field keeps the existing key.
    The UI confirms local storage; it does not make a paid key-validation call.
@@ -54,7 +54,7 @@ Folder scope includes subfolders while exclusions continue to apply. Selecting a
 **All actions** offers every supported action while retaining the separate data and change scopes you choose.
 **Preview data** is inside the data/permissions section and makes no API request. It previews initial input, rather than predicting every later tool read.
 
-Yoofloe AI has no server or cloud database. Yoofloe does not receive your notes, prompts or answers.
+Yoofloe has no server or cloud database. Yoofloe does not receive your notes, prompts or answers.
 When you choose Send, task data goes directly to OpenAI using your API key; API charges apply.
 Drafts, answers, recent context and recovery records remain on your device and may be copied by vault sync.
 See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local removal and scope details.
@@ -69,7 +69,7 @@ Current-news/search requests perform a real search, and saved research notes inc
 supports writing, translation, calculation and analysis of supplied facts. It uses OpenAI and is not offline AI.
 Switching source modes never expands note read/write permissions.
 
-Use **+** to select up to 10 files, 20 MiB combined. Files are copied to a protected local plugin cache;
+Use **+** to select up to 10 files, 45 MiB combined. Images can be up to 20 MiB each, and audio recordings can be up to 25 MB each. Files are copied to a protected local plugin cache;
 selection makes no provider request. **Send** authorizes sharing the selected files with OpenAI.
 Supported inputs include PNG/JPEG/WebP, PDF, Office documents/spreadsheets, text/code and recorded audio
 (MP3, M4A, MP4, WAV, MPEG/MPGA and WebM). Unsupported or oversized files show an error before upload.
@@ -158,7 +158,7 @@ brings together plans, tasks, events, notes, study, projects, Garden focus and F
 Use **Add Yoofloe Calendar context** in the same AI workspace when a task needs those records.
 
 Direct lookup requires **both apps on the same Android phone/tablet and Android profile**, Calendar **1.8.5+**,
-and a vault in shared device storage. It is unavailable on desktop, iPhone and iPad; Yoofloe AI itself works without it.
+and a vault in shared device storage. It is unavailable on desktop, iPhone and iPad; Yoofloe itself works without it.
 Android may require one initial folder grant to **Yoofloe Calendar Inbox** inside the vault; Calendar remembers it.
 App-private vaults and unsupported cloud document providers cannot use this local handoff.
 

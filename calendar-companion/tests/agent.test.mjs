@@ -50,3 +50,68 @@ test('stopping an in-flight tool-only answer retains the unapplied document prop
  const pending=task.run('Create a note',{model:'gpt-6-luna'},'edit',2);while(!finish)await new Promise(r=>setTimeout(r,1));task.stop();finish(reply([{type:'function_call',call_id:'new',name:'create_note',arguments:JSON.stringify({path:'Draft.md',markdown:'# Retained proposal'})}]));await pending;
  assert.equal(tools,0);assert.match(task.text,/Retained proposal/);assert.match(task.text,/not executed/);
 });
+
+test('a safe-step steer supersedes unstarted local actions and elapsed time excludes a pause', async t => {
+  let clock = 10000, release, calls = 0, tools = 0;
+  t.mock.method(Date, 'now', () => clock);
+  const statuses = [];
+  const task = new AgentTask({
+    current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false },
+    steerStatus: (_note, status) => statuses.push(status),
+    executor: { execute: async () => { tools++; return {}; } },
+    transport: async req => {
+      const body = JSON.parse(req.body);
+      if (++calls === 1) return await new Promise(resolve => { release = resolve; });
+      assert(body.input.some(item => item.role === 'user' && item.content === 'Keep the note untouched'));
+      const output = body.input.find(item => item.type === 'function_call_output');
+      assert.equal(JSON.parse(output.output).status, 'superseded');
+      clock += 1250;
+      return reply([{ type: 'reasoning', summary: [{ type: 'summary_text', text: 'Checked the allowed scope' }] }, text('Left the note untouched')]);
+    },
+  });
+  const pending = task.run('Edit note', { model: 'gpt-6-luna' }, 'edit', 1);
+  await new Promise(resolve => setImmediate(resolve));
+  clock += 2300;
+  assert.equal(task.durationMs, 2300);
+  assert(task.addSteer({ id: 'later', text: 'Keep the note untouched' }));
+  release(reply([{ ...call('stale-edit'), name: 'apply_changes', arguments: '{"changes":[]}' }]));
+  await pending;
+  assert.equal(task.state, 'paused');
+  assert.equal(tools, 0);
+  assert.deepEqual(statuses, []);
+  clock += 10000;
+  assert.equal(task.durationMs, 2300);
+  await task.resume(2);
+  assert.equal(task.durationMs, 3550);
+  assert.equal(task.text, 'Left the note untouched');
+  assert.equal(calls, 2);
+  assert.deepEqual(statuses, ['sending', 'applied']);
+  assert.equal(task.steerNotes[0].text, 'Keep the note untouched');
+  assert(task.events.some(event => event.kind === 'summary' && event.text === 'Checked the allowed scope'));
+});
+
+test('automatic compaction prunes the next request at the encrypted item and retains pending local tool output', async () => {
+  const inputs = [];
+  const compact = { type: 'compaction', id: 'cmp_test', encrypted_content: 'encrypted-state-123' };
+  const task = new AgentTask({
+    current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false },
+    executor: { execute: async () => ({ notes: [] }) },
+    transport: async req => {
+      inputs.push(JSON.parse(req.body));
+      return inputs.length === 1 ? reply([call('pending'), compact]) : reply([text('Continued after compaction')]);
+    },
+  });
+  await task.run('Current request', { model: 'gpt-6-luna' }, 'ask', 2, undefined, null, {
+    autoCompact: true, items: [{ role: 'user', content: 'Prior conversation context' }],
+  });
+  assert.equal(inputs.length, 2);
+  assert.deepEqual(inputs[0].context_management, [{ type: 'compaction', compact_threshold: 32000 }]);
+  assert.equal(inputs[0].store, false);
+  assert.equal(inputs[0].input[0].content, 'Prior conversation context');
+  assert.deepEqual(inputs[1].input[0], compact);
+  assert(!JSON.stringify(inputs[1].input).includes('Prior conversation context'));
+  assert(inputs[1].input.some(item => item.type === 'function_call' && item.call_id === 'pending'));
+  assert(inputs[1].input.some(item => item.type === 'function_call_output' && item.call_id === 'pending'));
+  assert(task.events.some(event => event.text === 'Conversation context compacted.'));
+  assert(!JSON.stringify(task.events).includes(compact.encrypted_content));
+});
