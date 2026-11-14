@@ -98,6 +98,42 @@ test('returned HTTP, host-reported HTTP and unreadable responses retain safe dia
     assert.doesNotMatch(task.message, /private|content\[456\]/);
   }
 });
+
+test('a steer acknowledged by a policy-rejected reply is preserved without being offered for dispatch again', async () => {
+  for (const desktop of [false, true]) {
+    let firstRequest, finishFirst, requests = 0;
+    const sent = [];
+    const first = new Promise(resolve => { firstRequest = resolve; });
+    const responses = async body => {
+      if (++requests === 1) {
+        firstRequest();
+        await new Promise(resolve => { finishFirst = resolve; });
+        return reply([text('First answer')]);
+      }
+      assert(body.input.some(item => item.role === 'user' && item.content === 'Focus on my note'));
+      return reply([{ type: 'web_search_call' }, text('Unusable web result')]);
+    };
+    const task = new AgentTask({ current: () => true, gate: { busy: false }, key: async () => 'sk-synthetic-agent-key',
+      executor: { execute: async () => assert.fail('No local tool') }, steerStatus: (_note, status) => sent.push(status),
+      transport: async request => { assert.equal(desktop, false); return responses(JSON.parse(request.body)); },
+      ...(desktop ? { liveResponse: async () => ({
+        request: async body => ({ response: (await responses(JSON.parse(body))).text }),
+        close() {},
+      }) } : {}),
+    });
+    const running = task.run('Read', { model: 'gpt-6-luna' }, 'ask', 3);
+    await first;
+    assert.equal(task.addSteer({ id: 'steer', text: 'Focus on my note' }), true);
+    finishFirst();
+    await running;
+    assert.equal(requests, 2);
+    assert.equal(task.state, 'failed');
+    assert.deepEqual(sent, ['sending', 'received']);
+    assert.deepEqual(task.steerNotes.map(note => note.text), ['Focus on my note']);
+    assert.equal(task.text, 'First answer');
+    assert.match(task.message, /rejected in Provided materials only mode/);
+  }
+});
 test('stopping an in-flight tool-only answer retains the unapplied document proposal',async()=>{
  let finish,tools=0;const task=new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},executor:{execute:async()=>{tools++;}},transport:async()=>await new Promise(r=>{finish=r;})});
  const pending=task.run('Create a note',{model:'gpt-6-luna'},'edit',2);while(!finish)await new Promise(r=>setTimeout(r,1));task.stop();finish(reply([{type:'function_call',call_id:'new',name:'create_note',arguments:JSON.stringify({path:'Draft.md',markdown:'# Retained proposal'})}]));await pending;

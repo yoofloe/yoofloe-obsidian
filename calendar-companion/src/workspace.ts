@@ -594,7 +594,7 @@ export class AiWorkspace {
   }
   private updateSteer(note: SteerNote, status: SteerStatus): void {
     if (!this.followUps.some(entry => entry.id === note.id)) return;
-    if (status === "applied") {
+    if (status === "applied" || status === "received") {
       this.followUps = this.followUps.filter(entry => entry.id !== note.id);
       if (this.task && this.agent) this.captureChat(this.task, this.agent);
     } else this.setFollowUpStatus(note.id, status);

@@ -577,10 +577,15 @@ export class YoofloeAiView extends ItemView {
       this.sizeComposerInput(input); this.refreshComposer(); this.saveSoon();
     };
     input.addEventListener("input", updateDraft);
-    input.addEventListener("compositionstart", () => { this.composing = true; });
-    input.addEventListener("compositionend", () => { this.composing = false; updateDraft(); });
+    let afterComposition: FollowUpMode | undefined;
     const send = (mode: FollowUpMode) => {
-      if (this.composing) return;
+      if (this.composing) {
+        if (afterComposition === undefined) {
+          afterComposition = mode;
+          input.blur();
+        }
+        return;
+      }
       void w.submitFollowUp(mode).then(saved => {
         if (!input.isConnected) return;
         if (saved && !this.showFollowUp) this.render();
@@ -590,6 +595,14 @@ export class YoofloeAiView extends ItemView {
         }
       });
     };
+    input.addEventListener("compositionstart", () => { this.composing = true; });
+    input.addEventListener("compositionend", () => {
+      const mode = afterComposition;
+      afterComposition = undefined;
+      this.composing = false;
+      updateDraft();
+      if (mode !== undefined && input.isConnected) send(mode);
+    });
     const actions = controls.createDiv({ cls: "y-ai-follow-up-actions", attr: { role: "group", "aria-label": "Follow-up actions" } });
     const queue = this.button(actions, "Queue", () => send("queue"), true, "y-ai-submit-follow-up");
     queue.dataset.followUp = "queue";
