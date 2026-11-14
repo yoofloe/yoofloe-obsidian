@@ -16,7 +16,8 @@ export interface AiReview {
 }
 export interface AiDraft { text: string; incomplete: boolean; inputTokens: number | null; outputTokens: number | null; thinkingTokens?: number | null }
 export interface AiHttpRequest { url: string; method: "POST"; headers: Record<string, string>; contentType: "application/json"; body: string; throw: false }
-export type AiTransport = (request: AiHttpRequest) => Promise<{ status: number; text: string }>;
+export interface AiHttpResponse { status: number; text: string; headers?: Readonly<Record<string, string>> }
+export type AiTransport = (request: AiHttpRequest) => Promise<AiHttpResponse>;
 export interface AiAdapter {
   provider: AiProvider; label: string; validateModel(model: string): void; validateKey(value: string): string;
   profile?(model: string): { reasoningEffort?: ReasoningEffort };

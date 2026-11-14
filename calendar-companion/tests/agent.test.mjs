@@ -45,6 +45,95 @@ test('duplicate tool IDs execute once, budgets stop loops and network errors nev
  const fail=new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},executor:{execute:async()=>{}},transport:async()=>{throw Error('provider secret details');}});await fail.run('Read',{model:'gpt-6-luna'},'ask',4);assert.equal(fail.requests,1);assert(!fail.message.includes('provider secret'));
  assert.throws(()=>parseAgentReply(200,'{"status":"completed","output":[]}'));
 });
+
+test('a timeout at the third HTTP step keeps prior usage and records only safe request metadata', async () => {
+  const ids = [], toolCalls = [];
+  const task = new AgentTask({
+    current: () => true,
+    key: async () => 'sk-synthetic-agent-key',
+    gate: { busy: false },
+    executor: { execute: async name => {
+      toolCalls.push(name);
+      return { notes: [{ path: 'Synthetic.md', text: 'Private fixture note body' }] };
+    } },
+    transport: async request => {
+      ids.push(request.headers['X-Client-Request-Id']);
+      if (ids.length === 1) return { ...reply([{ ...call('outline'), name: 'read_outline', arguments: '{}' }]),
+        headers: { 'X-Request-ID': 'req_a0123456789abcde0123456789abcdef', 'OpenAI-Processing-Ms': '27', 'Unrelated': 'private header' } };
+      if (ids.length === 2) return reply([call('notes')]);
+      assert(JSON.parse(request.body).input.some(item => item.type === 'function_call_output' && item.call_id === 'notes'));
+      throw new Error('java.net.SocketTimeoutException: Private fixture note body and sk-synthetic-agent-key');
+    },
+  });
+  await task.run('Private fixture prompt', { model: 'gpt-6.1-sol', effort: 'high' }, 'ask', 'none');
+  assert.deepEqual(toolCalls, ['read_outline', 'read_notes']);
+  assert.equal(task.state, 'failed');
+  assert.equal(ids.length, 3);
+  assert.equal(new Set(ids).size, 3);
+  assert(ids.every(id => /^[a-f0-9-]{36}$/.test(id)));
+  assert.deepEqual(task.usage, { input: 20, output: 10, reasoning: 4 });
+  assert.match(task.message, /OpenAI request 3 timed out.*No retry was made/);
+  assert(task.message.includes(ids[2]));
+  assert.match(task.message, /Obsidian HTTP · \d+ ms · \d+ B/);
+  assert.match(task.events.find(event => event.kind === 'response').text, /HTTP 200.*OpenAI ID req_a0123456789abcde0123456789abcdef.*OpenAI 27 ms/);
+  assert.doesNotMatch(JSON.stringify(task.events), /Private fixture|sk-synthetic|private header/);
+});
+
+test('returned HTTP, host-reported HTTP and unreadable responses retain safe diagnostics', async () => {
+  const scenarios = [
+    [async () => ({ status: 429, text: '{"error":{"code":"insufficient_quota","param":"input[123].content[456].file_id"}}', headers: { 'x-request-id': 'req_private_note_title' } }), /rate or quota limit.*HTTP 429.*insufficient_quota.*client ID/],
+    [async () => { throw 'Request failed, status 504'; }, /HTTP 504 reported by Obsidian/],
+    [async () => { throw { code: 'ERR_NAME_NOT_RESOLVED', message: 'private transport detail' }; }, /could not resolve the OpenAI host/],
+    [async () => ({ status: 200, text: '{"status":"failed","error":{"code":"server_error","message":"private provider error"}}' }), /failed response \(server_error\).*HTTP 200/],
+    [async () => ({ status: 200, text: 'private malformed response body' }), /unreadable response.*HTTP 200/],
+  ];
+  for (const [response, expected] of scenarios) {
+    let calls = 0;
+    const task = new AgentTask({ current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false },
+      executor: { execute: async () => assert.fail('No tool may run') }, transport: async () => { calls++; return response(); } });
+    await task.run('Read', { model: 'gpt-6-luna' }, 'ask', 2);
+    assert.equal(calls, 1);
+    assert.equal(task.state, 'failed');
+    assert.match(task.message, expected);
+    assert.doesNotMatch(task.message, /private|content\[456\]/);
+  }
+});
+
+test('a steer acknowledged by a policy-rejected reply is preserved without being offered for dispatch again', async () => {
+  for (const desktop of [false, true]) {
+    let firstRequest, finishFirst, requests = 0;
+    const sent = [];
+    const first = new Promise(resolve => { firstRequest = resolve; });
+    const responses = async body => {
+      if (++requests === 1) {
+        firstRequest();
+        await new Promise(resolve => { finishFirst = resolve; });
+        return reply([text('First answer')]);
+      }
+      assert(body.input.some(item => item.role === 'user' && item.content === 'Focus on my note'));
+      return reply([{ type: 'web_search_call' }, text('Unusable web result')]);
+    };
+    const task = new AgentTask({ current: () => true, gate: { busy: false }, key: async () => 'sk-synthetic-agent-key',
+      executor: { execute: async () => assert.fail('No local tool') }, steerStatus: (_note, status) => sent.push(status),
+      transport: async request => { assert.equal(desktop, false); return responses(JSON.parse(request.body)); },
+      ...(desktop ? { liveResponse: async () => ({
+        request: async body => ({ response: (await responses(JSON.parse(body))).text }),
+        close() {},
+      }) } : {}),
+    });
+    const running = task.run('Read', { model: 'gpt-6-luna' }, 'ask', 3);
+    await first;
+    assert.equal(task.addSteer({ id: 'steer', text: 'Focus on my note' }), true);
+    finishFirst();
+    await running;
+    assert.equal(requests, 2);
+    assert.equal(task.state, 'failed');
+    assert.deepEqual(sent, ['sending', 'received']);
+    assert.deepEqual(task.steerNotes.map(note => note.text), ['Focus on my note']);
+    assert.equal(task.text, 'First answer');
+    assert.match(task.message, /rejected in Provided materials only mode/);
+  }
+});
 test('stopping an in-flight tool-only answer retains the unapplied document proposal',async()=>{
  let finish,tools=0;const task=new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},executor:{execute:async()=>{tools++;}},transport:async()=>await new Promise(r=>{finish=r;})});
  const pending=task.run('Create a note',{model:'gpt-6-luna'},'edit',2);while(!finish)await new Promise(r=>setTimeout(r,1));task.stop();finish(reply([{type:'function_call',call_id:'new',name:'create_note',arguments:JSON.stringify({path:'Draft.md',markdown:'# Retained proposal'})}]));await pending;

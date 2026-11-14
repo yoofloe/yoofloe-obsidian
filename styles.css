@@ -215,7 +215,8 @@
 .yoofloe-ai .y-ai-follow-up-open .y-ai-row .y-ai-field, .yoofloe-ai .y-ai-follow-up-open .y-ai-row .y-ai-attach,
 .yoofloe-ai .y-ai-row button[hidden], .yoofloe-ai .y-ai-work-duration[hidden], .yoofloe-ai .y-ai-queue[hidden] { display:none; }
 .yoofloe-ai .y-ai-add-message:not([hidden]) + .y-ai-send { margin-inline-start:0; }
-.yoofloe-ai .y-ai-row .y-ai-submit-follow-up { min-width:56px; min-height:32px; border-radius:8px; padding:4px 9px; font-size:var(--font-ui-smaller); }
+.yoofloe-ai .y-ai-follow-up-actions { display:flex; align-items:center; flex:0 0 auto; gap:6px; }
+.yoofloe-ai .y-ai-row .y-ai-submit-follow-up { flex:0 0 auto; min-width:56px; min-height:32px; border-radius:8px; padding:4px 9px; font-size:var(--font-ui-smaller); white-space:nowrap; }
 .yoofloe-ai .y-ai-row .y-ai-close-follow-up { width:30px; min-height:32px; padding:5px; }
 @media (pointer:coarse) {
   .yoofloe-ai .y-ai-row :is(.y-ai-submit-follow-up,.y-ai-close-follow-up,.y-ai-add-message) { min-height:36px; }

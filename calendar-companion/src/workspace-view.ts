@@ -43,7 +43,7 @@ export class YoofloeAiView extends ItemView {
   private rendering: Component | null = null;
   private saveTimer: number | undefined;
   private durationTimer: number | undefined;
-  private followUpOpen = false;
+  private followUpClosed = false;
   private composing = false;
   private pendingRender = false;
   private libraryOpen = false;
@@ -94,7 +94,6 @@ export class YoofloeAiView extends ItemView {
       );
     }
     this.stopViewport = this.watchViewport(); this.render(); await this.work.initialize();
-    if (this.work.followUpDraft || this.work.editingFollowUpId) { this.followUpOpen = true; this.render(); }
   }
   async onClose(): Promise<void> {
     this.searchEpoch++; if (this.searchTimer !== undefined) this.contentEl.ownerDocument.defaultView?.clearTimeout(this.searchTimer);
@@ -514,17 +513,24 @@ export class YoofloeAiView extends ItemView {
     if (this.followChat && messages && !this.chatQuery) messages.scrollTop = messages.scrollHeight;
   }
   private followUpFocused(): boolean {
-    return this.contentEl.ownerDocument.activeElement?.matches(".yoofloe-ai .y-ai-follow-up-input") === true &&
-      this.contentEl.contains(this.contentEl.ownerDocument.activeElement);
+    const active = this.contentEl.ownerDocument.activeElement;
+    return !!active && this.contentEl.contains(active) &&
+      active.matches(".y-ai-follow-up-input, .y-ai-follow-up-actions button, .y-ai-close-follow-up");
+  }
+  private get showFollowUp(): boolean {
+    const w = this.work;
+    return w.canStop || w.stopping || w.canContinue || !this.followUpClosed && !!(w.followUpDraft || w.editingFollowUpId);
   }
   private openFollowUp(): void {
-    this.followUpOpen = true;
+    this.followUpClosed = false;
     this.render();
     this.contentEl.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input")?.focus();
   }
   private apiLimit(): string { return this.work.maximum === "none" ? "No request limit" : requestLimitLabel(this.work.maximum); }
   private refreshComposer(): void {
     const el = this.contentEl, w = this.work;
+    const followUp = el.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input");
+    if (followUp) followUp.readOnly = w.followUpSaving;
     const run = el.querySelector<HTMLButtonElement>(".y-ai-send");
     if (run) {
       const action = w.busy ? w.canStop ? "stop" : w.stopping ? "stopping" : "finishing" : w.canContinue ? "continue" : "send";
@@ -536,12 +542,17 @@ export class YoofloeAiView extends ItemView {
         setIcon(run, icon);
       }
       run.disabled = w.busy ? !w.canStop : !this.actionReady();
-      run.hidden = this.followUpOpen && !w.busy && !w.canContinue;
+      run.hidden = !!followUp && !w.busy && !w.canContinue;
       run.classList.toggle("mod-warning", w.busy);
       run.classList.toggle("mod-cta", !w.busy);
     }
     const add = el.querySelector<HTMLButtonElement>(".y-ai-add-message");
-    if (add) add.hidden = this.followUpOpen || !w.canStop && !w.canContinue && !w.followUpDraft;
+    if (add) add.hidden = !!followUp || !w.followUpDraft;
+    const close = el.querySelector<HTMLButtonElement>(".y-ai-close-follow-up");
+    if (close) {
+      close.hidden = (w.busy || w.canContinue) && !w.editingFollowUpId;
+      close.disabled = w.followUpSaving;
+    }
     el.querySelectorAll<HTMLButtonElement>(".y-ai-submit-follow-up").forEach(submit => {
       const mode = submit.dataset.followUp;
       submit.classList.toggle("mod-cta", mode === w.followUpDefault);
@@ -553,37 +564,76 @@ export class YoofloeAiView extends ItemView {
     const w = this.work, wrap = compose.createDiv({ cls: "y-ai-follow-up" });
     const input = wrap.createEl("textarea", { text: w.followUpDraft, cls: "y-ai-follow-up-input", attr: { rows: "1", placeholder: "Add a message…", "aria-label": "Additional message" } });
     input.maxLength = FOLLOW_UP_TEXT_LIMIT;
-    input.addEventListener("input", () => { w.setFollowUpDraft(input.value); this.sizeComposerInput(input); this.refreshComposer(); this.saveSoon(); });
-    input.addEventListener("compositionstart", () => { this.composing = true; });
-    input.addEventListener("compositionend", () => { this.composing = false; w.setFollowUpDraft(input.value); this.sizeComposerInput(input); this.refreshComposer(); this.saveSoon(); });
-    input.addEventListener("blur", () => {
-      this.contentEl.ownerDocument.defaultView?.setTimeout(() => {
-        if (this.pendingRender && !this.followUpFocused() && !this.work.followUpSaving && !controls.contains(controls.ownerDocument.activeElement)) this.render();
-      }, 0);
-    });
+    const updateDraft = () => {
+      w.setFollowUpDraft(input.value);
+      this.followUpClosed = false;
+      if (!this.composing && !this.showFollowUp) {
+        const focused = input.ownerDocument.activeElement === input;
+        this.saveSoon();
+        this.render();
+        if (focused) this.contentEl.querySelector<HTMLTextAreaElement>(".y-ai-primary-prompt")?.focus({ preventScroll: true });
+        return;
+      }
+      this.sizeComposerInput(input); this.refreshComposer(); this.saveSoon();
+    };
+    input.addEventListener("input", updateDraft);
+    let afterComposition: FollowUpMode | undefined;
     const send = (mode: FollowUpMode) => {
+      if (this.composing) {
+        if (afterComposition === undefined) {
+          afterComposition = mode;
+          input.blur();
+        }
+        return;
+      }
       void w.submitFollowUp(mode).then(saved => {
-        if (saved && !w.followUpDraft) { this.followUpOpen = false; this.render(); }
-        else if (input.isConnected && input.value !== w.followUpDraft) { input.value = w.followUpDraft; this.sizeComposerInput(input); }
+        if (!input.isConnected) return;
+        if (saved && !this.showFollowUp) this.render();
+        else if (input.value !== w.followUpDraft) {
+          input.value = w.followUpDraft;
+          this.sizeComposerInput(input);
+        }
       });
     };
-    const queue = this.button(controls, "Queue", () => send("queue"), true, "y-ai-submit-follow-up");
+    input.addEventListener("compositionstart", () => { this.composing = true; });
+    input.addEventListener("compositionend", () => {
+      const mode = afterComposition;
+      afterComposition = undefined;
+      this.composing = false;
+      updateDraft();
+      if (mode !== undefined && input.isConnected) send(mode);
+    });
+    const actions = controls.createDiv({ cls: "y-ai-follow-up-actions", attr: { role: "group", "aria-label": "Follow-up actions" } });
+    const queue = this.button(actions, "Queue", () => send("queue"), true, "y-ai-submit-follow-up");
     queue.dataset.followUp = "queue";
-    const steer = this.button(controls, "Steer", () => send("steer"), true, "y-ai-submit-follow-up");
+    setTooltip(queue, "Queue as a separate task");
+    const steer = this.button(actions, "Steer", () => send("steer"), true, "y-ai-submit-follow-up");
     steer.dataset.followUp = "steer";
+    setTooltip(steer, FOLLOW_UP_LABELS.steer);
+    actions.addEventListener("pointerdown", event => {
+      // A touch can blur the input before click. Keep the keyboard and button in place until submission.
+      if (event.pointerType !== "mouse" && event.isPrimary && event.button === 0 && input.ownerDocument.activeElement === input) event.preventDefault();
+    });
     const close = this.button(controls, "", () => {
-      this.followUpOpen = false;
+      this.followUpClosed = true;
       if (w.editingFollowUpId) w.closeFollowUpEdit();
       this.render();
-      this.contentEl.querySelector<HTMLButtonElement>(".y-ai-add-message:not([hidden])")?.focus({ preventScroll: true });
+      const target = this.showFollowUp ? ".y-ai-follow-up-input" : w.followUpDraft ? ".y-ai-add-message" : ".y-ai-primary-prompt";
+      this.contentEl.querySelector<HTMLElement>(target)?.focus({ preventScroll: true });
     }, false, "clickable-icon y-ai-close-follow-up");
     close.setAttribute("aria-label", "Close additional message");
     setTooltip(close, "Close additional message");
     setIcon(close, "x");
     input.addEventListener("keydown", event => {
+      if (event.isComposing || this.composing) return;
       const action = w.followUpDefault === "steer" ? steer : queue;
-      if (!event.isComposing && event.key === "Enter" && (event.ctrlKey || event.metaKey) && !action.disabled) { event.preventDefault(); action.click(); }
-      else if (!event.isComposing && event.key === "Escape") { event.preventDefault(); close.click(); }
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        if (!action.disabled) action.click();
+      } else if (event.key === "Escape" && !close.hidden && !close.disabled) {
+        event.preventDefault();
+        close.click();
+      }
     });
   }
   private sizeComposerInput(input: HTMLTextAreaElement): void {
@@ -631,14 +681,15 @@ export class YoofloeAiView extends ItemView {
     const w = this.work, el = this.contentEl;
     if (this.lastConversationId !== w.library.active) {
       this.lastConversationId = w.library.active; this.olderChats = []; this.olderOffset = 0; this.chatVisible = 10;
-      this.followUpOpen = !!(w.followUpDraft || w.editingFollowUpId);
+      this.followUpClosed = false;
     }
     el.classList.toggle("y-ai-library-open", this.libraryOpen);
     const wasExpanded = el.classList.contains("y-ai-settings-expanded"), previousScroll = el.querySelector<HTMLElement>(".y-ai-messages"), oldScroll = wasExpanded ? this.savedChatScroll : previousScroll?.scrollTop ?? 0, oldMenuScroll = el.querySelector<HTMLElement>(".y-ai-scroll")?.scrollTop ?? 0;
     const activeField = el.ownerDocument.activeElement;
     const promptSelection = activeField?.matches(".y-ai-primary-prompt") && el.contains(activeField)
       ? [(activeField as HTMLTextAreaElement).selectionStart, (activeField as HTMLTextAreaElement).selectionEnd] as const : null;
-    const followUpSelection = this.followUpFocused() ? [(activeField as HTMLTextAreaElement).selectionStart, (activeField as HTMLTextAreaElement).selectionEnd] as const : null;
+    const followUpSelection = activeField?.matches(".y-ai-follow-up-input") && el.contains(activeField)
+      ? [(activeField as HTMLTextAreaElement).selectionStart, (activeField as HTMLTextAreaElement).selectionEnd] as const : null;
     const dividerFocused = !!activeField && el.contains(activeField) && activeField.classList.contains("y-ai-split-handle");
     const settingsFocus = activeField && el.querySelector(".y-ai-scroll")?.contains(activeField) && activeField.matches("input,textarea,select") ? activeField.getAttribute("aria-label") : null;
     const selectionStart = settingsFocus && "selectionStart" in activeField! ? (activeField as HTMLInputElement).selectionStart : null;
@@ -818,7 +869,8 @@ export class YoofloeAiView extends ItemView {
     }
     if (w.preview) { const preview = this.details(scroll, "preview", "Data to be sent · initial preview"); preview.open = true; preview.createEl("pre", { text: w.preview }); }
     scroll.createEl("a", { text: "www.yoofloe.com ↗", href: "https://www.yoofloe.com", cls: "y-ai-site", attr: { target: "_blank", rel: "noopener noreferrer" } });
-    const dock = chatPanel.createDiv({ cls: `y-ai-dock${this.followUpOpen ? " y-ai-follow-up-open" : ""}` });
+    const followUp = this.showFollowUp;
+    const dock = chatPanel.createDiv({ cls: `y-ai-dock${followUp ? " y-ai-follow-up-open" : ""}` });
     if (w.attachments.length) {
       const attachments = dock.createDiv({ cls: "y-ai-attachments", attr: { "aria-label": "Attached files" } });
       for (const file of w.attachments) { const chip = attachments.createDiv({ cls: "y-ai-attachment" }); const icon = chip.createSpan(); setIcon(icon, file.kind === "audio" ? "audio-lines" : file.kind === "image" ? "image" : "file-text"); setTooltip(chip.createSpan({ text: file.name, cls: "y-ai-attachment-name" }), `${file.name} · ${(file.bytes / 1024).toFixed(0)} KiB${file.kind === "audio" ? " · transcription charges apply" : ""}`); const remove = this.button(chip, "", () => w.removeAttachment(file.id), w.settingsLocked, "clickable-icon"); remove.setAttribute("aria-label", `Remove ${file.name} from this request`); setIcon(remove, "x"); }
@@ -831,10 +883,18 @@ export class YoofloeAiView extends ItemView {
     picker.addEventListener("change", () => { const files = Array.from(picker.files ?? []); picker.value = ""; void w.addAttachments(files); });
     const attach = this.button(controls, "", () => picker.click(), w.settingsLocked, "y-ai-attach clickable-icon"); attach.setAttribute("aria-label", "Attach images, files or audio"); setTooltip(attach, ATTACHMENT_LIMIT_LABEL); setIcon(attach, "plus");
     const mode = this.select(controls, "AI mode", { expanded: "Expanded", provided: "Provided only" }, w.sourceMode, value => w.setSourceMode(value)); setTooltip(mode, SOURCE_MODES[w.sourceMode]);
-    if (this.followUpOpen) this.followUpEditor(compose, controls);
+    if (followUp) {
+      this.followUpEditor(compose, controls);
+      dock.addEventListener("focusout", () => {
+        dock.ownerDocument.defaultView?.setTimeout(() => {
+          if (dock.isConnected && this.pendingRender && !this.followUpFocused() && !w.followUpSaving &&
+            !controls.contains(dock.ownerDocument.activeElement)) this.render();
+        }, 0);
+      });
+    }
     const addMessage = this.button(controls, "", () => this.openFollowUp(), false, "y-ai-add-message clickable-icon");
-    addMessage.setAttribute("aria-label", "Add message");
-    setTooltip(addMessage, "Add message");
+    addMessage.setAttribute("aria-label", "Reopen follow-up draft");
+    setTooltip(addMessage, "Reopen follow-up draft");
     setIcon(addMessage, "message-square-plus");
     const run = this.button(controls, "", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, false, "y-ai-send");
     this.apiDisclosure(dock);
@@ -863,10 +923,10 @@ export class YoofloeAiView extends ItemView {
       if (replacement && !replacement.disabled) { replacement.focus({ preventScroll: true }); if (selectionStart !== null && selectionEnd !== null && "setSelectionRange" in replacement) replacement.setSelectionRange(selectionStart, selectionEnd); }
     }
     if (searchFocused && !this.settingsExpanded) { search.focus({ preventScroll: true }); search.setSelectionRange(searchCursor, searchCursor); }
-    if (promptSelection && !prompt.disabled && !this.followUpOpen && !this.settingsExpanded) {
+    if (promptSelection && !prompt.disabled && !followUp && !this.settingsExpanded) {
       prompt.focus({ preventScroll: true }); prompt.setSelectionRange(...promptSelection); this.sizeComposerInput(prompt);
     }
-    if (followUpSelection && this.followUpOpen) {
+    if (followUpSelection && followUp) {
       const input = el.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input");
       input?.focus({ preventScroll: true }); input?.setSelectionRange(...followUpSelection); if (input) this.sizeComposerInput(input);
     }
