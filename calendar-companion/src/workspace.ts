@@ -687,9 +687,13 @@ export class AiWorkspace {
     }
     if (!paused) { this.activeQueueId = null; this.activeAccess = null; }
     try {
-      if (!this.current) return false;
+      if (!this.current) {
+        if (task?.state === "stopped" && task.cleanupPending) await task.cleanupFiles();
+        return false;
+      }
       this.changed();
-      await this.persist();
+      if (task?.state === "stopped" && task.cleanupPending) await this.saveStoppedTask(task);
+      else await this.persist();
       return completed;
     } catch {
       if (completed && entry) this.followUps = [{ ...entry, status: "review" }, ...this.followUps];
@@ -709,7 +713,11 @@ export class AiWorkspace {
     this.message = task.message;
     if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
     if (this.source && agent.policy.selection) { this.source.selection = { ...agent.policy.selection }; this.source.selectionVersion = agent.policy.selectionVersion; }
-    if (!this.activeQueueId && task.state !== "paused" && !task.fileWarnings.length && (task.text || agent.operations.some(op => op.status === "done") || task.state === "completed" && task.generated.length > 0)) { this.prompt = ""; this.attachments = []; }
+    const hasConfirmedChanges = agent.operations.some(op => op.status === "done");
+    if (!this.activeQueueId && !task.fileWarnings.length && (hasConfirmedChanges && task.state !== "paused" ||
+        task.state === "completed" && (task.text || task.generated.length > 0) || task.state === "stopped" && task.text)) {
+      this.prompt = ""; this.attachments = [];
+    }
     for (const journal of agent.journals) if (journal.operations.length) {
       journal.status = task.state !== "completed" || task.events.some(e => e.kind === "blocked") ? "interrupted" : "complete";
       await this.options.host(() => this.current).persist(journal); this.rememberJournal(journal);
@@ -732,6 +740,7 @@ export class AiWorkspace {
     if (task.state !== "idle" && turn.sourceMode !== task.sourceMode) turn.contextScope = null;
     turn.sourceMode = task.state === "idle" ? turn.sourceMode : task.sourceMode; turn.sources = task.citedSources.length ? task.citedSources : task.sources; turn.online = { ...task.online }; turn.generated = task.generated;
     turn.transcriptions = task.transcriptions; turn.fileWarnings = [...task.fileWarnings];
+    turn.uploadCleanupWarning = task.uploadCleanupWarning || undefined;
     turn.durationMs = task.durationMs;
     turn.activity = [...task.events];
     turn.steers = [...task.steerNotes];
@@ -767,21 +776,51 @@ export class AiWorkspace {
     finally { unsubscribe(); }
     if (await this.finishRun(task, completed)) await this.drainQueue();
   }
-  async finishHere(): Promise<void> {
-    if (this.busy || !this.canContinue) return;
-    this.task?.finish(); this.message = this.task?.message ?? "Finished here.";
-    if (this.task && this.agent) this.captureChat(this.task, this.agent);
-    const turn = this.chat.find(item => item.id === this.activeChatId); if (turn) { turn.status = "stopped"; await this.archiveChat(turn); }
-    this.holdQueue("Resume the queue when you are ready.");
-    if (this.activeQueueId) this.setFollowUpStatus(this.activeQueueId, "review");
-    this.activeQueueId = null; this.activeAccess = null;
-    await this.persist(); this.changed();
+  async finishHere(): Promise<boolean> {
+    if (this.busy || !this.canContinue) return false;
+    const task = this.task;
+    if (!task) return false;
+    this.busy = true; this.changed();
+    try {
+      task.finish();
+      this.message = task.message;
+      this.holdQueue("Resume the queue when you are ready.");
+      if (this.activeQueueId) this.setFollowUpStatus(this.activeQueueId, "review");
+      this.activeQueueId = null; this.activeAccess = null;
+      await this.saveStoppedTask(task);
+      return this.current;
+    } catch {
+      this.message = "The final task state could not be saved locally. Completed work is kept.";
+      return false;
+    } finally { this.busy = false; this.changed(); }
+  }
+  private async saveStoppedTask(task: AgentTask): Promise<void> {
+    const save = async () => {
+      if (!this.current || this.task !== task || this.switchingConversation) return;
+      if (this.agent) this.captureChat(task, this.agent);
+      const turn = this.chat.find(item => item.id === this.activeChatId);
+      this.changed("progress");
+      const [workspace] = await Promise.allSettled([this.persist(), turn && this.archiveChat(turn)]);
+      if (workspace.status === "rejected") throw workspace.reason;
+    };
+    const pendingWarning = task.uploadCleanupWarning;
+    const removeUploads = async () => {
+      await task.cleanupFiles();
+      if (task.uploadCleanupWarning !== pendingWarning) await save();
+    };
+    try { await save(); }
+    catch (error) {
+      // Report a local save failure even if the network is still down.
+      void removeUploads().catch(() => {});
+      throw error;
+    }
+    await removeUploads();
   }
   stop(): void {
     if (!this.canStop) return;
     this.stopRequested = true; this.runEpoch++;
     this.holdQueue("Resume the queue when you are ready.");
-    if (this.task?.busy || this.task?.state === "paused") this.task.stop();
+    if (this.task?.busy || this.task?.state === "paused") this.task.stop(true);
     this.message = "Stopping. Completed work is kept. An already-sent request may still finish and incur charges; no further request or file action will start."; this.changed();
   }
   async newTask(source: WorkspaceSource | null = this.source): Promise<void> {
@@ -789,7 +828,7 @@ export class AiWorkspace {
     if (this.busy) return;
     if (source?.selection && !/^[a-f0-9]{64}$/.test(source.selectionVersion ?? "")) { this.message = "The selection is not ready. Select it again before starting a new task."; this.changed(); return; }
     if (source && !sameSource(source, this.source) && !this.availableNotes().some(file => file.path === source.path)) { this.message = "This note is outside the selected read scope. Choose an allowed note before starting a new task."; this.changed(); return; }
-    if (this.canContinue) await this.finishHere();
+    if (this.canContinue && !await this.finishHere()) return;
     this.rememberLast();
     const pending = this.nextSource;
     this.prompt = ""; this.task = null; this.agent = null; this.activeChatId = null; this.attachments = []; this.message = "Ready. No data is sent until you start."; this.bind(source, true); if (pending?.path !== source?.path) this.nextSource = pending; await this.persist(); this.changed();
