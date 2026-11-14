@@ -1,6 +1,6 @@
 import type { WorkMode, WriteScope } from "./agent-policy";
 import type { AiDraft } from "./ai-session";
-import { parseOpenAiDraft } from "./openai";
+import { openAiErrorCodes, parseOpenAiDraft } from "./openai";
 import { emptyOnlineUsage, sourceList, sourceLink, publicUrl, withSources, type WebSource, type OnlineUsage } from "./research";
 import type { PendingGeneratedFile } from "./generated-files";
 import { readCompaction } from "./conversation-context";
@@ -10,9 +10,15 @@ export interface AgentReply { output: Record<string, unknown>[]; calls: AgentCal
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const num = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0 ? v as number : 0;
 export function parseAgentReply(status: number, raw: string, superseded = false): AgentReply {
-  if (status < 200 || status >= 300) { parseOpenAiDraft(status, raw); throw Error("OpenAI did not return a usable response."); }
+  if (status < 200 || status >= 300) { parseOpenAiDraft(status, raw, false); throw Error("OpenAI did not return a usable response."); }
   if (new TextEncoder().encode(raw).length > 32 * 1024 * 1024) throw Error("The response is too large for this device.");
-  const data: unknown = JSON.parse(raw); if (!obj(data) || !Array.isArray(data.output) || !["completed", "incomplete"].includes(String(data.status))) throw Error("OpenAI did not complete this step. No retry was made.");
+  let data: unknown;
+  try { data = JSON.parse(raw); } catch { throw Error("OpenAI returned an unreadable response. No retry was made."); }
+  if (obj(data) && data.status === "failed") {
+    const codes = openAiErrorCodes(data.error);
+    throw Error(`OpenAI reported a failed response${codes.length ? ` (${codes.join(", ")})` : ""}. No retry was made.`);
+  }
+  if (!obj(data) || !Array.isArray(data.output) || !["completed", "incomplete"].includes(String(data.status))) throw Error("OpenAI did not complete this step. No retry was made.");
   const output = data.output.filter(obj), calls: AgentCall[] = []; const texts: string[] = [], summaries: string[] = [], candidates: unknown[] = [], citations: unknown[] = [], generated = new Map<string, PendingGeneratedFile>(), online = emptyOnlineUsage();
   for (const item of output) {
     if (item.type === "web_search_call") { online.search++; if (obj(item.action) && Array.isArray(item.action.sources)) candidates.push(...item.action.sources as unknown[]); }

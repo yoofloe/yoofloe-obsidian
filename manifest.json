@@ -1,7 +1,7 @@
 {
   "id": "yoofloe",
   "name": "Yoofloe",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "minAppVersion": "1.11.5",
   "description": "Research, write and organize Markdown with your own OpenAI key. Optional Yoofloe Calendar context. Visit www.yoofloe.com.",
   "author": "Yoofloe",

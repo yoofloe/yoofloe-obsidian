@@ -185,7 +185,11 @@ export default class YoofloeAiPlugin extends Plugin {
         saveTranscript: async (path, text) => { if (!ai.current()) throw Error("Vault changed"); await adapter.write(path, text); if (await adapter.read(path) !== text) throw Error("The transcript could not be saved locally."); },
       }),
       host: current => obsidianAgentHost(this.app, owner, current), inboxHint: () => adapter.getResourcePath(`${INBOX}/`),
-      transport: async request => { if (!ai.current()) throw Error("Vault changed"); const response = await requestUrl(request); return { status: response.status, text: response.text }; },
+      transport: async request => {
+        if (!ai.current()) throw Error("Vault changed");
+        const { status, text, headers } = await requestUrl(request);
+        return { status, text, headers };
+      },
       storage: {
         load: () => readLocalState(`${root}/workspace.json`),
         save: value => saveLocalState(`${root}/workspace.json`, value),

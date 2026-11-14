@@ -30,24 +30,30 @@ function object(value: unknown): value is { [key: string]: unknown } { return va
 function tokenCount(value: unknown): number | null { return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : null; }
 
 /** Never echo provider messages or arbitrary field values: they can contain private input or credentials. */
-function failureDetails(status: number, raw: string): string {
+const errorCodes = new Set(["invalid_request_error", "invalid_value", "invalid_parameter", "unsupported_parameter", "unsupported_value", "model_not_found", "invalid_image", "invalid_image_format", "invalid_image_url", "image_parse_error", "invalid_file", "permission_error", "insufficient_quota", "rate_limit_exceeded", "server_error", "context_length_exceeded", "server_is_overloaded"]);
+
+export function openAiErrorCodes(value: unknown): string[] {
+  if (!object(value)) return [];
+  return [...new Set([value.type, value.code].filter((code): code is string => typeof code === "string" && errorCodes.has(code)))];
+}
+
+function failureDetails(status: number, raw: string, includeParameter: boolean): string {
   const parts = [`HTTP ${status}`];
   if (raw.length <= 65536) try {
     const data: unknown = JSON.parse(raw), error = object(data) && object(data.error) ? data.error : null;
-    const codes = new Set(["invalid_request_error", "invalid_value", "invalid_parameter", "unsupported_parameter", "unsupported_value", "model_not_found", "invalid_image", "invalid_image_format", "invalid_image_url", "image_parse_error", "invalid_file", "permission_error", "insufficient_quota", "rate_limit_exceeded", "server_error"]);
     if (error) {
-      for (const field of ["type", "code"]) if (typeof error[field] === "string" && codes.has(error[field]) && !parts.includes(error[field])) parts.push(error[field]);
-      if (typeof error.param === "string" && error.param.length <= 96 && /^(?:model|tool_choice|parallel_tool_calls|max_tool_calls|reasoning(?:\.effort)?|tools(?:\[\d{1,3}\](?:\.(?:type|model|quality|size|output_format))?)?|input(?:\[\d{1,3}\]\.content(?:\[\d{1,3}\](?:\.(?:type|file_id|image_url|detail))?)?)?)$/.test(error.param)) parts.push(`parameter: ${error.param}`);
+      parts.push(...openAiErrorCodes(error));
+      if (includeParameter && typeof error.param === "string" && error.param.length <= 96 && /^(?:model|tool_choice|parallel_tool_calls|max_tool_calls|reasoning(?:\.effort)?|tools(?:\[\d{1,3}\](?:\.(?:type|model|quality|size|output_format))?)?|input(?:\[\d{1,3}\]\.content(?:\[\d{1,3}\](?:\.(?:type|file_id|image_url|detail))?)?)?)$/.test(error.param)) parts.push(`parameter: ${error.param}`);
     }
   } catch { /* A non-JSON error still has a useful status without exposing its body. */ }
   return parts.join("; ");
 }
 
 /** Read only assistant text output; model tool calls are never executed. */
-export function parseOpenAiDraft(status: number, raw: string): OpenAiDraft {
+export function parseOpenAiDraft(status: number, raw: string, includeParameter = true): OpenAiDraft {
   if (status === 401 || status === 403) throw Error("OpenAI rejected this key or its permissions. No retry was made.");
-  if (status === 429) throw Error("OpenAI reported a rate or quota limit. No retry was made.");
-  if (status < 200 || status >= 300) throw Error(`OpenAI could not complete the request (${failureDetails(status, raw)}). No retry was made.`);
+  if (status === 429) throw Error(`OpenAI reported a rate or quota limit (${failureDetails(status, raw, false)}). No retry was made.`);
+  if (status < 200 || status >= 300) throw Error(`OpenAI could not complete the request (${failureDetails(status, raw, includeParameter)}). No retry was made.`);
   if (encoder.encode(raw).length > 8 * 1024 * 1024) throw Error("OpenAI returned a response too large to open safely on this device.");
   let data: unknown;
   try { data = JSON.parse(raw); } catch { throw Error("OpenAI returned an unreadable response. No retry was made."); }

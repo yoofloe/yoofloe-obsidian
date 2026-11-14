@@ -1,5 +1,6 @@
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport } from "./ai-session";
-import { OPENAI_ENDPOINT, validateOpenAiKey, validateOpenAiOptions } from "./openai";
+import { validateOpenAiKey, validateOpenAiOptions } from "./openai";
+import { requestOpenAiRound } from "./openai-request";
 import { resolveEffort } from "./effort";
 import { safeOutbound, type WorkMode, type WriteScope } from "./agent-policy";
 import { agentTools, parseAgentReply, type AgentReply } from "./agent-protocol";
@@ -194,10 +195,12 @@ export class AgentTask {
           store: false, stream: false, include: ["reasoning.encrypted_content", ...(this.sourceMode === "expanded" && hosted.length ? ["web_search_call.action.sources"] : [])], ...(effort || summarize ? { reasoning: {
             ...(effort ? { effort } : {}), ...(summarize ? { summary: "auto" } : {}),
           } } : {}) });
-        if (new TextEncoder().encode(body).length > MAX_AI_INPUT_BYTES) throw Error("This task reached its data budget. Your work is kept. Start a focused follow-up.");
-        const reply = await this.requestReply(body, key, maximum, effort, hosted.length, canSaveGenerated);
-        if (!reply) break;
-        const newFiles = await this.collectReply(reply, key, canSaveGenerated);
+        const bytes = new TextEncoder().encode(body).length;
+        if (bytes > MAX_AI_INPUT_BYTES) throw Error("This task reached its data budget. Your work is kept. Start a focused follow-up.");
+        const result = await this.requestReply(body, bytes, key, maximum, effort, hosted.length, canSaveGenerated);
+        if (!result) break;
+        const { reply, trace } = result;
+        const newFiles = await this.collectReply(reply, key, canSaveGenerated, true, trace);
         if (this.stopped || !this.options.current()) { this.state = "stopped"; this.update("status", "Stopped. The returned answer and completed work are kept; no further file action was run."); break; }
         if (reply.incomplete) { this.state = "failed"; this.update("status", "A partial answer was returned. It is kept; no retry was made."); break; }
         const completeLocalWork = this.steerNotes.length === 0 && !this.pendingSteers.length && newFiles > 0 && (canSaveGenerated ? requestsVaultWork(this.initialInput) : localTools.some(tool => tool.name === "apply_changes") && requestsAttachedNoteEdit(this.initialInput) && this.options.executor.hasUneditedWritableNote?.() === true);
@@ -248,13 +251,13 @@ export class AgentTask {
       for (const listener of this.listeners) listener();
     }
   }
-  private async requestReply(body: string, key: string, maximum: RequestLimit, effort: string | undefined, hostedCount: number, canSaveGenerated: boolean): Promise<AgentReply | null> {
+  private async requestReply(body: string, bytes: number, key: string, maximum: RequestLimit, effort: string | undefined, hostedCount: number, canSaveGenerated: boolean): Promise<{ reply: AgentReply; trace?: string } | null> {
     const live = this.options.liveResponse && findOpenAiModel(this.model.model) ? await this.options.liveResponse(key) : null;
     if (this.stopped || !this.options.current()) { live?.close(); return null; }
     this.requests++;
     for (const note of this.sendingSteers) this.options.steerStatus?.(note, "sending");
     this.update("request", `OpenAI request ${this.requests}${maximum === "none" ? " · no request-count limit" : ` of ${maximum}`} · ${this.model.model}${effort ? ` · ${effort}` : " · model default"}`);
-    let reply: AgentReply;
+    let reply: AgentReply, trace: string | undefined;
     if (live) {
       this.live = live;
       this.nativeApplied = null;
@@ -279,20 +282,26 @@ export class AgentTask {
         this.nativeApplied = null;
       }
     } else {
-      let response: { status: number; text: string };
-      try { response = await this.options.transport({ url: OPENAI_ENDPOINT, method: "POST", contentType: "application/json", headers: { Authorization: `Bearer ${key}` }, body, throw: false }); }
-      catch { throw Error("The request failed. No retry was made; an already-sent request may still incur OpenAI charges."); }
-      reply = parseAgentReply(response.status, response.text);
+      const result = await requestOpenAiRound(this.options.transport, body, key, this.requests, bytes);
+      trace = result.trace;
+      try {
+        reply = parseAgentReply(result.response.status, result.response.text);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "OpenAI returned an unreadable response.";
+        throw Error(`OpenAI request ${this.requests} · ${detail} (${trace})`);
+      }
     }
-    for (const note of this.sendingSteers) this.markApplied(note);
-    this.sendingSteers = [];
-    return reply;
+    return { reply, trace };
   }
 
-  private async collectReply(reply: AgentReply, key: string, canSaveGenerated: boolean, replay = true): Promise<number> {
+  private async collectReply(reply: AgentReply, key: string, canSaveGenerated: boolean, replay = true, trace?: string): Promise<number> {
     this.usage.input += reply.usage.input; this.usage.output += reply.usage.output; this.usage.reasoning += reply.usage.reasoning;
     this.online.search += reply.online.search; this.online.analysis += reply.online.analysis; this.online.image += reply.online.image;
     if (this.sourceMode === "provided" && reply.online.search) throw Error("An unexpected web result was rejected in Provided materials only mode.");
+    if (replay) {
+      for (const note of this.sendingSteers) this.markApplied(note);
+      this.sendingSteers = [];
+    }
     this.sources = sourceList([...this.sources, ...reply.sources]);
     this.citedSources = sourceList([...this.citedSources, ...reply.citations]);
     if (replay) {
@@ -323,7 +332,7 @@ export class AgentTask {
     if (reply.online.search || reply.online.analysis || reply.online.image) this.update("tool", `Tools used: ${this.online.search} web · ${this.online.analysis} analysis · ${this.online.image} image. Separate tool charges apply.`);
     if (!reply.text && reply.calls.length && (this.stopped || !this.options.current() || reply.incomplete)) this.text = "## Unapplied AI proposals\n\nThese returned tool proposals were kept for review and were not executed.\n\n" + reply.calls.map(call => `### ${call.name}\n\n\`\`\`json\n${call.arguments}\n\`\`\``).join("\n\n");
     // Always collect paid text; authority to execute tools is checked separately after the response.
-    this.update("response", `Received response ${this.requests}. Returned text and token usage are kept.`);
+    this.update("response", `Received response ${this.requests}. Returned text and token usage are kept.${trace ? ` (${trace})` : ""}`);
     return newFiles;
   }
 }
