@@ -50,6 +50,19 @@ test('image uploads use vision purpose while documents retain user_data and both
  assert.match(bodies[0],/name="purpose"\r\n\r\nvision\r\n/);assert.match(bodies[1],/name="purpose"\r\n\r\nuser_data\r\n/);
  for(const body of bodies){assert(body.includes('expires_after[seconds]'));assert(body.includes('3600'));}
 });
+test('upload deletion checks the matching provider acknowledgement and retains safe failure metadata', async () => {
+  const api = (status, text) => providerFiles(async request => {
+    assert.equal(request.url, 'https://api.openai.com/v1/files/file-fixture');
+    assert.equal(request.method, 'DELETE');
+    return { status, text, arrayBuffer: new ArrayBuffer(0) };
+  });
+  await api(200, '{"id":"file-fixture","object":"file","deleted":true}').removeUpload('file-fixture', 'synthetic');
+  await api(404, '').removeUpload('file-fixture', 'synthetic');
+  for (const text of ['', '{"id":"file-other","object":"file","deleted":true}', '{"id":"file-fixture","object":"file","deleted":false}']) {
+    await assert.rejects(api(200, text).removeUpload('file-fixture', 'synthetic'), { status: 200, message: 'Uploaded-file deletion was not confirmed.' });
+  }
+  await assert.rejects(api(403, 'private provider detail').removeUpload('file-fixture', 'synthetic'), { status: 403, message: 'Uploaded-file cleanup failed.' });
+});
 test('unknown provider file sizes use bounded streaming without redirects or an unbounded native request',async()=>{
  const runtime=fetch=>({fetch,setTimeout,clearTimeout,setInterval,clearInterval});const route='https://api.openai.com/v1/containers/cntr_a/files/cfile_a/content';let streamed=0,requests=0;
  const api=providerFiles(async()=>{requests++;return{status:200,text:'{"id":"cfile_a","container_id":"cntr_a","object":"container.file","bytes":null}',arrayBuffer:new ArrayBuffer(0)};},async(url,key,max,current)=>{streamed++;return boundedOpenAiDownload(url,key,max,current,runtime(async(_url,options)=>{assert.equal(options.redirect,'error');return new Response(new Uint8Array([1,2,3]));}));});

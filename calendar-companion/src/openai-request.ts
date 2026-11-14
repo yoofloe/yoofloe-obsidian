@@ -12,9 +12,11 @@ function stringField(error: Record<string, unknown>, name: string): string {
   return typeof value === "string" ? value.slice(0, 512) : "";
 }
 
-function transportFailure(error: unknown): string {
+export function openAiTransportFailure(error: unknown): string {
   const fields = error && typeof error === "object" ? error as Record<string, unknown> : {};
   const status = fields.status ?? fields.statusCode;
+  if (typeof status === "number" && Number.isInteger(status) && status >= 200 && status < 300)
+    return `returned HTTP ${status} without a usable confirmation`;
   if (typeof status === "number" && Number.isInteger(status) && status >= 300 && status <= 599)
     return `failed with HTTP ${status} reported by Obsidian`;
   const message = typeof error === "string" ? error.slice(0, 512) : stringField(fields, "message");
@@ -64,7 +66,7 @@ export async function requestOpenAiRound(
     response = await transport({ url: OPENAI_ENDPOINT, method: "POST", contentType: "application/json", body, throw: false,
       headers: { Authorization: "Bearer " + key, "X-Client-Request-Id": trace.clientId } });
   } catch (error) {
-    throw Error(`OpenAI request ${number} ${transportFailure(error)}. No retry was made. The request may still incur charges. (${traceText(trace)})`);
+    throw Error(`OpenAI request ${number} ${openAiTransportFailure(error)}. No retry was made. The request may still incur charges. (${traceText(trace)})`);
   }
   return { response, trace: traceText(trace, response) };
 }

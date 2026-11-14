@@ -18,8 +18,9 @@ const audio: Record<string, string> = { mp3:"audio/mpeg", mp4:"audio/mp4", mpeg:
 const documents: Record<string, string> = { pdf:"application/pdf", doc:"application/msword", docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document", ppt:"application/vnd.ms-powerpoint", pptx:"application/vnd.openxmlformats-officedocument.presentationml.presentation", xls:"application/vnd.ms-excel", xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", odt:"application/vnd.oasis.opendocument.text", rtf:"application/rtf", txt:"text/plain", md:"text/markdown", csv:"text/csv", tsv:"text/tab-separated-values", json:"application/json", xml:"application/xml", html:"text/html", js:"text/javascript", ts:"text/plain", py:"text/plain", css:"text/css", sql:"text/plain", yaml:"text/plain", yml:"text/plain" };
 export interface Attachment { id: string; name: string; extension: string; kind: "image" | "document" | "audio"; mime: string; bytes: number; sha256: string; pastedText?: { providedOnly: boolean } }
 export interface AttachmentRun {
+  readonly hasUploads: boolean;
   prepare(key: string, current: () => boolean, billable: (name: string) => void): Promise<{ parts: Record<string, unknown>[]; fileIds: string[] }>;
-  cleanup(key: string): Promise<boolean>;
+  cleanup(key: string, onFailure?: (error: unknown) => void): Promise<boolean>;
 }
 export interface AttachmentStore {
   add(file: File, current: () => boolean): Promise<Attachment>;
@@ -72,6 +73,7 @@ export function attachmentStore(options: {
       const files=readAttachments(selected), uploaded=new Map<string,string>(), prepared=new Map<string,Record<string,unknown>>();
       if(files.length!==selected.length)throw Error("Review the attachment selection before sending.");
       return {
+        get hasUploads() { return uploaded.size > 0; },
         async prepare(key,current,billable) {
           const guard=()=>{if(!current())throw Error("Stopped before sending attachments.");};
           for(const file of files) {
@@ -96,7 +98,13 @@ export function attachmentStore(options: {
           });
           return { parts, fileIds: [...uploaded.values()] };
         },
-        async cleanup(key) {let ok=true;for(const [local,id]of [...uploaded]){try{await options.removeUpload(id,key);uploaded.delete(local);}catch{ok=false;}}return ok;},
+        async cleanup(key, onFailure) {
+          for (const [local, id] of [...uploaded]) {
+            try { await options.removeUpload(id, key); uploaded.delete(local); }
+            catch (error) { onFailure?.(error); }
+          }
+          return uploaded.size === 0;
+        },
       };
     },
   };

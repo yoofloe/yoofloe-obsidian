@@ -1,7 +1,7 @@
 import { sourceList, type SourceMode, type WebSource, type OnlineUsage } from "./research";
 import { readGeneratedFiles, type GeneratedFile } from "./generated-files";
 import { readAttachments, type Attachment } from "./attachments";
-import { readActivity, readSteerNotes, type SteerNote, type WorkEvent } from "./work-activity";
+import { readActivity, readSteerNotes, workText, type SteerNote, type WorkEvent } from "./work-activity";
 import { validContextScope } from "./conversation-context";
 export interface ChatAction { kind: string; path: string; target?: string }
 export interface ChatTurn {
@@ -13,11 +13,21 @@ export interface ChatTurn {
   actionTotal?: number;
   sourceMode?: SourceMode; sources?: WebSource[]; online?: OnlineUsage; generated?: GeneratedFile[];
   attachments?: Attachment[]; transcriptions?: number; fileWarnings?: string[];
+  uploadCleanupWarning?: string;
   generatedTruncated?: boolean;
   conversationId?: string; contextScope?: string | null;
   durationMs?: number; activity?: WorkEvent[]; steers?: SteerNote[]; workDetailsTruncated?: boolean;
 }
 export const CHAT_HISTORY_LIMIT = 50;
+export function confirmedChangeCount(turn: ChatTurn): number { return Math.max(turn.actionTotal ?? 0, turn.actions.length); }
+export function taskFailure(turn: ChatTurn): string {
+  if (turn.status !== "failed" || !turn.activity) return "";
+  for (let index = turn.activity.length - 1; index >= 0; index--) {
+    const event = turn.activity[index];
+    if (event.state === "blocked" && !turn.fileWarnings?.includes(event.text)) return event.text;
+  }
+  return "";
+}
 export function validChatId(id: string): boolean { return /^[a-zA-Z0-9_-]{1,80}$/.test(id); }
 export function chatPreview(turn: ChatTurn): ChatTurn {
   return { ...turn, request: turn.request.slice(0, 4000), answer: turn.answer.slice(0, 16000), actions: turn.actions.slice(-100), generated: turn.generated?.slice(0, 16), generatedTruncated: !!turn.generatedTruncated || (turn.generated?.length ?? 0) > 16,
@@ -49,6 +59,7 @@ export function readChat(value: unknown): ChatTurn | null {
     ...(typeof v.sourcePath === "string" ? { sourcePath: v.sourcePath.slice(0, 500) } : {}), actionsKnown: v.actionsKnown === true, actionTotal: Math.max(count(v.actionTotal), actions.length),
     sourceMode: v.sourceMode === "expanded" ? "expanded" : "provided", sources: sourceList(v.sources), generated: readGeneratedFiles(v.generated), generatedTruncated: v.generatedTruncated === true,
     attachments: readAttachments(v.attachments), transcriptions: count(v.transcriptions), fileWarnings: Array.isArray(v.fileWarnings) ? v.fileWarnings.filter((value): value is string => typeof value === "string").slice(0, 32).map(value => value.slice(0, 500)) : [],
+    ...(typeof v.uploadCleanupWarning === "string" ? { uploadCleanupWarning: workText(v.uploadCleanupWarning, 500) } : {}),
     online: v.online && typeof v.online === "object" ? { search: count((v.online as OnlineUsage).search), analysis: count((v.online as OnlineUsage).analysis), image: count((v.online as OnlineUsage).image) } : undefined };
 }
 export function chatMatches(turn: ChatTurn, query: string): boolean {

@@ -1,6 +1,6 @@
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport } from "./ai-session";
 import { validateOpenAiKey, validateOpenAiOptions } from "./openai";
-import { requestOpenAiRound } from "./openai-request";
+import { openAiTransportFailure, requestOpenAiRound } from "./openai-request";
 import { resolveEffort } from "./effort";
 import { safeOutbound, type WorkMode, type WriteScope } from "./agent-policy";
 import { agentTools, parseAgentReply, type AgentReply } from "./agent-protocol";
@@ -35,6 +35,7 @@ export class AgentTask {
   onlineMaximum: RequestLimit = 8;
   transcriptions = 0;
   fileWarnings: string[] = [];
+  uploadCleanupWarning = "";
   events: WorkEvent[] = [];
   steerNotes: SteerNote[] = [];
   compaction: CompactionItem | null = null;
@@ -62,7 +63,8 @@ export class AgentTask {
   private initialInput = "";
   private attachmentsReady = false;
   private fileIds: string[] = [];
-  private cleanupUploads: (() => Promise<void>) | null = null;
+  private cleanupUploads: ((onFailure: (error: unknown) => void) => Promise<boolean>) | null = null;
+  private stopDeferredCleanup = false;
   private listeners = new Set<() => void>();
   constructor(private readonly options: {
     current(): boolean; preserve?(): boolean; key(): Promise<string | null>; transport: AiTransport; liveResponse?: OpenLiveResponse;
@@ -138,9 +140,33 @@ export class AgentTask {
     this.sendingSteers = []; this.pendingSteers = []; this.nativeSteer = null;
     for (const note of remaining) this.options.steerStatus?.(note, "review");
   }
-  stop(): void { this.stopped = true; if (!this.busy) { this.state = "stopped"; this.reviewRemainingSteers(); void this.cleanupFiles(); } this.update("status", "Stopping future requests and file actions. An already-sent OpenAI request may still incur charges; its answer is kept."); }
+  stop(deferUploadCleanup = false): void {
+    this.stopped = true;
+    this.stopDeferredCleanup = deferUploadCleanup;
+    if (!this.busy) {
+      this.state = "stopped";
+      this.reviewRemainingSteers();
+      this.markCleanupUnconfirmed();
+      if (!deferUploadCleanup) void this.cleanupFiles().then(() => { for (const listener of this.listeners) listener(); });
+    }
+    this.update("status", "Stopping future requests and file actions. An already-sent OpenAI request may still incur charges; its answer is kept.");
+  }
   dispose(): void { this.stop(); this.live?.close(); }
-  private async cleanupFiles(): Promise<void> { const cleanup = this.cleanupUploads; this.cleanupUploads = null; try { await cleanup?.(); } catch { const message = "Uploaded-file cleanup could not be confirmed. The uploaded copies have a requested one-hour expiry."; this.fileWarnings.push(message); this.update("blocked", message); } }
+  get cleanupPending(): boolean { return this.cleanupUploads !== null; }
+  private markCleanupUnconfirmed(): void {
+    if (this.cleanupPending && (this.fileIds.length || this.options.attachments?.hasUploads))
+      this.uploadCleanupWarning = "Removal of temporary OpenAI uploads has not been confirmed. A one-hour expiry was requested.";
+  }
+  async cleanupFiles(): Promise<void> {
+    const cleanup = this.cleanupUploads;
+    this.cleanupUploads = null;
+    if (!cleanup) return;
+    let reason: string | undefined;
+    const onFailure = (error: unknown) => { reason ??= openAiTransportFailure(error); };
+    try { if (await cleanup(onFailure)) { this.uploadCleanupWarning = ""; return; } }
+    catch (error) { onFailure(error); }
+    this.uploadCleanupWarning = `Removal of temporary OpenAI uploads could not be confirmed.${reason ? ` The cleanup request ${reason}.` : ""} A one-hour expiry was requested.`;
+  }
   get canResume(): boolean { return this.state === "paused" && !this.stopped && !this.busy && this.options.current(); }
   get modelId(): string { return this.model.model; }
   get onlineCalls(): number { return this.online.search + this.online.analysis + this.online.image; }
@@ -152,13 +178,19 @@ export class AgentTask {
     const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
     this.usage = { input: count(usage.input), output: count(usage.output), reasoning: count(usage.reasoning) }; this.state = "completed";
   }
-  finish(): void { if (this.state === "paused" && !this.busy) { this.state = "completed"; this.reviewRemainingSteers(); void this.cleanupFiles(); this.update("status", "Finished here. Completed work and the answer are kept; no further AI request was sent."); } }
+  finish(): void {
+    if (this.state !== "paused" || this.busy) return;
+    this.state = "stopped";
+    this.reviewRemainingSteers();
+    this.markCleanupUnconfirmed();
+    this.update("status", "Finished here. Completed work and the answer are kept; no further AI request was sent.");
+  }
   async run(input: string, model: AiModelOptions, mode: WorkMode, maximum: RequestLimit, research?: { mode: SourceMode; maximum: RequestLimit }, initialNote?: string | null, context?: { autoCompact: boolean; items: Record<string, unknown>[] }): Promise<void> {
     if (this.busy || this.options.gate.busy || !this.options.current()) throw Error("Wait for the current task to finish.");
     requestLimit(maximum); validateOpenAiOptions(model); safeOutbound(input);
     this.model = { ...model }; this.mode = mode; this.lastAction = ""; this.repeats = 0; this.blockedRounds = 0;
     this.sourceMode = effectiveSourceMode(research?.mode ?? "provided", requestText(input)); this.onlineMaximum = requestLimit(research?.maximum ?? 8); this.online = emptyOnlineUsage(); this.sources = []; this.citedSources = []; this.generated = []; this.initialInput = input;
-    this.attachmentsReady = false; this.fileIds = []; this.transcriptions = 0; this.fileWarnings = [];
+    this.attachmentsReady = false; this.fileIds = []; this.transcriptions = 0; this.fileWarnings = []; this.uploadCleanupWarning = "";
     this.autoCompact = context?.autoCompact === true && !!findOpenAiModel(model.model);
     this.compaction = null;
     this.initialItem = { role: "user", content: input };
@@ -177,15 +209,16 @@ export class AgentTask {
   private async advance(maximum: RequestLimit): Promise<void> {
     const model = this.model, mode = this.mode, effort = resolveEffort(model.model, model.effort);
     const summarize = !!findOpenAiModel(model.model) && effort !== "none";
-    this.busy = true; this.options.gate.busy = true; this.stopped = false; this.state = "running"; this.activeSince = Date.now();
+    this.busy = true; this.options.gate.busy = true; this.stopped = false; this.stopDeferredCleanup = false; this.state = "running"; this.activeSince = Date.now();
     try {
       this.update("status", this.requests ? "Continuing the task" : "Preparing the request", "working");
       const value = await this.options.key();
       if (!value) throw Error("Save your OpenAI API key locally before starting. No request was sent.");
       const key = validateOpenAiKey(value);
-      if (this.options.attachments && !this.cleanupUploads) this.cleanupUploads = async () => { if (!await this.options.attachments!.cleanup(key)) { this.fileWarnings.push("Some uploaded files could not be deleted immediately. Their requested expiry is one hour from upload."); this.update("blocked", this.fileWarnings.at(-1)!); } };
-      if (!this.attachmentsReady && this.options.attachments) {
-        const prepared = await this.options.attachments.prepare(key, () => !this.stopped && this.options.current(), name => {
+      const attachments = this.options.attachments;
+      if (attachments && !this.cleanupUploads) this.cleanupUploads = onFailure => attachments.cleanup(key, onFailure);
+      if (!this.attachmentsReady && attachments) {
+        const prepared = await attachments.prepare(key, () => !this.stopped && this.options.current(), name => {
           if (maximum !== "none" && this.requests >= maximum) throw new AttachmentBudgetPause("The request limit was reached while preparing audio. Increase the limit and continue; completed transcripts are reused.");
           this.requests++; this.transcriptions++; this.update("request", `Transcribing ${name} · request ${this.requests} · gpt-transcribe · API charges apply`);
         });
@@ -213,7 +246,7 @@ export class AgentTask {
         const { reply, trace } = result;
         const newFiles = await this.collectReply(reply, key, canSaveGenerated, true, trace);
         if (this.stopped || !this.options.current()) { this.state = "stopped"; this.update("status", "Stopped. The returned answer and completed work are kept; no further file action was run."); break; }
-        if (reply.incomplete) { this.state = "failed"; this.update("status", "A partial answer was returned. It is kept; no retry was made."); break; }
+        if (reply.incomplete) { this.state = "failed"; this.update("blocked", "A partial answer was returned. It is kept; no retry was made."); break; }
         const completeLocalWork = this.steerNotes.length === 0 && !this.pendingSteers.length && newFiles > 0 && (canSaveGenerated ? requestsVaultWork(this.initialInput) : localTools.some(tool => tool.name === "apply_changes") && requestsAttachedNoteEdit(this.initialInput) && this.options.executor.hasUneditedWritableNote?.() === true);
         if (completeLocalWork && !reply.calls.length) this.items.push({ role: "user", content: "The research or generation step has returned. Complete the original requested document work with the permitted vault tools if needed. Do not repeat the research just to save its results. If the original request only wanted an answer, give that answer." });
         if (!reply.calls.length && !completeLocalWork && !this.pendingSteers.length) { this.state = "completed"; this.update("status", this.fileWarnings.length ? "The answer is kept, but some files need attention. See the file messages below." : this.generated.length && !canSaveGenerated ? "Task complete. Generated files are available in this chat; use Save attachment to save a copy." : "Task complete. Review the answer and changed files below."); break; }
@@ -256,7 +289,12 @@ export class AgentTask {
       if (this.state === "running") { this.state = this.stopped || !this.options.current() ? "stopped" : maximum !== "none" && this.requests >= maximum ? "paused" : "completed"; if (this.state === "paused") this.update("status", "The request limit was reached after preparing attachments. Continue with a higher total limit; completed work is reused."); }
     } catch (error) { this.state = error instanceof AttachmentBudgetPause ? "paused" : this.stopped ? "stopped" : "failed"; this.update("blocked", error instanceof Error ? error.message : "The task could not finish. No retry was made."); }
     finally {
-      if (this.state !== "paused") { this.reviewRemainingSteers(); await this.cleanupFiles(); }
+      if (this.stopped && this.state === "paused") this.state = "stopped";
+      if (this.state !== "paused") {
+        this.reviewRemainingSteers();
+        if (this.state === "stopped" && this.stopDeferredCleanup) this.markCleanupUnconfirmed();
+        else await this.cleanupFiles();
+      }
       if (this.activeSince !== null) { this.workedMs = this.durationMs; this.activeSince = null; }
       this.busy = false; this.options.gate.busy = false;
       for (const listener of this.listeners) listener();

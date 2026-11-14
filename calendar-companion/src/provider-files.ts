@@ -48,7 +48,15 @@ export function providerFiles(request:FileHttp, stream?: FileDownload) {
     },
     async removeUpload(this: void, id:string,key:string):Promise<void> {
       if(!/^file-[A-Za-z0-9_-]{1,150}$/.test(id))throw Error("Invalid uploaded-file reference.");
-      const response=await request({url:ROOT+"/files/"+id,method:"DELETE",headers:{Authorization:`Bearer ${key}`},throw:false});if(response.status!==404)check(response.status,"Uploaded-file cleanup");
+      const response=await request({url:ROOT+"/files/"+id,method:"DELETE",headers:{Authorization:`Bearer ${key}`},throw:false});
+      if(response.status===404)return;
+      if(response.status<200||response.status>=300)
+        throw Object.assign(Error("Uploaded-file cleanup failed."), {status:response.status});
+      let deleted: unknown;
+      try { deleted=JSON.parse(response.text); } catch { /* A successful HTTP status alone does not confirm deletion. */ }
+      const result=deleted && typeof deleted==="object" ? deleted as Record<string, unknown> : null;
+      if(result?.id!==id || result.object!=="file" || result.deleted!==true)
+        throw Object.assign(Error("Uploaded-file deletion was not confirmed."), {status:response.status});
     },
     async download(this: void, container:string,file:string,key:string,current:()=>boolean,byteBudget = MAX_GENERATED_BYTES):Promise<ArrayBuffer> {
       if(!/^cntr_[A-Za-z0-9_-]{1,150}$/.test(container)||!/^cfile_[A-Za-z0-9_-]{1,150}$/.test(file))throw Error("Invalid generated-file reference.");

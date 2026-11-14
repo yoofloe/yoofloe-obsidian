@@ -17,7 +17,7 @@ import { FOLLOW_UP_LIMIT, FOLLOW_UP_TEXT_LIMIT, type FollowUpMode } from "./foll
 import { formatWorkDuration } from "./work-activity";
 import { AUTO_COMPACT_TOKENS } from "./conversation-context";
 import { CONVERSATION_NAME_LIMIT, MAX_CONVERSATIONS, MAX_FOLDERS, turnConversation, type Conversation } from "./conversation-library";
-import { CHAT_HISTORY_LIMIT, chatMatches, searchChatPreview, type ChatTurn } from "./chat-history";
+import { CHAT_HISTORY_LIMIT, chatMatches, confirmedChangeCount, searchChatPreview, taskFailure, type ChatTurn } from "./chat-history";
 
 export const AI_VIEW = "yoofloe-ai";
 const STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -254,7 +254,11 @@ export class YoofloeAiView extends ItemView {
     else if (!turn.actions.length && turn.status === "completed" && turn.actionsKnown) metadata.createEl("p", { text: "No file changes were recorded for this task.", cls: "y-ai-hint" });
     if (turn.answer) this.markdown(assistant, turn.answer, turn.sourcePath ?? "");
     if (turn.sources?.length) { const sources = this.details(assistant, "sources-" + turn.id, `Sources · ${turn.sources.length}`); for (const source of turn.sources) sources.createEl("p").createEl("a", { text: source.title || source.url, href: source.url, attr: { target: "_blank", rel: "noopener noreferrer" } }); }
-    for (const warning of turn.fileWarnings ?? []) assistant.createEl("p", { text: warning, cls: "y-ai-file-warning" });
+    const failure = taskFailure(turn);
+    if (failure) assistant.createEl("p", { text: failure, cls: "y-ai-task-error" });
+    const warnings = new Set(turn.fileWarnings);
+    if (turn.uploadCleanupWarning) warnings.add(turn.uploadCleanupWarning);
+    for (const warning of warnings) assistant.createEl("p", { text: warning, cls: "y-ai-file-warning", attr: { role: "status" } });
     const visibleFiles = this.generatedVisible.get(turn.id) ?? 4;
     if (turn.generated?.length) assistant.createEl("p", { text: "Generated files are cached locally. Save attachment copies a file to the output folder.", cls: "y-ai-hint" });
     for (const file of (turn.generated ?? []).slice(0, visibleFiles)) {
@@ -406,7 +410,8 @@ export class YoofloeAiView extends ItemView {
     }
   }
   private updateWorkHeading(metadata: HTMLElement, turn: ChatTurn): void {
-    const label = turn.status === "running" && this.work.stopping ? "Stopping…" : WORK_STATUS[turn.status];
+    const label = turn.status === "running" && this.work.stopping ? "Stopping…" :
+      turn.status === "failed" && confirmedChangeCount(turn) > 0 ? "Changes saved · Could not finish" : WORK_STATUS[turn.status];
     metadata.querySelector(".y-ai-work-label")?.setText(label);
     metadata.querySelector(".y-ai-work-mode")?.setText(turn.sourceMode === "expanded" ? "Expanded" : "Provided only");
     const duration = metadata.querySelector<HTMLElement>(".y-ai-work-duration");
@@ -421,6 +426,7 @@ export class YoofloeAiView extends ItemView {
     if (turn.activity?.length) {
       const timeline = el.createEl("ol", { cls: "y-ai-timeline", attr: { "aria-label": "Task activity" } });
       for (const event of turn.activity) {
+        if (event.state === "blocked" && turn.fileWarnings?.includes(event.text)) continue;
         const row = timeline.createEl("li", { attr: { "data-state": event.state } });
         setIcon(row.createSpan({ cls: "y-ai-timeline-icon", attr: { "aria-label": ACTIVITY_LABEL[event.state] } }), ACTIVITY_ICON[event.state]);
         const copy = row.createDiv({ cls: "y-ai-timeline-copy" });
@@ -479,7 +485,15 @@ export class YoofloeAiView extends ItemView {
   private activeTurnChanged(turn: ChatTurn): boolean {
     const prior = this.renderedTurn;
     return !prior || prior.id !== turn.id || prior.answer !== turn.answer || prior.status !== turn.status ||
+      prior.uploadCleanupWarning !== turn.uploadCleanupWarning || taskFailure(prior) !== taskFailure(turn) ||
       JSON.stringify([prior.actions, prior.sources, prior.generated, prior.fileWarnings]) !== JSON.stringify([turn.actions, turn.sources, turn.generated, turn.fileWarnings]);
+  }
+  private statusFeedback(): string {
+    const w = this.work;
+    const feedback = w.busy && w.task?.busy ? w.task.message : w.message;
+    if (this.settingsExpanded || this.chatQuery) return feedback;
+    const latest = w.chat.at(-1);
+    return latest && (taskFailure(latest) === feedback || latest.fileWarnings?.includes(feedback)) ? "" : feedback;
   }
   private refreshProgress(): void {
     const el = this.contentEl, w = this.work, messages = el.querySelector<HTMLElement>(".y-ai-messages");
@@ -504,7 +518,7 @@ export class YoofloeAiView extends ItemView {
         this.renderedTurn = { ...turn };
       }
     }
-    const feedback = w.busy && w.task?.busy ? w.task.message : w.message;
+    const feedback = this.statusFeedback();
     const status = el.querySelector<HTMLElement>(".y-ai-status");
     if (status && status.textContent !== feedback) status.setText(feedback);
     const queue = el.querySelector<HTMLElement>(".y-ai-queue");
@@ -839,8 +853,8 @@ export class YoofloeAiView extends ItemView {
     this.renderedTurn = w.chat.length ? { ...w.chat.at(-1)! } : null;
     const queue = messages.createEl("section", { cls: "y-ai-queue", attr: { "aria-label": "Follow-up messages" } });
     this.updateQueue(queue);
-    const feedback = w.busy && w.task?.busy ? w.task.message : w.message;
-    if (w.busy || (w.message || w.task?.message) && (!w.task || w.task.state !== "completed" || w.message !== w.task.message)) {
+    const feedback = this.statusFeedback();
+    if (w.busy || feedback && (!w.task || w.task.state !== "completed" || w.message !== w.task.message)) {
       const status = (this.settingsExpanded ? scroll : messages).createEl("p", { text: feedback, cls: this.settingsExpanded ? "y-ai-status y-ai-settings-status" : "y-ai-status", attr: { role: "status", "aria-live": "polite" } });
       if (this.settingsExpanded) scroll.prepend(status);
     }

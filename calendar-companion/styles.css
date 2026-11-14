@@ -155,7 +155,8 @@
 .yoofloe-ai .y-ai-generated { display:flex; flex-wrap:wrap; align-items:center; gap:8px; border:1px solid var(--background-modifier-border); border-radius:8px; padding:8px; margin-top:10px; }
 .yoofloe-ai .y-ai-generated > span { flex:1; overflow-wrap:anywhere; }
 .yoofloe-ai .y-ai-generated img { display:block; width:100%; max-height:180px; object-fit:contain; }
-.yoofloe-ai .y-ai-file-warning, .yoofloe-ai .y-ai-limit-error { color:var(--text-error); font-size:var(--font-ui-small); overflow-wrap:anywhere; }
+.yoofloe-ai .y-ai-file-warning, .yoofloe-ai .y-ai-task-error, .yoofloe-ai .y-ai-limit-error { color:var(--text-error); font-size:var(--font-ui-small); overflow-wrap:anywhere; }
+.yoofloe-ai .y-ai-work[open] ~ .y-ai-task-error { display:none; }
 .yoofloe-ai .y-ai-limit-error:empty { display:none; }
 .yoofloe-ai .y-ai-status { font-size:var(--font-ui-small); color:var(--text-muted); line-height:1.4; padding-block:6px; overflow-wrap:anywhere; }
 .yoofloe-ai .y-ai-result-actions { display:flex; justify-content:flex-end; margin-top:8px; }

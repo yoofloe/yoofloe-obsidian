@@ -4,6 +4,7 @@ import { AiWorkspace } from '../dist/workspace.js';
 import { inputDigest } from '../dist/question-input.js';
 import { chatPreview } from '../dist/chat-history.js';
 const response = output => ({ status: 200, text: JSON.stringify({ status: 'completed', output }) });
+function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 function fixture() {
   let saved, calls = 0, keyReads = 0;
   const files = new Map(), journals = [], backups = new Map();
@@ -38,6 +39,185 @@ test('completed attachments leave the composer and can be explicitly attached ag
  f.options.attachments={forTask:()=>({prepare:async()=>({parts:[{type:'input_text',text:'Sample'}],fileIds:[]}),cleanup:async()=>true})};f.work.attachments=[file];
  f.work.setPrompt('Create a note from the sample');await f.work.run();assert.equal(f.work.attachments.length,0);assert.equal(f.work.chat.at(-1).attachments.length,1);const calls=f.calls();
  f.work.useAttachments(f.work.chat.at(-1).attachments);assert.equal(f.work.attachments.length,1);assert.equal(f.calls(),calls);
+});
+
+test('a saved edit survives a DNS failure in the final answer and one cleanup warning', async () => {
+  const f = fixture();
+  const original = '# Article\nBody [article source](https://example.org/article).\n\nSources:\n- [List entry](https://example.org/list)\n';
+  const edited = original.split('\n\nSources:')[0];
+  const note = await f.host.create('Current.md', original);
+  await f.work.initialize();
+  await f.work.newTask({ path: note.path });
+  const attachment = { id: crypto.randomUUID(), name: 'fixture.jpg', extension: 'jpg', kind: 'image', mime: 'image/jpeg', bytes: 6, sha256: 'a'.repeat(64) };
+  f.work.attachments = [attachment];
+  let sends = 0, cleanups = 0;
+  const dns = () => new Error('UnknownHostException private detail');
+  f.options.attachments = { forTask: () => ({
+    prepare: async () => ({ parts: [{ type: 'input_image', file_id: 'file-test' }], fileIds: ['file-test'] }),
+    cleanup: async (_key, onFailure) => { cleanups++; onFailure(dns()); return false; },
+  }) };
+  f.options.transport = async request => {
+    const body = JSON.parse(request.body);
+    if (++sends === 1) {
+      const source = JSON.parse(body.input[0].content[0].text).current_note;
+      return response([
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'I will remove the list.' }] },
+        { type: 'function_call', call_id: 'edit-current', name: 'apply_changes', arguments: JSON.stringify({
+          changes: [{ reference: 'N1', version: source.version, action: 'replace', markdown: edited }],
+        }) },
+      ]);
+    }
+    assert(body.input.some(item => item.type === 'function_call_output' && item.call_id === 'edit-current'));
+    throw dns();
+  };
+  const archived = [];
+  f.options.storage.saveChat = async t => archived.push(structuredClone(t));
+  f.work.setPrompt('Remove the Sources list at the end of this note, keeping the article text and inline citations.');
+  await f.work.run();
+  const turn = archived.at(-1);
+  assert.equal(sends, 2);
+  assert.equal(cleanups, 1);
+  assert.equal(turn.status, 'failed');
+  assert.equal(turn.actionTotal, 1);
+  assert.equal(note.text, edited);
+  assert.equal(f.journals.at(-1).status, 'interrupted');
+  assert.equal(f.journals.at(-1).operations[0].status, 'done');
+  assert.match(f.work.message, /OpenAI request 2 could not resolve the OpenAI host/);
+  assert.match(turn.uploadCleanupWarning, /cleanup request could not resolve the OpenAI host.*one-hour expiry/);
+  assert.deepEqual(turn.fileWarnings, []);
+  assert.equal(turn.activity.filter(event => event.state === 'blocked').length, 1);
+  assert.doesNotMatch(JSON.stringify(turn), /private detail/);
+  assert.equal(f.work.prompt, '');
+  assert.equal(f.work.attachments.length, 0);
+  assert.deepEqual(turn.attachments, [attachment]);
+});
+
+test('when the DNS failure prevents the write, the partial reply leaves the draft and attachment available', async () => {
+  const f = fixture();
+  const note = await f.host.create('Current.md', 'Original');
+  await f.work.initialize();
+  await f.work.newTask({ path: note.path });
+  const attachment = { id: crypto.randomUUID(), name: 'fixture.jpg', extension: 'jpg', kind: 'image', mime: 'image/jpeg', bytes: 6, sha256: 'a'.repeat(64) };
+  f.work.attachments = [attachment];
+  f.options.attachments = { forTask: () => ({
+    prepare: async () => ({ parts: [{ type: 'input_image', file_id: 'file-test' }], fileIds: ['file-test'] }),
+    cleanup: async () => true,
+  }) };
+  let sends = 0;
+  f.options.transport = async () => {
+    if (++sends === 1) return response([
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'I will edit.' }] },
+      { type: 'function_call', call_id: 'outline', name: 'read_outline', arguments: '{"reference":"N1"}' },
+    ]);
+    throw new Error('UnknownHostException');
+  };
+  f.work.setPrompt('Edit this note');
+  await f.work.run();
+  assert.equal(sends, 2);
+  assert.equal(note.text, 'Original');
+  assert.equal(f.work.chat.at(-1).actionTotal, 0);
+  assert.equal(f.work.prompt, 'Edit this note');
+  assert.deepEqual(f.work.attachments, [attachment]);
+  assert.match(f.work.message, /OpenAI request 2 could not resolve the OpenAI host/);
+});
+
+test('Finish here persists the stopped task before network cleanup and then saves the result', async () => {
+  const f = fixture();
+  await f.work.initialize();
+  f.work.maximum = 1;
+  f.work.attachments = [{ id: crypto.randomUUID(), name: 'fixture.jpg', extension: 'jpg', kind: 'image', mime: 'image/jpeg', bytes: 6, sha256: 'a'.repeat(64) }];
+  let finishCleanup;
+  const cleanupStarted = deferred();
+  const archived = [];
+  f.options.storage.saveChat = async turn => archived.push(structuredClone(turn));
+  f.options.attachments = { forTask: () => ({
+    prepare: async () => ({ parts: [{ type: 'input_image', file_id: 'file-test' }], fileIds: ['file-test'] }),
+    cleanup: async (_key, onFailure) => {
+      await new Promise(resolve => { finishCleanup = resolve; cleanupStarted.resolve(); });
+      onFailure(new Error('UnknownHostException'));
+      return false;
+    },
+  }) };
+  f.work.setPrompt('Prepare the document');
+  await f.work.run();
+  assert.equal(f.work.canContinue, true);
+  const closing = f.work.finishHere();
+  assert.equal(f.work.busy, true);
+  await cleanupStarted.promise;
+  assert.equal(typeof finishCleanup, 'function');
+  assert.equal(f.saved().taskUsage.state, 'stopped');
+  assert.equal(f.saved().chat.at(-1).status, 'stopped');
+  assert.equal(archived.at(-1).status, 'stopped');
+  assert.match(archived.at(-1).uploadCleanupWarning, /not been confirmed.*one-hour expiry/);
+  finishCleanup();
+  await closing;
+  assert.equal(f.calls(), 1);
+  assert.equal(f.work.canContinue, false);
+  assert.equal(f.work.busy, false);
+  assert.equal(archived.at(-1).status, 'stopped');
+  assert.match(archived.at(-1).uploadCleanupWarning, /cleanup request could not resolve/);
+  assert.match(f.work.message, /Finished here/);
+});
+test('Stop during a pause saves the termination and clears its temporary warning after confirmed cleanup', async () => {
+  const f = fixture();
+  await f.work.initialize();
+  f.work.maximum = 1;
+  f.work.attachments = [{ id: crypto.randomUUID(), name: 'fixture.jpg', extension: 'jpg', kind: 'image', mime: 'image/jpeg', bytes: 6, sha256: 'a'.repeat(64) }];
+  let finishCleanup, cleanups = 0;
+  const cleanupStarted = deferred();
+  const archived = [];
+  f.options.storage.saveChat = async turn => archived.push(structuredClone(turn));
+  f.work.subscribe(() => { if (f.work.canStop && f.work.task?.state === 'paused') f.work.stop(); });
+  f.options.attachments = { forTask: () => ({
+    hasUploads: true,
+    prepare: async () => ({ parts: [{ type: 'input_image', file_id: 'file-test' }], fileIds: ['file-test'] }),
+    cleanup: async () => { cleanups++; await new Promise(resolve => { finishCleanup = resolve; cleanupStarted.resolve(); }); return true; },
+  }) };
+  f.work.setPrompt('Prepare the document');
+  const running = f.work.run();
+  await cleanupStarted.promise;
+  assert.equal(f.saved().chat.at(-1).status, 'stopped');
+  assert.match(archived.at(-1).uploadCleanupWarning, /not been confirmed/);
+  finishCleanup();
+  await running;
+  assert.equal(cleanups, 1);
+  assert.equal(f.calls(), 1);
+  assert.equal(archived.at(-1).status, 'stopped');
+  assert.equal(archived.at(-1).uploadCleanupWarning, undefined);
+  assert.equal(f.saved().chat.at(-1).uploadCleanupWarning, undefined);
+  assert.equal(f.work.canContinue, false);
+});
+test('Finish here reports a local save failure without waiting for network cleanup', async () => {
+  const f = fixture();
+  await f.work.initialize();
+  f.work.maximum = 1;
+  f.work.attachments = [{ id: crypto.randomUUID(), name: 'fixture.jpg', extension: 'jpg', kind: 'image', mime: 'image/jpeg', bytes: 6, sha256: 'a'.repeat(64) }];
+  const cleanup = deferred(), correctedArchive = deferred();
+  const archived = [];
+  f.options.storage.saveChat = async turn => {
+    archived.push(structuredClone(turn));
+    if (turn.status === 'stopped' && !turn.uploadCleanupWarning) correctedArchive.resolve();
+  };
+  f.options.attachments = { forTask: () => ({
+    hasUploads: true,
+    prepare: async () => ({ parts: [{ type: 'input_image', file_id: 'file-test' }], fileIds: ['file-test'] }),
+    cleanup: () => cleanup.promise,
+  }) };
+  f.work.setPrompt('Prepare the document');
+  await f.work.run();
+  const save = f.options.storage.save;
+  f.options.storage.save = async () => { throw Error('Fixture storage unavailable'); };
+  assert.equal(await f.work.finishHere(), false);
+  assert.equal(f.work.busy, false);
+  assert.match(f.work.message, /could not be saved locally/);
+  assert.match(archived.at(-1).uploadCleanupWarning, /not been confirmed/);
+  const correctedWorkspace = deferred();
+  f.options.storage.save = async value => { await save(value); correctedWorkspace.resolve(); };
+  cleanup.resolve(true);
+  await Promise.all([correctedArchive.promise, correctedWorkspace.promise]);
+  assert.equal(f.saved().chat.at(-1).status, 'stopped');
+  assert.equal(f.saved().chat.at(-1).uploadCleanupWarning, undefined);
+  assert.equal(f.calls(), 1);
 });
 test('a no-search instruction in Expanded also removes earlier web-derived context before dispatch',async()=>{
  const f=fixture();f.options.storage.load=async()=>({previous:[{request:'Research',answer:'PRIOR_WEB_CONTEXT',sourceMode:'expanded'}]});await f.work.initialize();f.work.sourceMode='expanded';f.work.setPrompt('Translate supplied news; do not search the web.');await f.work.review();
