@@ -361,9 +361,9 @@ export function renderCalendarWorkspacePanel(el: HTMLElement, model: CalendarWor
   const capabilities = model.capabilities ?? model.delivery?.capabilities;
   let selection = model.selection;
   const manual = model.manual === true;
-  hint(parent, manual
-    ? "Put your saved request in the Yoofloe Calendar Inbox on Android. Approve it in Calendar, then import the reply here."
-    : "Choose what Calendar may look up, then approve the search in Calendar. The lookup runs on this device.");
+  if (manual) {
+    hint(parent, "Put the request in the Yoofloe Calendar Inbox on Android. Open and approve it from Calendar’s plugin details, then import the reply here.");
+  }
   if (model.message) parent.createEl("p", { cls: "y-ai-status", text: model.message, attr: { role: "status" } });
 
   const topic = field(parent, "Search terms (optional)").createEl("input", { type: "text", attr: { "aria-label": "Search terms (optional)" } });

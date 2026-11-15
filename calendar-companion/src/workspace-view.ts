@@ -765,6 +765,12 @@ export class YoofloeAiView extends ItemView {
         this.contentEl.querySelector<HTMLButtonElement>('[data-context-app="' + app.key + '"]')?.focus({ preventScroll: true });
       });
     }
+    const connectionGuide = Platform.isAndroidApp
+      ? "Use Obsidian and the selected app on the same Android phone or tablet. Approve each lookup in the app."
+      : Platform.isDesktopApp
+        ? "The apps run on Android phones and tablets. Exchange request and reply files with this computer."
+        : "Use Obsidian on Android for app connections.";
+    group.createEl("p", { cls: "y-ai-hint y-ai-app-context-guide", text: connectionGuide });
     if (!open) return;
     const body = group.createDiv({ cls: "y-ai-app-context-body", attr: { role: "region", "aria-label": open.name } });
     if (open.key === "calendar") this.calendarPanel(body);
@@ -838,7 +844,7 @@ export class YoofloeAiView extends ItemView {
   private calendarPanel(calendar: HTMLElement): void {
     const w = this.work;
     if (Platform.isAndroidApp) {
-      calendar.createEl("p", { text: "Find records locally in Calendar. Review the returned excerpts before sharing them with OpenAI.", cls: "y-ai-hint" });
+      calendar.createEl("p", { text: "If prompted, choose this vault’s Yoofloe Calendar Inbox. Review returned excerpts here before sharing them with OpenAI.", cls: "y-ai-hint" });
       if (!w.requestId) {
         const query = calendar.createEl("textarea", { text: w.calendarQuestion, attr: { rows: "2", placeholder: "E.g. Study and project plans for next week", "aria-label": "Calendar question" } }); query.disabled = w.settingsLocked;
         query.addEventListener("input", () => { w.calendarQuestion = query.value; });

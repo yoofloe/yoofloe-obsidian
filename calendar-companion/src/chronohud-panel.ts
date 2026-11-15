@@ -125,7 +125,7 @@ export function renderChronoHudPanel(el: HTMLElement, model: ChronoHudPanelModel
   let draft = model.draft;
   hint(parent, model.manual
     ? "Open the saved request from About in ChronoHUD on Android. Approve it there, then import the reply here."
-    : "Choose what to look up, then review and approve the export in ChronoHUD on this device.");
+    : "In ChronoHUD, choose the ChronoHUD Inbox folder inside this vault and review the excerpts.");
   if (model.message) parent.createEl("p", { cls: "y-ai-status", text: model.message, attr: { role: "status" } });
 
   const areas = parent.createDiv({ cls: "y-ai-models", attr: { role: "group", "aria-label": "ChronoHUD areas" } });
