@@ -68,7 +68,7 @@ function makeFixture() {
       assert(!raw.includes(eventId) && !raw.includes(studyId) && !raw.includes("WITHHOLD THIS EXCERPT"));
       assert.deepEqual(body.tools.map(x=>x.name),["draft_calendar_workspace_changes"]);
       assert(raw.includes("APPROVED EXCERPT"));
-      if(transport.length===1)return modelPacket([call([{kind:"study_session",action:"update",record:"C1",valuesJson:'{"title":"Edited synthetic session"}'}])]);
+      if(transport.length===1)return modelPacket([call([{kind:"study_session",action:"update",record:"C2",valuesJson:'{"title":"Edited synthetic session"}'}])]);
       return modelPacket([message("Review in Calendar.")]);
     },
   };
@@ -95,6 +95,7 @@ test("V5 workspace proposal shares selected excerpts, persists a scoped draft, a
   w.setPrompt("Update my included study session title");
   await w.review();
   assert(w.preview.includes("APPROVED EXCERPT") && !w.preview.includes("WITHHOLD THIS EXCERPT"));
+  assert.deepEqual(JSON.parse(w.preview).calendar_records.map(record => record.reference), ["C2"]);
   await w.run();
   assert.equal(data.requests,2);
   assert.equal(w.workspaceCalendarChanges.state.status,"draft");

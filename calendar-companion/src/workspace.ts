@@ -30,7 +30,7 @@ import { CalendarWorkspaceAccess } from "./calendar-workspace-access";
 import { readCalendarWorkspaceChangeDraft, type CalendarWorkspaceChangeDraft, type CalendarWorkspaceChangeReply } from "./calendar-workspace-change";
 import type { CalendarWorkspaceChangeSession } from "./calendar-workspace-change-session";
 import type { CalendarWorkspaceLookupSession } from "./calendar-workspace-lookup-session";
-import type { WorkspaceLookupDelivery } from "./calendar-workspace-query";
+import { workspaceExcerptReference, type WorkspaceLookupDelivery } from "./calendar-workspace-query";
 import { validateCalendarWorkspaceOperation } from "./calendar-workspace-catalog";
 import { prepareCalendarWorkspaceDraft, workspaceDraftTool } from "./calendar-workspace-draft";
 
@@ -658,7 +658,7 @@ export class AiWorkspace {
         const occurrence = origin ? { originalStart: origin.originalStart, timeBasis: origin.timeBasis,
           timezone: origin.timezone, originalOffset: origin.originalOffset } : null;
         return {
-          reference: "C" + (index + 1), kind: record.kind, title: record.title, date: record.date, text: record.text,
+          reference: workspaceExcerptReference(lookup, index), kind: record.kind, title: record.title, date: record.date, text: record.text,
           state: record.state, details: occurrence ? { ...details, origin: occurrence } : details,
         };
       }),

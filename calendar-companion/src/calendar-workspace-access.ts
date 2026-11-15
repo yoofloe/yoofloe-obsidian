@@ -129,7 +129,12 @@ export class CalendarWorkspaceAccess {
 
   modelDelivery(): WorkspaceLookupDelivery {
     const full = this.currentDelivery();
-    return this.included ? { ...full, records: full.records.filter((_, i) => this.included?.has(i)) } : full;
+    const included = this.included;
+    if (!included) return full;
+    return {
+      ...full, records: full.records.filter((_, i) => included.has(i)),
+      excerptReferences: full.records.map((_, i) => "C" + (i + 1)).filter((_, i) => included.has(i)),
+    };
   }
   selectionIdentity(): string | null {
     return this.verified ? JSON.stringify([this.verified.requestId, this.excerptsEnabled, [...this.included ?? []]]) : null;

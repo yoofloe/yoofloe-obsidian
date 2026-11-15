@@ -1,4 +1,5 @@
 import { setIcon } from "obsidian";
+import { workspaceExcerptReference } from "./calendar-workspace-query";
 import { buildCalendarInsights, type CalendarInsightEntry, type CalendarInsights } from "./calendar-insights";
 import type {
   WorkspaceCapabilities, WorkspaceFilters, WorkspaceFolderKind, WorkspaceLookupDelivery, WorkspaceRecordDetails,
@@ -326,7 +327,7 @@ function renderDelivery(parent: HTMLElement, model: CalendarWorkspacePanelModel)
   }
   let selectedCount = 0;
   for (const [index, record] of delivery.records.entries()) {
-    const reference = "C" + (index + 1);
+    const reference = workspaceExcerptReference(delivery, index);
     const { body: source } = section(body, sourceKey + reference, reference + " · " + (record.title.trim() || "Untitled"),
       model.openSections);
     const metadata = [recordLabel(record.kind), record.date,
@@ -337,8 +338,6 @@ function renderDelivery(parent: HTMLElement, model: CalendarWorkspacePanelModel)
     if (model.setIncluded) toggle(source, "Include excerpt " + reference, selected, !!model.locked || !!model.pending, checked => {
       model.setIncluded?.(index, checked);
     });
-    if (selected && model.excerptsEnabled && selectedCount !== index + 1)
-      hint(source, "Reference in the OpenAI request · C" + selectedCount);
     if (record.text) source.createEl("pre", { text: record.text });
     renderRecordDetails(source, record.details);
   }

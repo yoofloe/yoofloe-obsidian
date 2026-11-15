@@ -68,6 +68,11 @@ export interface WorkspaceLookupDelivery {
   context: QuestionContext | null;
   records: WorkspaceRecord[];
   capabilities: WorkspaceCapabilities;
+  /** Local projection of the original source labels. The native reply schema excludes it. */
+  excerptReferences?: readonly string[];
+}
+export function workspaceExcerptReference(delivery: WorkspaceLookupDelivery, index: number): string {
+  return delivery.excerptReferences?.[index] ?? "C" + (index + 1);
 }
 export type WorkspaceQueryRequest = Omit<ReturnType<typeof createRequest>, "version"> & {
   version: 5; vaultId: string; query: WorkspaceQuery;

@@ -289,3 +289,12 @@ test("links to recurrence accept only occurrences supplied by the reviewed serie
   await assert.rejects(prepare(delivery, change("project_link", "link", null,
     { source: "C3", target: { record: "C1", occurrence: { ...occurrence, originalStart: "2031-06-17" } } })), /Look up the selected occurrence/);
 });
+
+test("excluded excerpts keep the original C labels for destructive proposals", async () => {
+  const second = record("note", 2), third = record("note", 3);
+  const delivery = { ...lookup({ records: [second,third], writeKinds: [write("note",["delete"])] }),
+    excerptReferences: ["C2","C3"] };
+  const {draft} = await prepare(delivery, change("note","delete","C2"));
+  assert.deepEqual(draft.operations[0].target, { id: second.sourceId, revision: second.revision });
+  await assert.rejects(prepare(delivery, change("note","delete","C1")), /approved Calendar lookup/);
+});

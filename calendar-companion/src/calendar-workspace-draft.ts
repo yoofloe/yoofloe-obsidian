@@ -8,7 +8,7 @@ import {
   prepareCalendarWorkspaceValues, validateCalendarWorkspaceOperation,
   type CalendarWorkspaceAction, type CalendarWorkspaceProposalScope,
 } from "./calendar-workspace-catalog";
-import { workspaceKindAllowed, type WorkspaceLookupDelivery, type WorkspaceOccurrence, type WorkspaceRecord } from "./calendar-workspace-query";
+import { workspaceExcerptReference, workspaceKindAllowed, type WorkspaceLookupDelivery, type WorkspaceOccurrence, type WorkspaceRecord } from "./calendar-workspace-query";
 import type { RecordKind } from "./record-types";
 
 const fields = ["kind", "action", "record", "valuesJson"];
@@ -87,7 +87,7 @@ export function workspaceDraftTool(lookup: WorkspaceLookupDelivery) {
 function resolveReference(value: unknown, lookup: WorkspaceLookupDelivery, kinds: readonly RecordKind[]): WorkspaceRecord {
   if (typeof value !== "string" || !/^C[1-9]\d{0,5}$/.test(value) || lookup.query.mode !== "records")
     throw Error("Choose a C reference from the current Calendar lookup.");
-  const record = lookup.records[Number(value.slice(1)) - 1];
+  const record = lookup.records.find((_, index) => workspaceExcerptReference(lookup, index) === value);
   if (!record || !kinds.includes(record.kind) || !approvedRecord(record, lookup))
     throw Error("Choose a matching record from the approved Calendar lookup.");
   return record;
