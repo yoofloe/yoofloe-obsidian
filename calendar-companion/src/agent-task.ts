@@ -73,6 +73,7 @@ export class AgentTask {
   private steerInputs = new Map<string, { text: string; attachments?: AttachmentRun; parts?: Record<string, unknown>[] }>();
   private stopDeferredCleanup = false;
   private listeners = new Set<() => void>();
+  private stagedCalendarProposal = false;
   constructor(private readonly options: {
     current(): boolean; preserve?(): boolean; key(): Promise<string | null>; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse;
     steerStatus?(note: SteerNote, status: SteerStatus): void;
@@ -81,6 +82,7 @@ export class AgentTask {
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   get durationMs(): number { return this.workedMs + (this.activeSince === null ? 0 : Math.max(0, Date.now() - this.activeSince)); }
   get draftingCalendar() { return !!this.options.calendarDraft; }
+  get hasStagedCalendarProposal() { return this.stagedCalendarProposal; }
   private update(kind: ActivityKind, text: string, state: ActivityState = kind === "blocked" ? "blocked" : kind === "request" ? "working" : "done"): void {
     text = workText(text);
     if (kind !== "summary") this.message = text;
@@ -208,6 +210,7 @@ export class AgentTask {
     this.attachmentsReady = false; this.fileIds = []; this.transcriptions = 0; this.fileWarnings = []; this.uploadCleanupWarning = "";
     this.autoCompact = context?.autoCompact === true && !!findOpenAiModel(model.model);
     this.compaction = null;
+    this.stagedCalendarProposal = false;
     this.initialItem = { role: "user", content: input };
     this.items = [...context?.items ?? [], this.initialItem];
     this.requests = 0; this.calls.clear(); this.text = ""; this.events = []; this.eventId = 0; this.workedMs = 0; this.steerNotes = []; this.usage = { input: 0, output: 0, reasoning: 0 };
@@ -338,6 +341,7 @@ export class AgentTask {
                 throw Error("This task can only draft Calendar proposals.");
               const outcome = this.options.calendarDraft ?
                 await this.options.calendarDraft.draft(args) : await this.options.executor.execute(call.name, args);
+              if (this.draftingCalendar) this.stagedCalendarProposal = true;
               result = JSON.stringify(outcome);
               safeOutbound(result);
               this.update("tool", toolResult(label, outcome));

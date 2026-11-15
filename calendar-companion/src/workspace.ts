@@ -1028,7 +1028,7 @@ export class AiWorkspace {
     if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
     if (this.source && agent.policy.selection) { this.source.selection = { ...agent.policy.selection }; this.source.selectionVersion = agent.policy.selectionVersion; }
     const hasConfirmedChanges = agent.operations.some(op => op.status === "done");
-    if (task.draftingCalendar && (this.calendarChanges.state?.status === "draft" || this.workspaceCalendarChanges.state?.status === "draft") && task.state !== "paused") this.prompt = "";
+    if (task.hasStagedCalendarProposal && task.state !== "paused") this.prompt = "";
     else if (!task.draftingCalendar && !this.activeQueueId && !task.fileWarnings.length && (hasConfirmedChanges && task.state !== "paused" ||
         task.state === "completed" && (task.text || task.generated.length > 0) || task.state === "stopped" && task.text)) {
       this.prompt = ""; this.attachments = [];

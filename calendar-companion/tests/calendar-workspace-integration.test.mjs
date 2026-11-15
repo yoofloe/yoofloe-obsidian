@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { AiWorkspace } from "../dist/workspace.js";
+import { createCalendarChangeDraft } from "../dist/calendar-change.js";
 
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/calendar-workspace-lookup-v5.json", import.meta.url), "utf8"));
 const vaultId = "815b9a69-7a8f-496d-abcb-2699e5481d75";
@@ -58,7 +59,7 @@ function makeFixture() {
   const originalNote = {path:"Original.md", title:"Original", size:16, identity:{}};
   const options = {
     current:()=>true, configDir:".obsidian", gate:{busy:false}, inboxHint:()=>"",
-    workspaceLookup:()=>lookup, workspaceChange:()=>bridge,
+    calendarChange:()=>({}), workspaceLookup:()=>lookup, workspaceChange:()=>bridge,
     host:()=>({files:()=>[originalNote],read:async()=>{throw Error("Do not read vault notes in proposal mode");}}),
     preferences:{read:async()=>({model:"gpt-6-luna",effort:"none"}),hasKey:async()=>true,key:async()=>"sk-synthetic-agent-key",vaultId:async()=>vaultId},
     storage:{load:async()=>null,save:async value=>{saved=structuredClone(value);},history:async()=>[]},
@@ -161,4 +162,24 @@ test("Review of an approved recurring event shows only temporal origin details i
   assert(!raw.includes(seriesId) && !raw.includes(eventId));
   assert.deepEqual(record.details.origin,{originalStart:"2031-06-03",timeBasis:"DATE"});
   assert.equal(record.reference,"C1");
+});
+
+
+test("an older v4 proposal cannot clear a v5 draft that staged no new change", async()=>{
+  const {work:w,options}=makeFixture();
+  options.transport=async()=>modelPacket([message("Which date should I use?")]);
+  await w.initialize();
+  const oldDraft=await createCalendarChangeDraft([{
+    opId:crypto.randomUUID(),kind:"task",action:"create",target:null,values:{title:"Older draft"}
+  }],null);
+  await w.calendarChanges.stage(oldDraft,{},()=>true);
+  const access=w.workspaceCalendar;
+  assert(await access.open("capabilities"));
+  await access.receive(access.requestId);
+  w.setWorkspaceCalendarDraft(true);
+  w.setPrompt("Draft a new task after the old proposal.");
+  await w.run();
+  assert.equal(w.calendarChanges.state.draft.proposalId,oldDraft.proposalId);
+  assert.equal(w.workspaceCalendarChanges.state,null);
+  assert.equal(w.prompt,"Draft a new task after the old proposal.");
 });
