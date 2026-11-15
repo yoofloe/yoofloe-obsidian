@@ -124,7 +124,7 @@ export function renderChronoHudPanel(el: HTMLElement, model: ChronoHudPanelModel
   const editingLocked = locked || !!model.pending;
   let draft = model.draft;
   hint(parent, model.manual
-    ? "Open the saved request on Android and approve it in ChronoHUD. Import the reply here and delete the request copy after use."
+    ? "Open the saved request from About in ChronoHUD on Android. Approve it there, then import the reply here."
     : "Choose what to look up, then review and approve the export in ChronoHUD on this device.");
   if (model.message) parent.createEl("p", { cls: "y-ai-status", text: model.message, attr: { role: "status" } });
 

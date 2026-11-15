@@ -187,7 +187,8 @@ record can prevent undo. Full-record Markdown snapshot import without AI remains
 
 ### Calendar workspaces
 
-With Calendar **1.8.14+**, open **Calendar workspaces** and check the app's capabilities. Choose workspaces, record types
+With Calendar **1.8.14+**, open **Workspace settings → App context → Yoofloe Calendar** and check the app's capabilities.
+On Android, use **Calendar workspaces** for these expanded controls. Choose workspaces, record types
 and dates. Archive, Trash, financial records and attachment metadata have separate controls. Review the local summary
 and select the excerpts to include in your message. The original source labels stay stable when you deselect excerpts.
 

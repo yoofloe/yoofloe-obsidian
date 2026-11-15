@@ -267,16 +267,26 @@
 .yoofloe-ai .y-ai-setting-copy { display:flex; flex:1; flex-direction:column; min-width:0; gap:2px; }
 .yoofloe-ai .y-ai-setting-copy strong { font-size:var(--font-ui-small); font-weight:600; color:var(--text-normal); white-space:nowrap; }
 .yoofloe-ai .y-ai-setting-copy small { display:block; font-size:var(--font-ui-smaller); color:var(--text-muted); line-height:1.35; white-space:normal; overflow-wrap:anywhere; }
-.yoofloe-ai .y-ai-settings-grid summary, .yoofloe-ai .y-ai-calendar-setting summary, .yoofloe-ai .y-ai-settings-secondary summary { display:flex; align-items:center; gap:7px; list-style:none; min-height:38px; }
-.yoofloe-ai .y-ai-settings-grid summary::marker, .yoofloe-ai .y-ai-calendar-setting summary::marker, .yoofloe-ai .y-ai-settings-secondary summary::marker { content:""; }
+.yoofloe-ai .y-ai-settings-grid summary, .yoofloe-ai .y-ai-app-context-body summary, .yoofloe-ai .y-ai-settings-secondary summary { display:flex; align-items:center; gap:7px; list-style:none; min-height:38px; }
+.yoofloe-ai .y-ai-settings-grid summary::marker, .yoofloe-ai .y-ai-app-context-body summary::marker, .yoofloe-ai .y-ai-settings-secondary summary::marker { content:""; }
 .yoofloe-ai .y-ai-setting-icon, .yoofloe-ai .y-ai-setting-chevron { display:flex; flex:0 0 16px; color:var(--text-muted); }
 .yoofloe-ai .y-ai-setting-icon svg, .yoofloe-ai .y-ai-setting-chevron svg { width:16px; height:16px; }
 .yoofloe-ai .y-ai-setting-chevron { flex-basis:12px; }
 .yoofloe-ai .y-ai-setting-chevron svg { width:12px; height:12px; }
 .yoofloe-ai details[open] > summary .y-ai-setting-chevron { transform:rotate(180deg); }
-.yoofloe-ai .y-ai-calendar-setting { margin:3px 0; padding:5px 2px; }
-.yoofloe-ai .y-ai-calendar-setting summary .y-ai-setting-copy { flex-direction:row; align-items:center; gap:6px; flex-wrap:wrap; }
-.yoofloe-ai .y-ai-calendar-setting summary small { font-size:var(--font-ui-smaller); }
+.yoofloe-ai .y-ai-app-context { min-width:0; margin-block:8px; padding-block:4px 8px; border-bottom:1px solid var(--background-modifier-border); }
+.yoofloe-ai .y-ai-app-context-title { margin:0 0 6px; color:var(--text-muted); font-size:var(--font-ui-smaller); font-weight:600; }
+.yoofloe-ai .y-ai-app-context-buttons { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,8em),1fr)); gap:6px; }
+.yoofloe-ai .y-ai-app-context-button { display:flex; gap:6px; align-items:center; justify-content:flex-start; min-width:0; min-height:34px; height:auto; padding:5px 7px; text-align:start; white-space:normal; }
+.yoofloe-ai .y-ai-app-context-name { flex:1; min-width:0; }
+.yoofloe-ai .y-ai-app-context-button[aria-expanded="true"] { background:var(--background-modifier-hover); }
+.yoofloe-ai .y-ai-app-context-button[aria-expanded="true"] .y-ai-setting-chevron { transform:rotate(180deg); }
+.yoofloe-ai .y-ai-app-context-body { min-width:0; padding:2px 1px 0; }
+.yoofloe-ai .y-ai-app-context-footer { display:flex; justify-content:flex-end; margin-top:8px; }
+.yoofloe-ai .y-ai-app-context-footer a { display:inline-flex; align-items:center; gap:4px; color:var(--text-muted); font-size:var(--font-ui-smaller); text-decoration:none; }
+.yoofloe-ai .y-ai-app-context-footer a:is(:hover,:focus-visible) { color:var(--text-normal); text-decoration:underline; }
+.yoofloe-ai .y-ai-app-context-footer a span { display:flex; }
+.yoofloe-ai .y-ai-app-context-footer a svg { width:13px; height:13px; }
 .yoofloe-ai .y-ai-settings-secondary { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,7em),1fr)); font-size:var(--font-ui-smaller); gap:4px 8px; margin-block:4px; }
 .yoofloe-ai .y-ai-settings-secondary > .y-ai-details { border:0; padding:3px 0; }
 .yoofloe-ai .y-ai-settings-secondary > .y-ai-details[open] { grid-column:1/-1; border-bottom:1px solid var(--background-modifier-border); padding-bottom:8px; }

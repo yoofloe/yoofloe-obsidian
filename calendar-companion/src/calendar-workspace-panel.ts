@@ -362,7 +362,7 @@ export function renderCalendarWorkspacePanel(el: HTMLElement, model: CalendarWor
   let selection = model.selection;
   const manual = model.manual === true;
   hint(parent, manual
-    ? "Save a request file and put it in the Yoofloe Calendar Inbox. Approve the request in Calendar, then import the reply here. Remove your exported request copy after use."
+    ? "Put your saved request in the Yoofloe Calendar Inbox on Android. Approve it in Calendar, then import the reply here."
     : "Choose what Calendar may look up, then approve the search in Calendar. The lookup runs on this device.");
   if (model.message) parent.createEl("p", { cls: "y-ai-status", text: model.message, attr: { role: "status" } });
 
