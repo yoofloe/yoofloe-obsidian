@@ -270,7 +270,7 @@ export class YoofloeAiView extends ItemView {
       if (turn.attachments?.length) { const files = user.createDiv({ cls: "y-ai-sent-files" }); for (const file of turn.attachments) files.createSpan({ text: file.name, cls: "y-ai-sent-file" }); this.button(files, "Attach again", () => w.useAttachments(turn.attachments!), w.settingsLocked); }
       if (turn.reference) {
         const reference = turn.reference;
-        const source = this.button(user, selectionLabel(reference), () => new ReferenceModal(this.app, w, reference, this.showFollowUp).open(), false, "y-ai-sent-reference");
+        const source = this.button(user, selectionLabel(reference), () => new ReferenceModal(this.app, w, reference, this.showFollowUp, turn.referenceSnapshot).open(), false, "y-ai-sent-reference");
         setTooltip(source, "View the reference used for this message");
       }
     }
@@ -447,6 +447,7 @@ export class YoofloeAiView extends ItemView {
   }
   private updateWorkHeading(metadata: HTMLElement, turn: ChatTurn): void {
     const label = turn.status === "running" && this.work.stopping ? "Stopping…" :
+      turn.status === "paused" && turn.pausedForInput ? "Paused at input verification" :
       turn.status === "failed" && confirmedChangeCount(turn) > 0 ? "Changes saved · Could not finish" : WORK_STATUS[turn.status];
     metadata.querySelector(".y-ai-work-label")?.setText(label);
     metadata.querySelector(".y-ai-work-mode")?.setText(turn.sourceMode === "expanded" ? "Expanded" : "Provided only");

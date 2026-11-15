@@ -19,7 +19,7 @@ import type { SteerNote } from "./work-activity";
 import { conversationName, newConversationRecord, readLibrary, turnConversation, MAX_CONVERSATIONS, MAX_FOLDERS, type Conversation, type ConversationLibrary } from "./conversation-library";
 import { conversationContext, readCheckpoint, validContextScope, type ConversationCheckpoint } from "./conversation-context";
 import { findOpenAiModel } from "./openai-models";
-import { captureSelectionReference, readSelectionReference, selectionText, type SelectionReference } from "./selection-reference";
+import { captureSelectionReference, readSelectionReference, sameReference, selectionText, type ReferenceSnapshot, type SelectionReference } from "./selection-reference";
 import { estimateInput, type InputBudget } from "./input-budget";
 import { agentTools } from "./agent-protocol";
 
@@ -442,6 +442,7 @@ export class AiWorkspace {
     if (!this.canChangeReference || expectedRevision !== this.referenceEpoch) return false;
     const value = readSelectionReference(reference);
     if (!value || !validTaskPath(this.policy(), value.path)) { this.message = "This note cannot be attached as a reference."; this.changed(); return false; }
+    if (this.reference && sameReference(this.reference, value)) return true;
     if (this.reference && this.reference.id !== value.id) {
       const previous = this.reference.id;
       if (!this.editingFollowUpId) this.attachments = this.attachments.filter(file => file.referenceId !== previous);
@@ -525,7 +526,7 @@ export class AiWorkspace {
     const turn: PreviousTurn = { request: this.lastRequest, answer: this.result, sourceMode: this.task?.sourceMode ?? "provided", contextScope };
     if (this.previous.at(-1)?.request !== turn.request || this.previous.at(-1)?.answer !== turn.answer) this.previous = [...this.previous, turn].slice(-2);
   }
-  private async prepare(agent: VaultAgent, request = this.prompt, attachments = this.attachments, reference = this.reference, deferNoteRead = this.deferNoteRead): Promise<{ input: string; sourceMode: SourceMode; scope: string | null; context: Record<string, unknown>[] }> {
+  private async prepare(agent: VaultAgent, request = this.prompt, attachments = this.attachments, reference = this.reference, deferNoteRead = this.deferNoteRead): Promise<{ input: string; sourceMode: SourceMode; scope: string | null; context: Record<string, unknown>[]; snapshot?: ReferenceSnapshot }> {
     const selectedReference = reference ? await agent.addReference(reference) : null;
     const note = await agent.initialContext(deferNoteRead); if (!this.current) throw Error("Vault changed.");
     const pastedTextIsRequest = !request.trim() && attachments.some(file => file.pastedText);
@@ -551,7 +552,8 @@ export class AiWorkspace {
     const historyAllowance = Math.min(192 * 1024, MAX_AI_INPUT_BYTES - currentBytes - 128 * 1024);
     const context = extended ? conversationContext(this.chat, scope, this.checkpoint, historyAllowance) : [];
     const input = JSON.stringify(context.length ? { ...data, previous_turns: [] } : data);
-    safeOutbound(input); return { input, sourceMode, scope, context };
+    safeOutbound(input);
+    return { input, sourceMode, scope, context, ...(selectedReference ? { snapshot: { text: selectedReference.text, partial: selectedReference.next_cursor !== null } } : {}) };
   }
   private contextScope(policy: TaskPolicy, mode: SourceMode, model: string, reference: SelectionReference | null, deferNoteRead: boolean): Promise<string> {
     const base = [this.library.active, policy, mode, model];
@@ -792,7 +794,7 @@ export class AiWorkspace {
       this.rememberLast();
       const access = this.followUpAccess();
       const agent = new VaultAgent(this.options.host(current), this.policy(), current);
-      const { input, sourceMode, scope, context } = await this.prepare(agent, request, attachments, reference, deferNoteRead);
+      const { input, sourceMode, scope, context, snapshot } = await this.prepare(agent, request, attachments, reference, deferNoteRead);
       if (current()) {
         await this.persist(); // Preserve the draft and a queue claim before a billable request.
         if (current()) {
@@ -804,6 +806,7 @@ export class AiWorkspace {
           this.touchConversation(conversationName(request) || this.title);
           const turn: ChatTurn = { id: this.activeChatId, conversationId: this.library.active, contextScope: scope, request: request.trim(), answer: "", startedAt: Date.now(), model: this.model.model, status: "running", requests: 0, inputTokens: 0, outputTokens: 0, actions: [], attachments: [...attachments], sourceMode };
           if (reference) turn.reference = reference;
+          if (snapshot) turn.referenceSnapshot = snapshot;
           this.chat = [...this.chat, turn].slice(-CHAT_HISTORY_LIMIT);
           const unsubscribe = this.watchTask(task);
           try { await task.run(input, { ...this.model }, this.mode, this.maximum, { mode: sourceMode, maximum: this.onlineMaximum }, this.source?.path, { autoCompact: this.autoCompact, items: context }); }
@@ -883,6 +886,7 @@ export class AiWorkspace {
     turn.transcriptions = task.transcriptions; turn.fileWarnings = [...task.fileWarnings];
     turn.uploadCleanupWarning = task.uploadCleanupWarning || undefined;
     turn.durationMs = task.durationMs;
+    turn.pausedForInput = task.pausedForInput || undefined;
     turn.readCoverage = agent.readCoverage;
     turn.activity = [...task.events];
     turn.steers = [...task.steerNotes];

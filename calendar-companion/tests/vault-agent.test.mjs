@@ -157,6 +157,29 @@ test('reading-view reference tools only reveal the quoted selection', async () =
   assert.deepEqual(outline.headings.map(heading=>heading.text),['# Selected heading']);
   await assert.rejects(f.agent.execute('apply_changes',{changes:[{reference:ref.reference,version:ref.version,action:'replace_selection',markdown:'No'}]}),/scope/);
 });
+test('selected outline line numbers can be used to read the original note range', async () => {
+  const prefix = 'Title\n\nAnother section\n\n';
+  const selection = '## Target\nText in selected passage.\n';
+  const f = fixture({ 'Notes/Plan.md': prefix + selection + '\nPrivate tail' });
+  const note = await f.agent.initialContext();
+  const ref = await f.agent.addReference({ id: crypto.randomUUID(), path: note.path, version: note.version, from: prefix.length, to: prefix.length + selection.length, firstLine: 5, lastLine: 6 });
+  const outline = await f.agent.execute('read_outline', { reference: ref.reference });
+  assert.deepEqual(outline.headings, [{ line: 5, text: '## Target' }]);
+  const result = await f.agent.execute('read_notes', { notes: [{ reference: ref.reference, from_line: outline.headings[0].line, through_line: 6 }] });
+  assert.equal(result.notes[0].text, selection);
+});
+test('whole-note and bounded replacements preserve the original trailing line breaks', async () => {
+  const whole = fixture({ 'Notes/Plan.md': 'Before\n\n' });
+  const full = await whole.agent.initialContext();
+  await whole.agent.execute('apply_changes', { changes: [{ reference: full.reference, version: full.version, action: 'replace', markdown: 'Updated' }] });
+  assert.equal(whole.files.get('Notes/Plan.md').text, 'Updated\n\n');
+
+  const f = fixture({ 'Notes/Plan.md': '# Title\n\nOld paragraph\n\n## Next heading\n' });
+  await f.agent.initialContext();
+  const read = await f.agent.execute('read_notes', { notes: [{ reference: 'N1', from_line: 3, through_line: 4 }] });
+  await f.agent.execute('apply_changes', { changes: [{ reference: 'N1', version: read.notes[0].version, action: 'replace_selection', markdown: 'Updated' }] });
+  assert.equal(f.files.get('Notes/Plan.md').text, '# Title\n\nUpdated\n\n## Next heading\n');
+});
 test('create collision, excluded secrets, corrupted backups and uncertain journals cannot overwrite an original', async () => {
   const f = fixture();
   await assert.rejects(f.agent.execute('create_note', { path: 'Notes/Plan.md', markdown: 'Bad' }), /exists/);

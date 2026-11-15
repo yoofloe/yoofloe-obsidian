@@ -3,7 +3,7 @@ import { readGeneratedFiles, type GeneratedFile } from "./generated-files";
 import { readAttachments, type Attachment } from "./attachments";
 import { readActivity, readSteerNotes, workText, type SteerNote, type WorkEvent } from "./work-activity";
 import { validContextScope } from "./conversation-context";
-import { readSelectionReference, type SelectionReference } from "./selection-reference";
+import { readSelectionReference, type ReferenceSnapshot, type SelectionReference } from "./selection-reference";
 import { containsCredential } from "./agent-policy";
 import type { ReadCoverage } from "./vault-agent";
 export interface ChatAction { kind: string; path: string; target?: string }
@@ -17,6 +17,8 @@ export interface ChatTurn {
   sourceMode?: SourceMode; sources?: WebSource[]; online?: OnlineUsage; generated?: GeneratedFile[];
   attachments?: Attachment[]; transcriptions?: number; fileWarnings?: string[];
   reference?: SelectionReference;
+  referenceSnapshot?: ReferenceSnapshot;
+  pausedForInput?: boolean;
   readCoverage?: ReadCoverage[];
   uploadCleanupWarning?: string;
   generatedTruncated?: boolean;
@@ -40,14 +42,17 @@ function referencePreview(reference: SelectionReference): SelectionReference {
   return { ...preview, needsReview: true };
 }
 export function chatPreview(turn: ChatTurn): ChatTurn {
+  const excerpt = turn.referenceSnapshot;
+  const limited = !!excerpt && excerpt.text.length > 4096;
   return { ...turn, request: turn.request.slice(0, 4000), answer: turn.answer.slice(0, 16000), actions: turn.actions.slice(-100), generated: turn.generated?.slice(0, 16), generatedTruncated: !!turn.generatedTruncated || (turn.generated?.length ?? 0) > 16,
     ...(turn.reference ? { reference: referencePreview(turn.reference) } : {}),
+    ...(limited ? { referenceSnapshot: { text: excerpt.text.slice(0, 4096).replace(/[\uD800-\uDBFF]$/, ""), partial: true } } : {}),
     activity: turn.activity?.slice(-24).map(event => ({ ...event, text: event.text.slice(0, 360) })),
     steers: turn.steers?.slice(-5).map(note => ({ ...note, text: note.text.slice(0, 1000), ...(note.context?.reference?.quote ?
       { context: { ...note.context, reference: referencePreview(note.context.reference) } } : {}) })),
     workDetailsTruncated: !!turn.workDetailsTruncated || (turn.activity?.length ?? 0) > 24 || (turn.steers?.length ?? 0) > 5 ||
       !!turn.activity?.some(event => event.text.length > 360) || !!turn.steers?.some(note => note.text.length > 1000 || note.context?.reference?.quote) ||
-      !!turn.reference?.quote,
+      !!turn.reference?.quote || limited,
     requestTruncated: !!turn.requestTruncated || turn.request.length > 4000, answerTruncated: !!turn.answerTruncated || turn.answer.length > 16000 };
 }
 export function readChat(value: unknown): ChatTurn | null {
@@ -57,6 +62,9 @@ export function readChat(value: unknown): ChatTurn | null {
   const status = ["running", "paused", "completed", "stopped", "failed"].includes(String(v.status)) ? v.status as ChatTurn["status"] : "stopped";
   const count = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : 0;
   const reference = readSelectionReference(v.reference);
+  const snapshot = v.referenceSnapshot && typeof v.referenceSnapshot === "object" ? v.referenceSnapshot as Record<string, unknown> : null;
+  const referenceSnapshot = reference && typeof snapshot?.text === "string" && snapshot.text.length <= 32768 && !containsCredential(snapshot.text) ?
+    { text: snapshot.text, partial: snapshot.partial === true } : null;
   const readCoverage = Array.isArray(v.readCoverage) ? v.readCoverage.slice(-24).flatMap(value => {
     if (!value || typeof value !== "object") return [];
     const { path, selection, read, total } = value as Record<string, unknown>;
@@ -79,7 +87,8 @@ export function readChat(value: unknown): ChatTurn | null {
     requestTruncated: v.requestTruncated === true, answerTruncated: v.answerTruncated === true,
     ...(typeof v.sourcePath === "string" ? { sourcePath: v.sourcePath.slice(0, 500) } : {}), actionsKnown: v.actionsKnown === true, actionTotal: Math.max(count(v.actionTotal), actions.length),
     sourceMode: v.sourceMode === "expanded" ? "expanded" : "provided", sources: sourceList(v.sources), generated: readGeneratedFiles(v.generated), generatedTruncated: v.generatedTruncated === true,
-    attachments: readAttachments(v.attachments), ...(reference ? { reference } : {}), ...(readCoverage ? { readCoverage } : {}),
+    attachments: readAttachments(v.attachments), ...(reference ? { reference } : {}), ...(referenceSnapshot ? { referenceSnapshot } : {}),
+    ...(v.pausedForInput === true ? { pausedForInput: true } : {}), ...(readCoverage ? { readCoverage } : {}),
     transcriptions: count(v.transcriptions), fileWarnings: Array.isArray(v.fileWarnings) ? v.fileWarnings.filter((value): value is string => typeof value === "string").slice(0, 32).map(value => value.slice(0, 500)) : [],
     ...(typeof v.uploadCleanupWarning === "string" ? { uploadCleanupWarning: workText(v.uploadCleanupWarning, 500) } : {}),
     online: v.online && typeof v.online === "object" ? { search: count((v.online as OnlineUsage).search), analysis: count((v.online as OnlineUsage).analysis), image: count((v.online as OnlineUsage).image) } : undefined };

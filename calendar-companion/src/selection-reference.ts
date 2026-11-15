@@ -13,6 +13,12 @@ export interface SelectionReference {
   wholeNote?: boolean;
   needsReview?: boolean;
 }
+export interface ReferenceSnapshot { text: string; partial: boolean }
+
+export function sameReference(a: SelectionReference, b: SelectionReference): boolean {
+  return a.path === b.path && a.version === b.version && a.from === b.from && a.to === b.to &&
+    a.quote === b.quote && a.wholeNote === b.wholeNote && a.needsReview === b.needsReview;
+}
 
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const hash = /^[a-f0-9]{64}$/;

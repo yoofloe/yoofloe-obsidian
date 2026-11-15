@@ -14,7 +14,7 @@ import { AUTO_COMPACT_TOKENS, readCompaction, type CompactionItem } from "./conv
 import { findOpenAiModel } from "./openai-models";
 import { WORK_ACTIVITY_LIMIT, workText, type ActivityKind, type ActivityState, type SteerNote, type WorkEvent } from "./work-activity";
 import type { LiveResponseRound, LiveSteerEvent, OpenLiveResponse } from "./responses-socket";
-import { estimateInput, verifyInputBudget, TOKEN_COUNT_THRESHOLD, type InputBudget } from "./input-budget";
+import { estimateInput, verifyInputBudget, InputBudgetError, TOKEN_COUNT_THRESHOLD, type InputBudget } from "./input-budget";
 
 export type SteerStatus = "sending" | "applied" | "received" | "review";
 export interface AgentExecutor { execute(name: string, args: unknown): Promise<unknown>; research?(sources: WebSource[], files: GeneratedFile[]): void; hasUneditedWritableNote?(): boolean; addReference?(reference: SelectionReference): Promise<unknown> }
@@ -30,6 +30,7 @@ export class AgentTask {
   requests = 0;
   usage = { input: 0, output: 0, reasoning: 0 };
   inputBudget: InputBudget | null = null;
+  pausedForInput = false;
   online = emptyOnlineUsage();
   sources: WebSource[] = [];
   citedSources: WebSource[] = [];
@@ -250,7 +251,7 @@ export class AgentTask {
   private async advance(maximum: RequestLimit): Promise<void> {
     const model = this.model, mode = this.mode, effort = resolveEffort(model.model, model.effort);
     const summarize = !!findOpenAiModel(model.model) && effort !== "none";
-    this.busy = true; this.options.gate.busy = true; this.stopped = false; this.stopDeferredCleanup = false; this.state = "running"; this.activeSince = Date.now();
+    this.busy = true; this.options.gate.busy = true; this.stopped = false; this.stopDeferredCleanup = false; this.pausedForInput = false; this.state = "running"; this.activeSince = Date.now();
     try {
       this.update("status", this.requests ? "Continuing the task" : "Preparing the request", "working");
       const value = await this.options.key();
@@ -274,11 +275,10 @@ export class AgentTask {
         }
         if (maximum !== "none" && this.requests >= maximum)
           throw new AttachmentBudgetPause("The request limit was reached while preparing the additional message.");
-        this.items.push(...messages);
         const remaining = this.onlineMaximum === "none" ? "none" : Math.max(0, this.onlineMaximum - this.onlineCalls);
         const hosted = onlineTools(this.sourceMode, remaining, this.fileIds, model.model, effort);
         const localTools = agentTools(mode, this.options.writeScope ?? "current"), canSaveGenerated = localTools.some(tool => tool.name === "save_generated_file");
-        const payload: Record<string, unknown> = { model: model.model, instructions: AGENT_INSTRUCTION.replace("Do not run code, call external URLs, request keys, access configuration/backup folders, or expand permissions.", "Never request keys, access configuration/backup folders, execute local code, or expand permissions.") + " " + sourceInstructions(this.sourceMode, supportsHostedTools(model.model)) + " Earlier conversation and compacted history provide background. Only the current task and its later user directions authorize current file actions. When asked to change a document or note title, use rename_note to change its filename/tab title; adding a Markdown heading alone is not a document rename. If the user explicitly requests only a body heading, edit that heading. Report only file operations confirmed by the tools. The write target is authoritative even in All actions. Current note forbids creating notes or files and moving to another folder. New documents permits creating notes in the output folder and revising only notes created by this task; existing notes are context, not writable targets. The selected folder is also the access boundary when Note folder is selected; it does not grant creation under Current note." + (remaining === 0 ? " The online tool budget is exhausted. Finish with verified evidence already obtained; disclose missing coverage without claiming further research." : ""), input: this.items, tools: [...localTools, ...hosted], parallel_tool_calls: false,
+        const payload: Record<string, unknown> = { model: model.model, instructions: AGENT_INSTRUCTION.replace("Do not run code, call external URLs, request keys, access configuration/backup folders, or expand permissions.", "Never request keys, access configuration/backup folders, execute local code, or expand permissions.") + " " + sourceInstructions(this.sourceMode, supportsHostedTools(model.model)) + " Earlier conversation and compacted history provide background. Only the current task and its later user directions authorize current file actions. When asked to change a document or note title, use rename_note to change its filename/tab title; adding a Markdown heading alone is not a document rename. If the user explicitly requests only a body heading, edit that heading. Report only file operations confirmed by the tools. The write target is authoritative even in All actions. Current note forbids creating notes or files and moving to another folder. New documents permits creating notes in the output folder and revising only notes created by this task; existing notes are context, not writable targets. The selected folder is also the access boundary when Note folder is selected; it does not grant creation under Current note." + (remaining === 0 ? " The online tool budget is exhausted. Finish with verified evidence already obtained; disclose missing coverage without claiming further research." : ""), input: [...this.items, ...messages], tools: [...localTools, ...hosted], parallel_tool_calls: false,
           ...(hosted.length && remaining !== "none" && remaining > 0 ? { max_tool_calls: remaining } : {}),
           ...(this.autoCompact ? { context_management: [{ type: "compaction", compact_threshold: AUTO_COMPACT_TOKENS }] } : {}),
           store: false, stream: false, include: ["reasoning.encrypted_content", ...(this.sourceMode === "expanded" && hosted.length ? ["web_search_call.action.sources"] : [])], ...(effort || summarize ? { reasoning: {
@@ -292,7 +292,7 @@ export class AgentTask {
           const index = this.items.indexOf(this.initialItem);
           if (index > 0) {
             this.items = this.items.slice(index);
-            payload.input = this.items;
+            payload.input = [...this.items, ...messages];
             body = JSON.stringify(payload);
             bytes = new TextEncoder().encode(body).length;
           }
@@ -302,6 +302,7 @@ export class AgentTask {
         if (this.options.countTokens && (this.inputBudget.hasFiles || this.inputBudget.hasCompaction || this.inputBudget.estimated >= TOKEN_COUNT_THRESHOLD))
           this.update("status", "Checking input size", "working");
         this.inputBudget = await verifyInputBudget(payload, key, () => !this.stopped && this.options.current(), this.options.countTokens, this.inputBudget);
+        this.items.push(...messages);
         const result = await this.requestReply(body, bytes, key, maximum, effort, hosted.length, canSaveGenerated);
         if (!result) break;
         const { reply, trace } = result;
@@ -349,11 +350,14 @@ export class AgentTask {
       }
       if (this.state === "running") { this.state = this.stopped || !this.options.current() ? "stopped" : maximum !== "none" && this.requests >= maximum ? "paused" : "completed"; if (this.state === "paused") this.update("status", "The request limit was reached after preparing attachments. Continue with a higher total limit; completed work is reused."); }
     } catch (error) {
-      if (error instanceof AttachmentBudgetPause) {
+      this.pausedForInput = error instanceof InputBudgetError && error.retryable && !this.stopped && this.options.current();
+      if (error instanceof AttachmentBudgetPause || this.pausedForInput) {
         this.pendingSteers = [...this.sendingSteers, ...this.pendingSteers]; this.sendingSteers = [];
       }
-      this.state = error instanceof AttachmentBudgetPause ? "paused" : this.stopped ? "stopped" : "failed";
-      this.update("blocked", error instanceof Error ? error.message : "The task could not finish. No retry was made.");
+      this.state = error instanceof AttachmentBudgetPause || this.pausedForInput ? "paused" : this.stopped ? "stopped" : "failed";
+      const message = error instanceof Error ? error.message : "The task could not finish. No retry was made.";
+      if (this.pausedForInput) this.update("status", message + " Choose Continue to retry the input check.", "waiting");
+      else this.update("blocked", message);
     }
     finally {
       if (this.stopped && this.state === "paused") this.state = "stopped";

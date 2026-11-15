@@ -52,3 +52,31 @@ test('unreadable or failed counts do not masquerade as a safe input estimate', a
   await assert.rejects(verifyInputBudget(body,'synthetic',()=>true,async()=>({status:200,text:'{"object":"response.input_tokens","input_tokens":"900"}'})),/did not confirm/);
   await assert.rejects(verifyInputBudget(body,'synthetic',()=>true,async()=>({status:403,text:'private diagnostic'})),/HTTP 403/);
 });
+test('a temporary count error pauses an active task and keeps the pending steer for an explicit continue', async () => {
+  let release, entered, counts=0, sends=0, cleanups=0;
+  const firstRequest=new Promise(resolve=>{entered=resolve;});
+  const statuses=[];
+  const answer=text=>({status:200,text:JSON.stringify({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text}]}]})});
+  const task=new AgentTask({
+    current:()=>true,key:async()=>'sk-synthetic-agent-key',gate:{busy:false},
+    executor:{execute:async()=>({})},steerStatus:(note,status)=>statuses.push([note.text,status]),
+    attachments:{hasUploads:true,prepare:async()=>({parts:[{type:'input_image',file_id:'file-fixture'}],fileIds:['file-fixture']}),
+      cleanup:async()=>{cleanups++;return true;}},
+    countTokens:async()=> ++counts===2 ? {status:503,text:'unavailable'} : countReply(5000),
+    transport:async req=>{
+      if(++sends===1){entered();await new Promise(resolve=>{release=resolve;});return answer('First response');}
+      const items=JSON.parse(req.body).input;
+      assert.equal(items.filter(item=>item.content==='Focus on the next passage').length,1);
+      assert(items.some(item=>item.content?.[0]?.file_id==='file-fixture'||item.content?.[1]?.file_id==='file-fixture'));
+      return answer('Steered response');
+    },
+  });
+  const running=task.run('Synthetic reference',{model:'gpt-6.1-sol',effort:'low'},'ask',4);
+  await firstRequest;assert(task.addSteer({id:crypto.randomUUID(),text:'Focus on the next passage'}));
+  release();await running;
+  assert.equal(task.state,'paused');assert.equal(task.canResume,true);assert.equal(sends,1);assert.equal(cleanups,0);
+  assert.match(task.message,/Choose Continue/);
+  await task.resume(4);
+  assert.equal(task.state,'completed');assert.equal(task.requests,2);assert.equal(counts,3);assert.equal(cleanups,1);
+  assert.equal(statuses.filter(([,status])=>status==='applied').length,1);
+});

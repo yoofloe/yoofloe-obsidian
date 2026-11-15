@@ -1,6 +1,6 @@
 import { Modal, setIcon, type App } from "obsidian";
 import type { AiWorkspace } from "./workspace";
-import { selectionLabel, type SelectionReference } from "./selection-reference";
+import { selectionLabel, type ReferenceSnapshot, type SelectionReference } from "./selection-reference";
 import { selectionImages } from "./selection-image";
 import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES } from "./attachments";
 
@@ -8,7 +8,7 @@ import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES } from "./attachments";
 export class ReferenceModal extends Modal {
   private alive = true;
   private imageUrls: string[] = [];
-  constructor(app: App, private readonly work: AiWorkspace, private readonly reference: SelectionReference, private readonly followUp = false) { super(app); }
+  constructor(app: App, private readonly work: AiWorkspace, private readonly reference: SelectionReference, private readonly followUp = false, private readonly snapshot?: ReferenceSnapshot) { super(app); }
   onOpen(): void {
     this.titleEl.setText("Reference");
     this.contentEl.addClass("y-ai-reference-preview");
@@ -19,6 +19,13 @@ export class ReferenceModal extends Modal {
     const gallery = this.contentEl.createDiv({ cls: "y-ai-reference-images" });
     const open = actions.createEl("button", { text: "Open note" });
     open.addEventListener("click", () => { this.close(); void this.app.workspace.openLinkText(this.reference.path, ""); });
+    if (this.snapshot) {
+      text.setText(this.snapshot.text);
+      state.setText(this.snapshot.partial ? "Saved preview of the opening passage." : "Saved reference from this message.");
+      const close = actions.createEl("button", { text: "Close" });
+      close.addEventListener("click", () => this.close());
+      return;
+    }
     const whole = actions.createEl("button", { text: "Use whole note" });
     whole.disabled = !this.work.canChangeReference || this.reference.wholeNote === true;
     whole.addEventListener("click", () => {

@@ -48,6 +48,14 @@ interface Ref {
 }
 const encoder = new TextEncoder();
 const limitBytes = 32768;
+function preserveLineBreaks(markdown: string, previous: string): string {
+  if (!markdown) return markdown;
+  let end = previous.length;
+  while (end > 0 && " \t\r\n".includes(previous.charAt(end - 1))) end--;
+  const trailing = previous.slice(end);
+  const firstBreak = trailing.search(/\r?\n/);
+  return firstBreak === -1 ? markdown : markdown + trailing.slice(firstBreak);
+}
 function list(value: unknown, maximum = 16): unknown[] { if (!Array.isArray(value) || !value.length || value.length > maximum) throw Error("Choose a bounded set of notes."); return value; }
 /** The model only requests typed work. Scope, source versions and recovery are enforced locally. */
 export class VaultAgent {
@@ -114,7 +122,7 @@ export class VaultAgent {
     const text = await this.host.read(ref.file); this.guard(); if (text === null) throw Error("The note was renamed, deleted or replaced.");
     return text;
   }
-  async addReference(reference: SelectionReference): Promise<unknown> {
+  async addReference(reference: SelectionReference) {
     this.guard();
     if (!validTaskPath(this.policy, reference.path)) throw Error("This reference is outside the permitted note paths.");
     const file = this.host.files().find(item => item.path === reference.path);
@@ -229,9 +237,11 @@ export class VaultAgent {
       const ref = this.ref(args.reference), text = await this.read(ref);
       const visible = ref.provided ? await selectionText(ref.provided, text) : ref.allowedRange ? text.slice(ref.allowedRange.from, ref.allowedRange.to) : text;
       this.guard();
+      const firstLine = ref.allowedRange && !ref.provided?.quote ? text.slice(0, ref.allowedRange.from).split("\n").length : 1;
       const headings = []; let fence = false;
-      for (const [index, line] of visible.split("\n").entries()) { if (/^\s*(`{3,}|~{3,})/.test(line)) fence = !fence; if (!fence && /^#{1,6} /.test(line)) headings.push({ line: index + 1, text: line.slice(0, 180) }); }
-      safeOutbound(JSON.stringify(headings)); return { title: ref.file.title, headings: headings.slice(0, 200), total_lines: visible.split("\n").length, selection_only: !!ref.allowedRange, partial: headings.length > 200 };
+      const lines = visible.split("\n");
+      for (const [index, line] of lines.entries()) { if (/^\s*(`{3,}|~{3,})/.test(line)) fence = !fence; if (!fence && /^#{1,6} /.test(line)) headings.push({ line: firstLine + index, text: line.slice(0, 180) }); }
+      safeOutbound(JSON.stringify(headings)); return { title: ref.file.title, headings: headings.slice(0, 200), from_line: firstLine, total_lines: lines.length, selection_only: !!ref.allowedRange, partial: headings.length > 200 };
     }
     if (name === "apply_changes") {
       closedObject(args, ["changes"]); const plans = [], seen = new Set<string>();
@@ -241,9 +251,12 @@ export class VaultAgent {
         if (seen.has(ref.file.path)) throw Error("Use one change per note in a batch."); seen.add(ref.file.path);
         if (!ref.version || change.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("The note changed. Read its new version before editing.");
         const markdown = this.markdown(textField(change.markdown, 4 * 1024 * 1024), before, change.action === "replace_selection", change.action === "append"); let after: string;
-        if (change.action === "replace" && ref.complete) after = markdown;
+        if (change.action === "replace" && ref.complete) after = preserveLineBreaks(markdown, before);
         else if (change.action === "append" && !ref.allowedRange) after = before + (before.endsWith("\n\n") || !before ? "" : before.endsWith("\n") ? "\n" : "\n\n") + markdown + "\n";
-        else if (change.action === "replace_selection" && ref.range) after = before.slice(0, ref.range.from) + markdown + before.slice(ref.range.to);
+        else if (change.action === "replace_selection" && ref.range) {
+          const { from, to } = ref.range;
+          after = before.slice(0, from) + preserveLineBreaks(markdown, before.slice(from, to)) + before.slice(to);
+        }
         else throw Error("Read the complete note before replacing it, or replace only the reviewed selection.");
         plans.push({ ref, before, after, hash: await inputDigest(after) });
       }

@@ -18,7 +18,9 @@ const CONTEXT_WINDOW = 1050000;
 const OUTPUT_RESERVE = 128000;
 const FORMAT_RESERVE = 8192;
 export const TOKEN_COUNT_THRESHOLD = 24000;
-export class InputBudgetError extends Error {}
+export class InputBudgetError extends Error {
+  constructor(message: string, readonly retryable = false) { super(message); }
+}
 
 function inputKinds(value: unknown, found = { files: false, compaction: false }): typeof found {
   if (Array.isArray(value)) {
@@ -75,11 +77,12 @@ export async function verifyInputBudget(
       headers: { Authorization: "Bearer " + key }, body: JSON.stringify(countBody), throw: false,
     });
   } catch (error) {
-    throw new InputBudgetError(`Input-size verification ${openAiTransportFailure(error)}. Your draft and completed work are kept.`);
+    throw new InputBudgetError(`Input-size verification ${openAiTransportFailure(error)}. Your draft and completed work are kept.`, true);
   }
   if (!current()) throw new InputBudgetError("Stopped after the input check. No next model request was sent.");
   if (response.status < 200 || response.status >= 300)
-    throw new InputBudgetError(`OpenAI input-size verification returned HTTP ${response.status}. Review the attachments or try again when the connection is available.`);
+    throw new InputBudgetError(`OpenAI input-size verification returned HTTP ${response.status}. Review the attachments or try again when the connection is available.`,
+      response.status === 408 || response.status === 429 || response.status >= 500);
   if (response.text.length > 16384) throw new InputBudgetError("OpenAI returned an oversized token-count response.");
   let value: unknown;
   try { value = JSON.parse(response.text); } catch { throw new InputBudgetError("OpenAI returned an unreadable input token count."); }

@@ -79,7 +79,7 @@ test('a saved edit survives a DNS failure in the final answer and one cleanup wa
   assert.equal(cleanups, 1);
   assert.equal(turn.status, 'failed');
   assert.equal(turn.actionTotal, 1);
-  assert.equal(note.text, edited);
+  assert.equal(note.text, edited + "\n");
   assert.equal(f.journals.at(-1).status, 'interrupted');
   assert.equal(f.journals.at(-1).operations[0].status, 'done');
   assert.match(f.work.message, /OpenAI request 2 could not resolve the OpenAI host/);
@@ -245,6 +245,7 @@ test('a selection reference guides an edit while its scope remains governed by A
  f.options.transport=async req=>{calls++;const body=JSON.parse(req.body);if(calls===1){const n=JSON.parse(body.input[0].content).selected_reference;assert.equal(n.text,'Original');return response([{type:'function_call',call_id:'edit',name:'apply_changes',arguments:JSON.stringify({changes:[{reference:n.reference,version:n.version,action:'replace_selection',markdown:'Longer revised text'}]})}]);}return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Selection updated.'}]}]);};
  f.work.setPrompt('Refine the selection');await f.work.run();assert.equal(file.text,'# Title\nLonger revised text\nPrivate tail');
  assert.equal(f.work.reference.from,8);assert.equal(f.work.chat.at(-1).reference.id,f.work.reference.id);
+ assert.deepEqual(f.saved().chat.at(-1).referenceSnapshot,{text:'Original',partial:false});
  await assert.rejects(f.work.readReference(),/reference changed/);
  f.work.removeReference();assert.equal(f.work.reference,null);assert.equal(f.work.source.path,'A.md');
  assert.equal(f.work.canRestoreReference,true);f.work.restoreReference();assert(f.work.reference);
@@ -262,6 +263,8 @@ test('removing a reference removes its draft images and Undo restores them witho
  assert(f.work.setReference(reference));f.work.readScope='vault';f.work.writeScope='vault';
  const file={id:crypto.randomUUID(),name:'Reference.png',extension:'png',kind:'image',mime:'image/png',bytes:10,sha256:'a'.repeat(64),referenceId:reference.id};
  f.work.attachments=[file];f.work.followUpAttachments=[{...file,id:crypto.randomUUID()}];
+ assert(f.work.setReference({...reference,id:crypto.randomUUID()}));
+ assert.equal(f.work.reference.id,reference.id);assert.equal(f.work.attachments.length,1);assert.equal(f.work.followUpAttachments.length,1);
  f.work.removeReference();assert.equal(f.work.reference,null);assert.equal(f.work.attachments.length,0);assert.equal(f.work.followUpAttachments.length,0);
  assert.equal(f.work.source.path,'A.md');assert.equal(f.work.readScope,'vault');assert.equal(f.work.writeScope,'vault');
  f.work.restoreReference();assert.equal(f.work.reference.id,reference.id);assert.equal(f.work.attachments.length,1);assert.equal(f.work.followUpAttachments.length,1);
