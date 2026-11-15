@@ -1,0 +1,58 @@
+{
+  "now": 1938164400000,
+  "request": {
+    "format": "yoofloe.calendar.request",
+    "version": 5,
+    "requestId": "630456e5-3910-4759-a152-37cdf67047e1",
+    "vault": "Q2FsZW5kYXIgaW50ZXJvcCB2YXVsdA",
+    "nonce": "GhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk",
+    "key": "R0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2BhYmNkZWY",
+    "createdAt": 1938164398800,
+    "expiresAt": 1938164998800,
+    "vaultId": "c1543d57-5440-4443-b9fb-0a5776e9103c",
+    "query": {
+      "mode": "records",
+      "lookup": {
+        "areas": [
+          "calendar",
+          "study",
+          "project",
+          "notes"
+        ],
+        "period": "custom",
+        "from": "2031-06-01",
+        "through": "2031-06-07",
+        "zone": "Europe/Warsaw",
+        "terms": [],
+        "profile": "summary",
+        "includeLinkedNotes": false,
+        "maxRecords": 12,
+        "maxTextBytes": 8732
+      },
+      "kinds": [
+        "event",
+        "study_session",
+        "project_stage",
+        "note"
+      ],
+      "filters": {
+        "folders": [],
+        "projects": [],
+        "includeTrash": false,
+        "includeArchive": false,
+        "includeFinancials": false,
+        "includeAttachmentMetadata": true
+      }
+    }
+  },
+  "requestAad": "yoofloe-calendar-companion/v5|630456e5-3910-4759-a152-37cdf67047e1|Q2FsZW5kYXIgaW50ZXJvcCB2YXVsdA|c1543d57-5440-4443-b9fb-0a5776e9103c|GhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk",
+  "launchUrl": "yoofloe-calendar://obsidian/connect?version=5&requestId=630456e5-3910-4759-a152-37cdf67047e1&vault=Q2FsZW5kYXIgaW50ZXJvcCB2YXVsdA&vaultId=c1543d57-5440-4443-b9fb-0a5776e9103c",
+  "plaintext": "{\"version\":5,\"requestId\":\"630456e5-3910-4759-a152-37cdf67047e1\",\"datasetId\":\"7dc24489-0893-46e5-ad91-fad592512831\",\"exportedAt\":1938164400000,\"query\":{\"mode\":\"records\",\"lookup\":{\"areas\":[\"calendar\",\"study\",\"project\",\"notes\"],\"period\":\"custom\",\"from\":\"2031-06-01\",\"through\":\"2031-06-07\",\"zone\":\"Europe/Warsaw\",\"terms\":[],\"profile\":\"summary\",\"includeLinkedNotes\":false,\"maxRecords\":12,\"maxTextBytes\":8732},\"kinds\":[\"event\",\"study_session\",\"project_stage\",\"note\"],\"filters\":{\"folders\":[],\"projects\":[],\"includeTrash\":false,\"includeArchive\":false,\"includeFinancials\":false,\"includeAttachmentMetadata\":true}},\"context\":{\"scope\":{\"areas\":[\"calendar\",\"study\",\"project\",\"notes\"],\"period\":\"custom\",\"from\":\"2031-06-01\",\"through\":\"2031-06-07\",\"zone\":\"Europe/Warsaw\",\"terms\":[],\"profile\":\"summary\",\"includeLinkedNotes\":false,\"maxRecords\":12,\"maxTextBytes\":8732},\"from\":\"2031-06-01\",\"through\":\"2031-06-07\",\"zone\":\"Europe/Warsaw\",\"scanned\":8,\"matched\":4,\"partial\":false,\"metrics\":[{\"key\":\"event_count\",\"value\":1},{\"key\":\"study_recorded_seconds\",\"value\":1800},{\"key\":\"stage_count\",\"value\":1},{\"key\":\"note_count\",\"value\":1}]},\"records\":[{\"id\":\"be139dbf-cb1d-4cf0-ae7e-f72e6c902378\",\"kind\":\"event\",\"sourceId\":\"be139dbf-cb1d-4cf0-ae7e-f72e6c902378\",\"revision\":3,\"title\":\"Fixture event\",\"text\":\"Selected Calendar occurrence.\",\"date\":\"2031-06-03\",\"state\":\"active\",\"details\":{\"intervals\":[{\"startAt\":\"2031-06-03T08:30+02:00\",\"endAt\":\"2031-06-03T09:10+02:00\"}]}},{\"id\":\"0bff3027-e0c6-4217-98d6-f21d9c375482\",\"kind\":\"study_session\",\"sourceId\":\"0bff3027-e0c6-4217-98d6-f21d9c375482\",\"revision\":3,\"title\":\"Fixture study session\",\"text\":\"Logged reading.\",\"date\":\"2031-06-02\",\"state\":\"active\",\"details\":{\"recordedSeconds\":1800,\"tags\":[\"Reading\"]}},{\"id\":\"0ecfc3e1-ceea-4c80-b9de-1fb0aa8dc65b\",\"kind\":\"project_stage\",\"sourceId\":\"0ecfc3e1-ceea-4c80-b9de-1fb0aa8dc65b\",\"revision\":3,\"title\":\"Fixture stage\",\"text\":\"Staged for review.\",\"date\":\"2031-06-03\",\"state\":\"active\",\"details\":{\"status\":\"REVIEW\",\"dueDate\":\"2031-06-03\",\"startDate\":\"2031-06-01\"}},{\"id\":\"6b9d456a-46fd-4497-8a3e-7fa20ab4edad\",\"kind\":\"note\",\"sourceId\":\"6b9d456a-46fd-4497-8a3e-7fa20ab4edad\",\"revision\":3,\"title\":\"Notatka próbna\",\"text\":\"Local supporting excerpt.\",\"date\":\"2031-06-02\",\"state\":\"active\",\"details\":{\"pinned\":true,\"tags\":[\"Środowisko\"],\"attachmentCount\":1}}],\"capabilities\":{\"readKinds\":[\"event\",\"task\",\"study_session\",\"project_stage\",\"note\"],\"writeKinds\":[{\"kind\":\"event\",\"actions\":[\"create\",\"update\",\"delete\",\"restore\"]},{\"kind\":\"project_stage\",\"actions\":[\"create\",\"update\",\"delete\"]}]}}",
+  "reply": {
+    "format": "yoofloe.calendar.reply",
+    "version": 5,
+    "requestId": "630456e5-3910-4759-a152-37cdf67047e1",
+    "iv": "bW5vcHFyc3R1dnd4",
+    "ciphertext": "zDuVcSJzH7Z_Ny5ToOKIzT4HvlbXCM1kwEskQxyrRtbatlWtx3wVz-gujvQ2D09m6bYHD1HGO6KMMDhnE4VXzpphKEufORIMZubNjyALro394zWZEVsDKUgz4M-GnbRbqcQc44JnXEJxfUOrdAIQS7GXo5g5bclSGYvOBZ-tWe_2TEHtj_4KiP0cunywbJyi4j_kj-Q_xmSHVa_H9rNt9T6pOQilzTRP7Z-0F8upedzARKjtRewYSNCfyAza5oRAZ272DvnxwwOC1SMOxPafqgc18l4-VULLwqNC8fx_cR6w9bGF5lCNU8frdSwPCLDj4WnLDVwNbmiovhtga-SG4yB-qRv5uExoG42vGzJme50Q9bUyFYYsxhzDSaP_qQBtermAwhCB69xNqk_wUpTQYxrVtpZahxTphQ5VrnjdEK5ehcS8C6UdYONCZwUXY_7L9NCSYMuAlHQGrNLBrwWXF5luW05r-1iM6soe_FhBwfpv9M2TXM1HYP6jkKyyh5xXOn1YCMa4usP_-4p9xeKCEyOBR4vLWCyqcvg7WkehyDpYr5tiyFH6w4F6xkqP_50UrRJlEhKDh8ppK0i5mPGER_DbYnwvD8zQWX-psbgseylTT8Z3YB-k9c1zk0Vs-BE8yRbJWLRjKtgW3if8MlfWgBKXKIJffpZYCW1uKA2Yx-sugPswvQV9_mTNHYYpZ46edgsgcWfmO_KEN8hCJ529gPUoRLF1Ct70OuV8S0IK4y3T8QglcvF6WdnQa_set5uAzTWYIDpx2PufqjWrh7BM6HKSOrpvcQMJQRSOpT8ODFa6aOm2AlAspbF991P95-wRKmCgM4beTb1pIM21ke1GFhE9PX0fyqm149-E51DwGlAI1j7Qn4fFxMdFbvzXOvlvIxwn4rQBpGS1GobRUrt3zu-i3OcJBWU9N61Bm2id_2_2NwlLP_cBFFgL267RGJKTLizy_ymICimZYSGRORT26y-OkxxYCoqQ08rE3HTfdCBqKE9cGUZP1ARXLuINzZ3LbmlvwfI404zn-UrrzYP65oLwn2bRmc2M65tNNq7FFy_cen60ya-9YbjuDEw3nJJPTs3kw55-IqHfPS6WQbiN6TTFiIOgI8R-1fEoZt1UHrSZcmxa8lvlqKzdgWH3G3rKZQLVuGwASDkXaBsdESrQpjzEzKqUbMb1KThXEMf0Z3GtbsbjDJzTDBvW8KkYmapdjm4dSRPqkTfCdDoPn3O4KQUEGqN7BiPbGNxvCmjpMR8Myd2ggGKh54D-w9WVbV5qDSoiDqqRcgyoMg9RGsKy66FXHOoneSC9QkFhvRKPTiPx3Ell3hUnwx2PI50uPQiHBB_AcpZLwigwFCBj2QwyzBsSZ6OEgQwO7rBoYT9dxDP9WmNnSWOrpuZ6-HnuLvPvqpyThHNhkaiyr6QPfCeEk4qHpuZzN9Kahn7M7ovQVH2NU_EiJLWm4xq_nZzbh1E2aVwrvUVE1F2Odu82NnJq0XszWxFF7hw81UQP9mKoTdhjLEvdbDse7LrEaxCXcR2nNsV2hIzps6h1JYVTLJzNNGGyVN1XEYvJnuRj9owLuo1yGsoRcnQhSIboGnSkOCe2VEf9oWv2CZ4efh6Jd0TMmAut845szdMpP3Uy-7l4gTxVhEMfE_SVKtLVZLakjTS4Ing6e_WpB_A2PKSJZ0l1fVj_UISXe4BlNPkywSv3IOlf8K0RhXVAWLwk3jM19CtK8lvNiZsR1WnvCSaGgNGmDsFVNaiXlCsdT3wOYOXGAnMrW4XuiyNs4lFl9bPLZ95AW5-cMRNCA8c9oLwh0u3_uF7jaV92E8QJY5J3NtOHgLB7tQfwPNNzXUAJkw-c6NQV894h2EQhhuw5_5vdd32FbQqVpNmNUIbHSKoz4I650Olr472RGAfsyX4fn3g26_tOsDtVMQfgqjhXSVpYuXwdN340j5l7x_skiwKngNJI2KY6wIiLoMxgV50DdeAdx9L935FV0T4pL0_GBEHvGUNYTgNmCN0NMkKuojB-aCtYXLXO-wbXL2OoGuXZy7cbgSMXzH7VL4GTaUqxRk-hYlG_1mw4lOT66kQRc-w5rRlkwePw9RvxrC-GBDwcoC-uB1SrEyYYGybsE2641h5yijLaNgwJLG91qn-PXtVb7Z1e87oGgq66XuVs34TILp5Ng9yggld_grMkAoD7NH6ol95fEdfjIS9nR1EcopVYV965Yvo44dnOpcQ9u1TwQK-Ik48iziwOKiuithTPBYJ7m7PaK02EZIx-hCbETgLLwxqu56I4OFOcE55W3BD496fJkX8TsuIe8wb6RMh0TGo-UDWWhgBwaNn8Tp276sGkHFQBgYFjGXXtNvamTWOHa5glIqnFLSCqYMSoojneb8HNB7oaVzraiPyoPHWCINwxDiDKrOxWPPVUnexM8onkq-VvV8lmfFjKQBnC25rl3d5MOryQ94wejgWJ6eM8CU0U3gIdFM1DBmDwbfMEQvqf4T4gh94W0SjNpZiD7vmqJUN1zoHCGvOQFJmlcSMGzE8i2oVsFnOkl-Kky5BMvs4fKkWZaZru0BslSg6xRCKe4Q8NK3c2DmQ5HoLNrX0t1-QzRv6YgZygzmod_c0uOlW9JIUI1r6x-XN67ANm1Tdr886Alyn_5qOLd_NC1OahSsuL49IAejQLFxEpp5L_qD_aiBvesROBovHW_SBXzqxR2AWwLGgmdMkzXLOVyrd4pN8bIcg0y7vk9rUgOhTwrn8nDKoc8Xfz0oLPxrN0pNJg0M8u1V-QEs0-wZqASFt-vAOcTWgXBNmPIVartPq03sYp0XTP2NZfUExRYzAm7KN-nQdav9Wfctxd_Ps6j87NiSbeXOoGoGIHEZphC0iRuR2FLrFDgNE15IkiX5WZ9KQs-AFaS2xfBFu2wsAJdzwCfuJtI-6NOAq9UFtBebYYL9mPrEzhZoybaxHPvSQeeovPynbQ7Uytkw2v2IASZGLl42PgDFHPPgzCDLUaPxP0jyg6RdOAwbeh1yE73hegek4aBtTb_icANUjN2wNz8D4BVeLAkstULjKlZuCeNVbWF4SoVdExvEKzoYfsoM5JjROOAp73K4GHHxWmx9WdoYHX7sy80uWzLYxwVoeaeCXyb8Cf3wZ3fsNmG9OLCozAoB2S6lTMxs7ejvdTqWHC-6X_IW5OFT42ZWJF6hjJW4tMv7Vj2zEwhBeBK1K4lVWo4B7CdrautKtCM434q7FcGh3JK5a_4482lyHM_bokNUtN0_koAVQKIWyzxP7vHMl9IRDny4KNSr4qgI8GDpqZUO3f_saDO6KINHCcOqC6_Qt70LgHans_E3oJvsMGLyhlmv6o2waeQCZbOEctr5yeNPhlXJ3ytiXWkvpl5Y-1Le_GjHVIvP8e3BBBnvkghxBXG4ZfJ6GY9A"
+  }
+}

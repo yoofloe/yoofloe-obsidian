@@ -168,7 +168,8 @@ brings together plans, tasks, events, notes, study, projects, Garden focus and F
 Use **Add Yoofloe Calendar context** in the same AI workspace when a task needs those records.
 
 Direct lookup requires **both apps on the same Android phone/tablet and Android profile**, Calendar **1.8.5+**,
-and a vault in shared device storage. It is unavailable on desktop, iPhone and iPad; Yoofloe itself works without it.
+and a vault in shared device storage. Desktop can transfer request files with Calendar 1.8.14 or later.
+On iPhone and iPad, use Markdown snapshots for Calendar context.
 Android may require one initial folder grant to **Yoofloe Calendar Inbox** inside the vault; Calendar remembers it.
 App-private vaults and unsupported cloud document providers cannot use this local handoff.
 
@@ -182,8 +183,20 @@ to prepare additions, edits or moves to Trash for one-off events and non-recurri
 when editing or deleting it. **Send** sends your request and approved event or task excerpts to OpenAI. **Review in Calendar**
 opens the Android approval screen. The Calendar app validates current records and saves the approved batch.
 Use **Undo in Calendar** for a confirmed batch or **Check status in Calendar** to recover a missed reply. A changed
-record can prevent undo. Desktop and iOS can keep local drafts and use Markdown exports.
-Full-record Markdown snapshot import without AI remains an advanced setting.
+record can prevent undo. Full-record Markdown snapshot import without AI remains an advanced setting.
+
+### Calendar workspaces
+
+With Calendar **1.8.14+**, open **Calendar workspaces** and check the app's capabilities. Choose workspaces, record types
+and dates. Archive, Trash, financial records and attachment metadata have separate controls. Review the local summary
+and select the excerpts to include in your message. The original source labels stay stable when you deselect excerpts.
+
+**Draft workspace changes** prepares supported Schedule, Study, Project and Notes changes. Calendar previews the
+affected records, applies an approved batch and can undo it while its saved revisions still match.
+
+On Desktop, save the request, transfer it into **Yoofloe Calendar Inbox** on Android and open it from Calendar settings.
+Bring the reply back and import it in the same conversation before the request expires. The request file contains a
+one-time transfer key. After importing the reply, remove your exported request and reply copies on both devices.
 
 ## Data, rights and privacy
 

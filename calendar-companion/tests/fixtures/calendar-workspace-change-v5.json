@@ -1,0 +1,32 @@
+{
+  "now": 1794744001000,
+  "launchUrl": "yoofloe-calendar://obsidian/change?version=5&requestId=50000000-0000-4000-8000-000000000001&vault=Rml4dHVyZSB2YXVsdA&vaultId=30000000-0000-4000-8000-000000000002",
+  "request": {
+    "format": "yoofloe.calendar.change.request",
+    "version": 5,
+    "requestId": "50000000-0000-4000-8000-000000000001",
+    "vault": "Rml4dHVyZSB2YXVsdA",
+    "vaultId": "30000000-0000-4000-8000-000000000002",
+    "nonce": "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8",
+    "key": "gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8",
+    "createdAt": 1794744000000,
+    "expiresAt": 1794744600000,
+    "action": "review",
+    "proposalId": "50000000-0000-4000-8000-000000000003",
+    "proposalDigest": "af8984d47e10773cc258c443106bf9adea85bfacca6edfee0c10acd0d76f27c3",
+    "datasetId": "30000000-0000-4000-8000-000000000004",
+    "iv": "wMHCw8TFxsfIycrL",
+    "ciphertext": "Hx7v8tnfgrdrQFk8YJtrSwuuegiGIsh3Gt6cjR_nXbMjwPPVIBxZ8eNCkkcQQJXvaafQfBsVEmHJICiOEzwakieGLVy74bZssaeFlFkbaLt8GabqMmGU5Iph2CcWZf37H7WI82SUlMYywNUuOTqIgDyvuyKWFl-5dAl1gSxfdcnUdTbvejqqflLK_jXfXtyQLCir0NWNQYBaFVe2DKHXY5k1XYZY06VLydXyX2CGTtx1X04HqGKf6B-jcT3ZGtjUU7sjA0vMGI3Vl9NHaaIj5g4dLrfBRsDDW4g6ObGycWhMHKS36JB3d5khaODNcKajOc3VsyJzpk6z2iOEyboX3nF1cLo11EAj5fSD59lgqkhJ-NdmCH_kx8qrHtuSXReoUL36MMBtO4QKoj84nD0kzxJlKPTNCO5jJBmXtaYIoyeFsp9hhlPH-hkxHrYAG_YVNoagnQQpPro5puU1-Ou96Z9nPwzCY2ZpifiDTzPXPg2bgPoVJ90uf3PtqNa9757SfyfPLwr_oZdwZJaKKtisUlx3zXeoHrzTrLr9mKzHpJL_AOhdQfO4n80gSCGqMXtUH-y_V-k3jE8yniTCQSew2dPOPjSb8vpfhD0RUgTGDoBPhHCD-OJykl_TMqiVu2CNFntsE8wK27mOscy6-Up1vf_lLTXOfIGDTZnHyj1ud7Ruj1O5kAiQSYON2L93nQf1MsXA3TOjocKFLQaXIPQ1r5Q2JOOohR2i-oYz-pxp3oXB3xOT47jR23-ITGAIRMwaRV3L-xZSjkViLffaO8V9biJvgmosHYoBMyXLiUo3OVX9qGU"
+  },
+  "plaintext": "{\"operations\":[{\"opId\":\"30000000-0000-4000-8000-000000000011\",\"kind\":\"event\",\"action\":\"create\",\"target\":null,\"values\":{\"allDay\":false,\"description\":\"Bring the notebook.\",\"end\":\"2026-11-16T08:00:00Z\",\"start\":\"2026-11-16T07:30:00Z\",\"timezone\":\"Europe/Warsaw\",\"title\":\"Plan the week\"}},{\"opId\":\"30000000-0000-4000-8000-000000000012\",\"kind\":\"task\",\"action\":\"update\",\"target\":{\"id\":\"fixture-task\",\"revision\":4},\"values\":{\"dueDate\":null,\"status\":\"completed\"}},{\"opId\":\"30000000-0000-4000-8000-000000000013\",\"kind\":\"event\",\"action\":\"delete\",\"target\":{\"id\":\"fixture-event\",\"revision\":8},\"values\":null}]}",
+  "requestAad": "yoofloe-calendar-change/v5|request|review|50000000-0000-4000-8000-000000000001|Rml4dHVyZSB2YXVsdA|30000000-0000-4000-8000-000000000002|oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8|50000000-0000-4000-8000-000000000003|af8984d47e10773cc258c443106bf9adea85bfacca6edfee0c10acd0d76f27c3|30000000-0000-4000-8000-000000000004",
+  "reply": {
+    "format": "yoofloe.calendar.change.reply",
+    "version": 5,
+    "requestId": "50000000-0000-4000-8000-000000000001",
+    "iv": "4OHi4-Tl5ufo6err",
+    "ciphertext": "VCRngliAo6icRn1oujFzw8RCEKiGDiGKbgF4er36fPWshes5qXs0PfJ99JghdeNKpkQobSZrfV4dESW2Zf0shmTIwPpllTx_deJG-Lmf1woq2nnNzi0dSSHIqQUxOdsjqiavjkjjkR08J69mHF2nsFuuoWIzxcMPPiRJ3ry7js9HzIBIOJxOgKs_YbI8gSxm9z_AcRWh-OZNMsE1JKgZTliIhjvqO-mFbexO_Ipb3d-FL8VyYOlqBgyvXzQohfm2HACNnu295HaJioIU9eRL-TNDbgbCevRAqN-YW8M6R7eDmAtEF07u2gknj0aVsG-SazkmR7wIxwjqkv3BG2TLtcSNiuAdCYee5prlQ1A8OoC3PygR6WAgC904tmnkJ4_FMpbnK1cwSQSRhZPqIDVD1NsqjH6_MdbvhW-dIc6SJoqcqd0ZEHTAgP5wkb8yN1oZkNvdpaw_zR5rrQpeLTur22MEEmDrEE4pY7rMeMzmCAW591ziDgMHHull9wKLPA1L3G5DJv3GYSTWrCqysyDaC_C0qVILsSjZXj-mtD1EOtKpntI5xhUnlCxT8HZ7jsclB-ntTThhzgRl4gwNvznGPgNul0glqFKc6qK5RckEX_mnvvTyGX63D-5pyXSLG5U_Yk2dbuNGpQeJIVXJZ4yKiR7Ilp2RIU9UFZfIlcN4qeiUo_WJaSXPkE2QFOq4yaCZfSmb1CiGtw83Hr1ng5zpAMziM52LW4q_pIk9Z-iWj7Eufz9-wofI18P5SPxSbncjKZeh1JN4UnukQrzE2F6Dm_-x"
+  },
+  "replyPlaintext": "{\"version\":5,\"requestId\":\"50000000-0000-4000-8000-000000000001\",\"proposalId\":\"50000000-0000-4000-8000-000000000003\",\"proposalDigest\":\"af8984d47e10773cc258c443106bf9adea85bfacca6edfee0c10acd0d76f27c3\",\"datasetId\":\"30000000-0000-4000-8000-000000000004\",\"status\":\"applied\",\"results\":[{\"opId\":\"30000000-0000-4000-8000-000000000011\",\"kind\":\"event\",\"id\":\"fixture-new-event\",\"revision\":1},{\"opId\":\"30000000-0000-4000-8000-000000000012\",\"kind\":\"task\",\"id\":\"fixture-task\",\"revision\":5},{\"opId\":\"30000000-0000-4000-8000-000000000013\",\"kind\":\"event\",\"id\":\"fixture-event\",\"revision\":null}]}",
+  "replyAad": "yoofloe-calendar-change/v5|reply|review|50000000-0000-4000-8000-000000000001|Rml4dHVyZSB2YXVsdA|30000000-0000-4000-8000-000000000002|oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8|50000000-0000-4000-8000-000000000003|af8984d47e10773cc258c443106bf9adea85bfacca6edfee0c10acd0d76f27c3|30000000-0000-4000-8000-000000000004"
+}

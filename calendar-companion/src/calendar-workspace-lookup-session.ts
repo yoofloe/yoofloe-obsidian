@@ -1,0 +1,212 @@
+import {
+  createWorkspaceQueryRequest, openWorkspaceLookupReply, workspaceQueryLaunchUrl,
+  type WorkspaceLookupDelivery, type WorkspaceQuery, type WorkspaceQueryRequest,
+} from "./calendar-workspace-query";
+import { INBOX } from "./protocol";
+import { QUERY_REPLY_BYTES } from "./question-query";
+import type { TransferStore } from "./session";
+
+interface VaultOwner {
+  readonly name: string;
+  readonly identity: object | string;
+}
+type TransferFile = { name: string; contents: string };
+
+interface LookupTransfer {
+  readonly owner: VaultOwner;
+  readonly request: WorkspaceQueryRequest;
+  marker: string | null;
+  delivery: WorkspaceLookupDelivery | null;
+}
+const encoder = new TextEncoder();
+
+/** A one-use, vault-local Calendar lookup. No file access occurs until a user starts the lookup. */
+export class CalendarWorkspaceLookupSession {
+  private pending: LookupTransfer | null = null;
+  private live = true;
+  private busy = false;
+  private lostOwner = false;
+
+  constructor(private readonly options: {
+    store: TransferStore;
+    vaultName: () => string;
+    vaultIdentity?: () => object | string;
+    allowed: () => boolean;
+    canClean?: () => boolean;
+    now?: () => number;
+    wait?: (milliseconds: number) => Promise<void>;
+  }) {}
+
+  get requestId(): string | null { return this.pending?.request.requestId ?? null; }
+  get expiresAt(): number | null { return this.pending?.request.expiresAt ?? null; }
+  get isBusy(): boolean { return this.busy; }
+
+  private now(): number { return (this.options.now ?? Date.now)(); }
+  private owner(): VaultOwner {
+    const name = this.options.vaultName();
+    return { name, identity: this.options.vaultIdentity?.() ?? name };
+  }
+  private sameVault(owner: VaultOwner): boolean {
+    const current = this.owner();
+    if (owner.identity !== current.identity || owner.name !== current.name) this.lostOwner = true;
+    return !this.lostOwner;
+  }
+  private guard(transfer: LookupTransfer): void {
+    if (!this.sameVault(transfer.owner) || !this.options.allowed()) this.live = false;
+    if (!this.live || this.pending !== transfer) throw Error("This vault session changed. Open Calendar from the active vault.");
+    const now = this.now();
+    if (!Number.isSafeInteger(now) || now < transfer.request.createdAt - 60000 || now > transfer.request.expiresAt)
+      throw Error("This Calendar lookup expired. Start a new connection.");
+  }
+  private fileName(transfer: LookupTransfer, role: "request" | "reply"): string {
+    return transfer.request.requestId + "." + role + ".json";
+  }
+  private path(transfer: LookupTransfer, role: "request" | "reply"): string {
+    return INBOX + "/" + this.fileName(transfer, role);
+  }
+
+  /** Write one owned marker and return only launch metadata. */
+  async start(options: { query: WorkspaceQuery; vaultId: string; inboxHint?: string }): Promise<string> {
+    if (!this.live || !this.options.allowed()) throw Error("Open Calendar from the active vault.");
+    if (this.busy || this.pending) throw Error("Finish the current Calendar lookup before starting another.");
+    const owner = this.owner();
+    const request = createWorkspaceQueryRequest(owner.name, options.vaultId, options.query, this.now());
+    const transfer: LookupTransfer = { owner, request, marker: null, delivery: null };
+    const marker = JSON.stringify(request);
+    const markerBytes = encoder.encode(marker).byteLength;
+    const store = this.options.store;
+    const path = this.path(transfer, "request");
+    this.pending = transfer;
+    this.busy = true;
+    try {
+      this.guard(transfer);
+      if (!await store.exists(INBOX)) {
+        this.guard(transfer);
+        await store.mkdir(INBOX);
+      }
+      this.guard(transfer);
+      if (await store.exists(path)) throw Error("The Calendar transfer path is already in use.");
+      this.guard(transfer);
+      if (await store.exists(this.path(transfer, "reply"))) throw Error("The Calendar transfer path is already in use.");
+      this.guard(transfer);
+      transfer.marker = marker;
+      await store.write(path, marker);
+
+      // Android may report pre-write metadata briefly. Verify the same marker without another write.
+      const wait = this.options.wait ?? (milliseconds => new Promise<void>(resolve => window.setTimeout(resolve, milliseconds)));
+      for (const delay of [0, 50, 150, 300]) {
+        if (delay) await wait(delay);
+        this.guard(transfer);
+        if (await store.size(path) !== markerBytes) continue;
+        this.guard(transfer);
+        if (await store.read(path) !== marker) continue;
+        this.guard(transfer);
+        return workspaceQueryLaunchUrl(request, options.inboxHint);
+      }
+      throw Error("The Calendar lookup marker could not be verified.");
+    } catch (error) {
+      await this.release(transfer);
+      throw error;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Provide the exact owned marker for an explicit Desktop save. */
+  exportPending(): TransferFile | null {
+    const transfer = this.pending;
+    if (!transfer || this.busy || transfer.marker === null) return null;
+    try { this.guard(transfer); }
+    catch { return null; }
+    return { name: this.fileName(transfer, "request"), contents: transfer.marker };
+  }
+
+  /** Authenticate a vault reply or an explicitly imported Desktop file in memory. */
+  async receive(requestId: string, imported?: TransferFile): Promise<WorkspaceLookupDelivery> {
+    const transfer = this.pending;
+    if (!transfer || this.busy || transfer.delivery || transfer.request.requestId !== requestId)
+      throw Error("No matching pending Calendar lookup.");
+    this.guard(transfer);
+    const store = this.options.store;
+    this.busy = true;
+    let authenticatedReply: string | undefined;
+    try {
+      let raw: string;
+      if (imported !== undefined) {
+        if (!imported || imported.name !== this.fileName(transfer, "reply"))
+          throw Error("Choose the Calendar reply file for this lookup.");
+        const contents = imported.contents;
+        if (typeof contents !== "string" || !contents || contents.length > QUERY_REPLY_BYTES || encoder.encode(contents).byteLength > QUERY_REPLY_BYTES)
+          throw Error("This Calendar lookup reply is empty or too large.");
+        raw = contents;
+      } else {
+        const path = this.path(transfer, "reply");
+        const size = await store.size(path);
+        this.guard(transfer);
+        if (size === null) throw Error("No Calendar reply yet. Approve the lookup in Calendar, then try again.");
+        if (!Number.isSafeInteger(size) || size < 1 || size > QUERY_REPLY_BYTES)
+          throw Error("This Calendar lookup reply is empty or too large.");
+        raw = await store.read(path);
+      }
+      this.guard(transfer);
+      const delivery = await openWorkspaceLookupReply(raw, transfer.request, this.now(), imported !== undefined).catch(() => {
+        throw Error("The Calendar lookup reply could not be verified. Approve the same lookup in Calendar and retry.");
+      });
+      if (imported === undefined) authenticatedReply = raw;
+      this.guard(transfer);
+      await this.clean(transfer, authenticatedReply);
+      this.guard(transfer);
+      transfer.delivery = delivery;
+      return delivery;
+    } finally {
+      if (!this.live && this.pending === transfer) await this.release(transfer, authenticatedReply);
+      this.busy = false;
+    }
+  }
+
+  /** Check the same in-memory reviewed lookup immediately before the caller uses it. */
+  assertCanUse(delivery: WorkspaceLookupDelivery): void {
+    const transfer = this.pending;
+    if (!transfer || this.busy || transfer.delivery !== delivery) throw Error("Review a current Calendar lookup first.");
+    this.guard(transfer);
+  }
+
+  async cancel(): Promise<void> {
+    if (this.busy) throw Error("Wait for the current Calendar check to finish.");
+    const transfer = this.pending;
+    if (!transfer) return;
+    this.busy = true;
+    try { await this.release(transfer); }
+    finally { this.busy = false; }
+  }
+
+  /** In-flight operations stop at the next guard and clear any files they still own. */
+  async dispose(): Promise<void> {
+    this.live = false;
+    if (!this.busy) await this.cancel();
+  }
+
+  private async release(transfer: LookupTransfer, authenticatedReply?: string): Promise<void> {
+    if (this.pending === transfer) this.pending = null;
+    transfer.delivery = null;
+    await this.clean(transfer, authenticatedReply);
+  }
+
+  private async clean(transfer: LookupTransfer, authenticatedReply?: string): Promise<void> {
+    const store = this.options.store;
+    const canClean = () => this.sameVault(transfer.owner) && (this.options.canClean ?? this.options.allowed)();
+    const removeExact = async (path: string, expected: string) => {
+      if (!canClean()) return;
+      const size = await store.size(path);
+      if (size !== encoder.encode(expected).byteLength || size > QUERY_REPLY_BYTES || !canClean()) return;
+      if (await store.read(path) === expected && canClean()) await store.remove(path);
+    };
+    try {
+      if (transfer.marker !== null) await removeExact(this.path(transfer, "request"), transfer.marker).catch(() => {});
+      if (authenticatedReply !== undefined) await removeExact(this.path(transfer, "reply"), authenticatedReply).catch(() => {});
+    } finally {
+      transfer.marker = null;
+      transfer.request.key = "";
+    }
+  }
+}
