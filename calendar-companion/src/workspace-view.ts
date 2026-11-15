@@ -22,6 +22,7 @@ import { selectionLabel } from "./selection-reference";
 import { ReferenceModal } from "./reference-modal";
 import { budgetLabel } from "./input-budget";
 import { InputBudgetModal } from "./input-budget-modal";
+import { calendarChangeCard, calendarChangeToggle } from "./calendar-change-view";
 
 export const AI_VIEW = "yoofloe-ai";
 const STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -580,9 +581,10 @@ export class YoofloeAiView extends ItemView {
   }
   private get showFollowUp(): boolean {
     const w = this.work;
-    return w.canStop || w.stopping || w.canContinue || !this.followUpClosed && !!(w.followUpDraft || w.editingFollowUpId);
+    return !w.calendarDraftActive && (w.canStop || w.stopping || w.canContinue || !this.followUpClosed && !!(w.followUpDraft || w.editingFollowUpId));
   }
   private openFollowUp(): void {
+    if (this.work.calendarDraftActive) return;
     this.followUpClosed = false;
     this.render();
     this.contentEl.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input")?.focus();
@@ -608,7 +610,7 @@ export class YoofloeAiView extends ItemView {
       run.classList.toggle("mod-cta", !w.busy);
     }
     const add = el.querySelector<HTMLButtonElement>(".y-ai-add-message");
-    if (add) add.hidden = !!followUp || !w.followUpDraft;
+    if (add) add.hidden = w.calendarDraftActive || !!followUp || !w.followUpDraft;
     const close = el.querySelector<HTMLButtonElement>(".y-ai-close-follow-up");
     if (close) {
       close.hidden = (w.busy || w.canContinue) && !w.editingFollowUpId;
@@ -617,7 +619,7 @@ export class YoofloeAiView extends ItemView {
     el.querySelectorAll<HTMLButtonElement>(".y-ai-submit-follow-up").forEach(submit => {
       const mode = submit.dataset.followUp;
       submit.classList.toggle("mod-cta", mode === w.followUpDefault);
-      submit.disabled = w.followUpSaving || w.addingAttachments || !w.followUpDraft.trim() || w.stopping ||
+      submit.disabled = w.calendarDraftActive || w.followUpSaving || w.addingAttachments || !w.followUpDraft.trim() || w.stopping ||
         w.followUps.length >= FOLLOW_UP_LIMIT && !w.editingFollowUpId || mode === "steer" && !w.canSteer;
     });
   }
@@ -886,6 +888,7 @@ export class YoofloeAiView extends ItemView {
         this.button(calendar, "Find relevant Calendar records", () => { void w.findCalendar().then(url => { if (url) this.contentEl.ownerDocument.defaultView?.open(url, "_self"); }); }, w.settingsLocked);
       } else if (!w.delivery) this.button(calendar, "Check Calendar reply", () => { if (w.requestId) void w.receiveCalendar(w.requestId); }, w.settingsLocked);
       if (w.requestId) this.button(calendar, w.delivery ? "Remove Calendar context" : "Cancel Calendar request", () => void w.removeCalendar(), w.settingsLocked);
+      calendarChangeToggle(calendar, w);
       if (w.delivery) {
         calendar.createEl("p", { text: `${w.delivery.context.scope.areas.map(a => AREA_LABELS[a]).join(", ")} · ${w.delivery.context.from ?? "any date"} → ${w.delivery.context.through ?? "any date"}${w.delivery.context.partial ? " · partial coverage" : ""}` });
         for (const record of w.delivery.records) { const item = calendar.createEl("details"); item.createEl("summary", { text: record.title }); item.createEl("pre", { text: record.text }); }
@@ -931,6 +934,7 @@ export class YoofloeAiView extends ItemView {
     scroll.createEl("a", { text: "www.yoofloe.com ↗", href: "https://www.yoofloe.com", cls: "y-ai-site", attr: { target: "_blank", rel: "noopener noreferrer" } });
     const followUp = this.showFollowUp;
     const dock = chatPanel.createDiv({ cls: `y-ai-dock${followUp ? " y-ai-follow-up-open" : ""}` });
+    calendarChangeCard(dock, w);
     if (w.reference) {
       const reference = w.reference, chip = dock.createDiv({ cls: "y-ai-reference-chip", attr: { "aria-label": "Selected reference" } });
       const preview = this.button(chip, "", () => new ReferenceModal(this.app, w, reference, followUp).open(), false, "y-ai-reference-open");

@@ -406,3 +406,8 @@
 .y-ai-reference-preview .y-ai-reference-render th, .y-ai-reference-preview .y-ai-reference-render td { border:1px solid var(--background-modifier-border); padding:8px; }
 .y-ai-reference-preview .y-ai-reference-render pre { white-space:pre-wrap; overflow-wrap:anywhere; }
 .y-ai-reference-preview .y-ai-reference-images img { display:block; max-width:100%; height:auto; margin-block:12px; border:1px solid var(--background-modifier-border); }
+
+.yoofloe-ai .y-ai-calendar-proposal { max-height:35vh; overflow:auto; }
+.yoofloe-ai .y-ai-calendar-proposal ol { padding-inline-start:1.5em; }
+.yoofloe-ai .y-ai-calendar-proposal-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.is-mobile .yoofloe-ai .y-ai-calendar-proposal-actions button { min-height:36px; height:auto; white-space:normal; }

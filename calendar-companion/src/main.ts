@@ -2,7 +2,8 @@ import { turnConversation } from "./conversation-library";
 import { openDesktopResponse } from "./desktop-responses";
 import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, requestUrl, requireApiVersion, type SettingDefinitionRender } from "obsidian";
 import { ACTION, INBOX } from "./protocol";
-import { CalendarSession } from "./session";
+import { CalendarSession, type TransferStore } from "./session";
+import { CalendarChangeSession } from "./calendar-change-session";
 import { AiPreferences, localSecretBinding } from "./ai-preferences";
 import { OPENAI_ADAPTER } from "./openai";
 import { AiSession } from "./ai-session";
@@ -12,6 +13,7 @@ import { AI_VIEW, LegacyYoofloeView, YoofloeAiView } from "./workspace-view";
 import { loadWorkRecords, obsidianAgentHost } from "./obsidian-agent-host";
 import { CompanionModal } from "./manual-import";
 import { captureSelectionReference, type SelectionReference } from "./selection-reference";
+import { observeNoteSelection } from "./note-selection-observer";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, PRIVACY_URL } from "./privacy-copy";
 import { readChat, validChatId, chatMatches, searchChatPreview, type ChatTurn } from "./chat-history";
 import { generatedStore } from "./generated-files";
@@ -30,10 +32,11 @@ export default class YoofloeAiPlugin extends Plugin {
   private gate = { busy: false };
   private lastSource: WorkspaceSource | null = null;
   private sourceEpoch = 0;
+  private selectionEpoch = 0;
   private capturingSource: number | null = null;
   private capturingPath: string | null = null;
   private notesReady = false;
-  private actions = new Map<MarkdownView, HTMLElement>();
+  private actions = new Map<MarkdownView, { button: HTMLElement; document: Document; stopSelection: () => void }>();
   onload(): void {
     this.addSettingTab(new YoofloeSettings(this.app, this));
     this.registerView(AI_VIEW, leaf => new YoofloeAiView(leaf, this.workspace(), { settings: () => this.openAiSettings(), chooseNote: () => { void this.chooseNote(); }, hide: () => { leaf.detach(); } }));
@@ -53,10 +56,24 @@ export default class YoofloeAiPlugin extends Plugin {
       this.registerEvent(this.app.workspace.on("active-leaf-change", trackNote));
       this.registerEvent(this.app.workspace.on("file-open", trackNote));
       this.app.workspace.onLayoutReady(() => { update(); this.notesReady = true; void this.mergeLegacyPanels(); });
-      this.register(() => { for (const action of this.actions.values()) action.remove(); this.actions.clear(); });
+      this.register(() => {
+        for (const action of this.actions.values()) { action.button.remove(); action.stopSelection(); }
+        this.actions.clear();
+      });
     }
     this.registerObsidianProtocolHandler(ACTION, params => {
       if (!this.live || !Platform.isAndroidApp) { new Notice("Direct Calendar lookup requires both apps on the same Android phone or tablet. Yoofloe itself works without Calendar."); return; }
+      if (params.version === "4") {
+        const changes = this.work?.calendarChanges;
+        if (!changes || !params.requestId || params.requestId !== changes.requestId) {
+          new Notice("No matching Calendar change connection. Check the proposal in Yoofloe.");
+          return;
+        }
+        const leaf = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
+        if (leaf) void this.app.workspace.revealLeaf(leaf);
+        void changes.receive(params.requestId);
+        return;
+      }
       if (!params.requestId) { this.openWorkspace(); return; }
       if (params.vault !== this.app.vault.getName()) { new Notice("This Calendar request belongs to another vault."); return; }
       if (this.work?.requestId === params.requestId) { void this.work.receiveCalendar(params.requestId); this.openWorkspace(); return; }
@@ -83,16 +100,63 @@ export default class YoofloeAiPlugin extends Plugin {
     }
     return source;
   }
+  private canCaptureOpenReference(view: MarkdownView, work: AiWorkspace): boolean {
+    const doc = view.contentEl.ownerDocument;
+    return this.live && this.work === work && work.canChangeReference && !work.settingsLocked && !work.editingFollowUpId &&
+      this.app.workspace.getLeavesOfType(AI_VIEW).some(leaf => {
+        if (!(leaf.view instanceof YoofloeAiView)) return false;
+        const pane = leaf.view.contentEl;
+        return pane.ownerDocument === doc && (Platform.isMobile || pane.isConnected && pane.getClientRects().length > 0);
+      });
+  }
+  private watchOpenReference(view: MarkdownView): () => void {
+    return observeNoteSelection(view.contentEl, () => {
+      const work = this.work;
+      if (!work || !this.canCaptureOpenReference(view, work)) return null;
+      try {
+        const source = this.capture(view);
+        if (!source || (!source.selection && !source.quote)) return null;
+        return { key: JSON.stringify(source), value: { work, source, revision: work.referenceRevision } };
+      } catch { return null; }
+    }, ({ work, source, revision }, epoch) => {
+      const file = view.file;
+      const mode = view.getMode();
+      const ownerDocument = view.contentEl.ownerDocument;
+      if (epoch !== this.selectionEpoch || !file || file.path !== source.path || work.referenceRevision !== revision) return;
+      void (async () => {
+        const document = mode === "source" ? view.editor.getValue() : await this.app.vault.cachedRead(file);
+        const reference = await captureSelectionReference(source.path, document, source.selection?.from ?? 0,
+          source.selection?.to ?? document.length, source.quote);
+        if (epoch !== this.selectionEpoch || view.file !== file || file.path !== source.path || view.getMode() !== mode ||
+            view.contentEl.ownerDocument !== ownerDocument ||
+            !this.canCaptureOpenReference(view, work) || !this.actions.has(view)) return;
+        work.setReference(reference, revision);
+      })().catch(() => { /* A stale or unsupported selection leaves the draft as it was. */ });
+    }, () => {
+      const work = this.work;
+      if (work && this.canCaptureOpenReference(view, work)) this.selectionEpoch++;
+      return this.selectionEpoch;
+    });
+  }
   private updateActions(bindActive = false): void {
     if (!this.live) return;
     const active = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (active?.file) {
-      if (this.lastSource?.path !== active.file.path && this.capturingPath !== active.file.path) { this.sourceEpoch++; this.capturingSource = null; this.capturingPath = null; this.lastSource = { path: active.file.path }; }
+      if (this.lastSource?.path !== active.file.path && this.capturingPath !== active.file.path) { this.sourceEpoch++; this.selectionEpoch++; this.capturingSource = null; this.capturingPath = null; this.lastSource = { path: active.file.path }; }
       if (bindActive && this.capturingSource === null && this.work && this.lastSource) this.work.bind({ path: this.lastSource.path });
     }
     const views = this.app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).filter((view): view is MarkdownView => view instanceof MarkdownView);
-    for (const [view, action] of this.actions) if (!views.includes(view)) { action.remove(); this.actions.delete(view); }
-    for (const view of views) if (!this.actions.has(view)) this.actions.set(view, view.addAction("sparkles", "Yoofloe", () => this.openWorkspace(view)));
+    for (const [view, action] of this.actions) if (!views.includes(view)) {
+      action.button.remove(); action.stopSelection(); this.actions.delete(view);
+    }
+    for (const view of views) {
+      const doc = view.contentEl.ownerDocument;
+      const previous = this.actions.get(view);
+      if (previous?.document === doc) continue;
+      previous?.stopSelection();
+      const button = previous?.button ?? view.addAction("sparkles", "Yoofloe", () => this.openWorkspace(view));
+      this.actions.set(view, { button, document: doc, stopSelection: this.watchOpenReference(view) });
+    }
   }
   openWorkspace(sourceView?: MarkdownView): void {
     void this.showWorkspace(sourceView).catch(() => new Notice("Yoofloe could not open. Existing notes and saved work are kept."));
@@ -100,6 +164,7 @@ export default class YoofloeAiPlugin extends Plugin {
   private async showWorkspace(sourceView?: MarkdownView): Promise<void> {
     if (!this.live) return;
     const epoch = ++this.sourceEpoch;
+    const selectionEpoch = ++this.selectionEpoch;
     const referenceRevision = this.work?.referenceRevision;
     const file = this.app.workspace.getActiveFile();
     const focused = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -123,7 +188,7 @@ export default class YoofloeAiPlugin extends Plugin {
     const work = this.workspace(); await work.initialize(); if (!this.live) return;
     if (this.sourceEpoch === epoch && this.capturingSource === null) {
       work.bind(selected ?? this.lastSource, false, true);
-      if (reference) work.setReference(reference, referenceRevision ?? work.referenceRevision);
+      if (reference && selectionEpoch === this.selectionEpoch) work.setReference(reference, referenceRevision ?? work.referenceRevision);
     }
     let leaf = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
     if (Platform.isPhone && leaf && leaf.getRoot() !== this.app.workspace.rootSplit) {
@@ -193,6 +258,13 @@ export default class YoofloeAiPlugin extends Plugin {
       return `${root}/conversations/${id}.json`;
     };
     let chatQueue: Promise<void> = Promise.resolve();
+    const companionStore: TransferStore = {
+      exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path),
+      write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
+      size: async path => { const stat = await adapter.stat(path); return stat?.type === "file" ? stat.size : null; },
+      remove: path => adapter.remove(path),
+    };
+    const companionOptions = { store: companionStore, vaultName: () => owner.getName(), allowed: () => ai.current() && Platform.isAndroidApp };
     this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
       ...(Platform.isDesktopApp ? { liveResponse: openDesktopResponse } : {}),
       generated: generatedStore({ ...localFiles, download: provider.download }),
@@ -251,9 +323,10 @@ export default class YoofloeAiPlugin extends Plugin {
           return { turns, nextOffset: index < paths.length ? index : null };
         },
       },
-      ...(Platform.isAndroidApp ? { calendar: () => new CalendarSession({ vaultName: () => owner.getName(), allowed: () => ai.current() && Platform.isAndroidApp,
-        store: { exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path), write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
-          size: async path => { const stat = await adapter.stat(path); return stat?.type === "file" ? stat.size : null; }, remove: path => adapter.remove(path) } }) } : {}),
+      ...(Platform.isAndroidApp ? {
+        calendar: () => new CalendarSession(companionOptions),
+        calendarChange: () => new CalendarChangeSession({ ...companionOptions, canClean: () => this.app.vault === owner }),
+      } : {}),
     });
     return this.work;
   }

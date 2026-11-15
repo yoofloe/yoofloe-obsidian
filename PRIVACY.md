@@ -84,8 +84,10 @@ Requests already in flight may still be processed and charged after Stop.
   archived conversation is local only; a new task sends limited recent context rather than the whole chat archive.
 - Original Markdown backups are stored under `Yoofloe AI/Backups/`; task journals list changed paths/digests under
   the configuration directory's `plugins/yoofloe/tasks/`. Old panel layout state is backed up there before consolidation.
-- Optional Calendar handoffs use the existing local Inbox and authenticated encrypted replies. Exact session files
-  are cleaned up only when safe; independently changed or uncertain files are preserved.
+- Optional Calendar handoffs use the local Inbox and authenticated encrypted replies. Change proposals use a
+  separate encrypted payload and a short-lived transfer key in the Inbox request file. Keep the Inbox out of
+  cloud sync if possible. Software that can read the Inbox can access its request files. Exact session files are
+  cleaned up only when safe; independently changed or uncertain files are preserved.
 
 These local files can contain personal or confidential information. Vault sync, backup software and other trusted
 plugins may access or copy them. The plugin's scope guard is not an operating-system isolation boundary.
@@ -113,7 +115,8 @@ organization, within the read and change scopes you choose. It does not silently
 Credential-pattern detection blocks recognized keys in outgoing material but cannot identify every secret or personal detail.
 Write/edit modes can make real changes in their selected scope, including several files. Version checks,
 original backups, task records and conflict-aware Undo reduce mistakes; they cannot guarantee perfect model behavior.
-Trash requires your separate choice. Calendar data is read-only. Review facts and rights before publishing AI-assisted work.
+Obsidian Trash requires your separate choice. Calendar lookup is read-only. The Calendar app reviews, applies and
+undoes approved changes to supported events and tasks and keeps the result locally. Review facts and rights before publishing AI-assisted work.
 
 ## Personal data and legal responsibilities
 
