@@ -60,7 +60,7 @@ Drafts, answers, recent context and recovery records remain on your device and m
 See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local removal and scope details.
 Note titles and vault-relative paths returned by search can also go to OpenAI. Select a passage while the Yoofloe pane is
 open to add a reference chip above the composer. Opening Yoofloe from a selected passage works too. Click the chip to preview it or create local image pages. Use its x button to remove
-the reference and its selected images from the next message, or **Undo removal** to restore them.
+the reference and its selected images from the next message. Use **Restore reference** to bring them back.
 References guide the task. **Access** continues to control which notes the task can read and edit, including other passages
 or notes. Open editor text, including unsaved changes, is used. Changed references require a fresh selection.
 Long passages have versioned continuation cursors and reading coverage. Queue stores each message's reference and
@@ -149,7 +149,7 @@ A new task keeps up to two bounded prior turns as context. Opening another note 
 
 Before content changes, exact originals are verified in **Yoofloe AI/Backups/** and a recovery record is written
 in `.obsidian/plugins/yoofloe/tasks/` (or the vault's custom configuration directory).
-**Undo this task** only restores files whose current content still matches the recorded version.
+**Revert changes from this task** only restores files whose current content still matches the recorded version.
 Newer user edits, occupied filenames, modified backups and uncertain operations are kept.
 Empty folders are retained. Review the changed-file list and use original backups for manual recovery if needed.
 **Trash always requires a separate user choice** after reviewing the concrete notes.
@@ -176,7 +176,7 @@ Return to Obsidian, choose workspaces, record types and dates, and tap **Find re
 Review the search in Calendar and return to Obsidian for the excerpts. **Quick Calendar lookup** supports Calendar 1.8.5 or later.
 
 Archive, Trash, financial records and attachment metadata have separate controls. **Draft workspace changes** prepares
-supported Schedule, Study, Project and Notes changes. Review and apply proposals in Calendar. Use **Undo in Calendar**
+supported Schedule, Study, Project and Notes changes. Review and apply proposals in Calendar. Use **Revert in Calendar**
 for a confirmed batch or **Check status in Calendar** to recover a missed reply. Full-record Markdown snapshot import remains available in Settings.
 
 ### ChronoHUD

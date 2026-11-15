@@ -15,7 +15,7 @@ Run `npm run check`, `npm run lint`, `npm test` before releasing all three paylo
 Use **Workspace settings → App context → Yoofloe Calendar** and **Check Calendar connection**. Share capabilities in Calendar,
 return to Obsidian to choose workspaces and record types, then approve the lookup in Calendar. Date and folder filters narrow the search. Archive, Trash, financial records and attachment metadata each have a separate switch. The local summary lists its sources and identifies partial coverage.
 
-Choose which approved excerpts to include before sending a message. **Draft workspace changes** uses the connected Calendar build's supported actions. Review and apply the batch in Calendar, and use the matching proposal's Undo action to revert it.
+Choose which approved excerpts to include before sending a message. **Draft workspace changes** uses the connected Calendar build's supported actions. Review and apply the batch in Calendar. Use **Revert in Calendar** for the matching proposal.
 
 Use **Quick Calendar lookup** for the original lookup and one-off event and task proposal controls.
 

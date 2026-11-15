@@ -7,7 +7,7 @@ import { isRecordKind, recordLabel } from "./record-types";
 const statusLabels: Record<CalendarChangeStatus, string> = {
   draft: "Proposal ready", waiting: "Waiting for Calendar", applied: "Applied in Calendar",
   cancelled: "Cancelled in Calendar", conflict: "Calendar found a conflict", not_found: "No saved result found",
-  undone: "Undone in Calendar", rejected: "Rejected by Calendar",
+  undone: "Reverted in Calendar", rejected: "Rejected by Calendar",
 };
 const actionLabels: Record<string, string> = {
   create: "Add", update: "Edit", delete: "Move to Trash", restore: "Restore",
@@ -94,7 +94,7 @@ function renderCard(container: HTMLElement, workspace: AiWorkspace, extended: bo
     if (url) container.ownerDocument.defaultView?.open(url, "_self");
   };
   if (controller.canOpen("review")) button("Review in Calendar", open("review"), true);
-  if (controller.canOpen("undo")) button("Undo in Calendar", open("undo"), true);
+  if (controller.canOpen("undo")) button("Revert in Calendar", open("undo"), true);
   if (controller.requestId) {
     button("Check Calendar reply", async () => {
       const id = controller.requestId;

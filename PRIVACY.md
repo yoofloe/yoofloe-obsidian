@@ -103,7 +103,7 @@ directory as well if you want to remove full archived conversations. Older chat 
 their previews leave the recent 50-task display. For a custom configuration directory, substitute that directory for `.obsidian`.
 Task journals are under `plugins/yoofloe/tasks/` in that same configuration directory; original backups are ordinary
 vault files under `Yoofloe AI/Backups/`. Delete those only when you no longer need recovery. Removing a backup can make
-Undo unavailable. Other sync/backup copies and provider-side retention are managed separately.
+recovery unavailable. Other sync/backup copies and provider-side retention are managed separately.
 
 ## Scope, safety and your choices
 
@@ -114,7 +114,7 @@ The output folder does not enable creation under Current note. In Note folder mo
 organization, within the read and change scopes you choose. It does not silently change those scopes.
 Credential-pattern detection blocks recognized keys in outgoing material but cannot identify every secret or personal detail.
 Write/edit modes can make real changes in their selected scope, including several files. Version checks,
-original backups, task records and conflict-aware Undo reduce mistakes; they cannot guarantee perfect model behavior.
+original backups, task records and conflict-aware recovery reduce mistakes; they cannot guarantee perfect model behavior.
 Obsidian Trash requires your separate choice. The Calendar app reviews, applies and undoes approved changes
 and keeps the result locally. Its capabilities determine the available Schedule, Study, Project and Notes actions.
 The workspace lookup has separate approvals for archive, Trash, financial records and attachment metadata. Sending

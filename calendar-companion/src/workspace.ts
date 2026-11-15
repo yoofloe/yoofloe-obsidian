@@ -1244,14 +1244,14 @@ export class AiWorkspace {
   }
   async undo(journal: WorkJournal): Promise<void> {
     if (!this.current || this.settingsLocked) return; this.busy = true; this.changed();
-    try { const agent = new VaultAgent(this.options.host(() => this.current), this.policy(), () => this.current); const result = await agent.undo(journal); if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath; this.message = `Undo: ${result.restored} action(s) restored; ${result.kept} kept because recovery could not safely be confirmed. Newer user edits are preserved.`; await this.persist(); }
+    try { const agent = new VaultAgent(this.options.host(() => this.current), this.policy(), () => this.current); const result = await agent.undo(journal); if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath; this.message = `Reverted ${result.restored} action(s). Kept ${result.kept} action(s) to protect newer or uncertain changes.`; await this.persist(); }
     catch { this.message = "Recovery could not be confirmed. Notes and backups were kept."; }
     finally { this.busy = false; this.changed(); }
   }
   async confirmTrash(): Promise<void> {
     if (!this.agent || this.settingsLocked || !this.current) return; this.busy = true; this.changed();
     let failed = false;
-    try { await this.agent.confirmTrash(); this.message = "Selected notes moved to Obsidian Trash. Original backups and Undo are available."; }
+    try { await this.agent.confirmTrash(); this.message = "Selected notes moved to Obsidian Trash. Open Recovery to revert the changes."; }
     catch (error) { failed = true; this.message = error instanceof Error ? error.message : "Trash could not be confirmed. No retry was made."; }
     finally {
       if (this.current) {

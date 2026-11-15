@@ -1018,11 +1018,11 @@ export class YoofloeAiView extends ItemView {
       if (w.agent) for (const sent of w.agent.sent) activity.createEl("p", { text: `Read for OpenAI: ${sent.path} · ${sent.bytes} bytes`, cls: "y-ai-hint" });
     }
     if (w.history.length) {
-      const history = this.details(secondarySettings, "history", "Changed files and recovery"); this.settingSummary(history, "Recovery", "Undo", "history");
+      const history = this.details(secondarySettings, "history", "Changed files and recovery"); this.settingSummary(history, "Recovery", "Note changes", "history");
       for (const journal of w.history.slice(0, 10)) {
-        const item = history.createDiv({ cls: "y-ai-card" }); item.createEl("strong", { text: `${new Date(journal.createdAt).toLocaleString()} · ${journal.status}` });
-        for (const op of journal.operations) item.createEl("p", { text: `${op.kind}: ${op.path}${op.target ? ` → ${op.target}` : ""} · ${op.status}`, cls: "y-ai-hint" });
-        this.button(item, "Undo this task", () => void w.undo(journal), w.settingsLocked || journal.status === "undone");
+        const item = history.createDiv({ cls: "y-ai-card" }); item.createEl("strong", { text: `${new Date(journal.createdAt).toLocaleString()} · ${journal.status === "undone" ? "Reverted" : journal.status}` });
+        for (const op of journal.operations) item.createEl("p", { text: `${op.kind}: ${op.path}${op.target ? ` → ${op.target}` : ""} · ${op.status === "undone" ? "reverted" : op.status}`, cls: "y-ai-hint" });
+        this.button(item, "Revert changes from this task", () => void w.undo(journal), w.settingsLocked || journal.status === "undone");
       }
     }
     if (w.preview) { const preview = this.details(scroll, "preview", "Data to be sent · initial preview"); preview.open = true; preview.createEl("pre", { text: w.preview }); }
@@ -1040,7 +1040,7 @@ export class YoofloeAiView extends ItemView {
       remove.setAttribute("aria-label", "Remove reference from the next message"); setTooltip(remove, "Remove reference");
       setIcon(remove, "x");
     } else if (w.canRestoreReference) {
-      const undo = this.button(dock, "Undo removal", () => w.restoreReference(), false, "y-ai-reference-undo");
+      const undo = this.button(dock, "Restore reference", () => w.restoreReference(), false, "y-ai-reference-undo");
       setTooltip(undo, "Restore the last reference and its selected images");
     }
     const selectedAttachments = followUp ? w.followUpAttachments : w.attachments;
