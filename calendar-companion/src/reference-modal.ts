@@ -19,6 +19,14 @@ export class ReferenceModal extends Modal {
     const gallery = this.contentEl.createDiv({ cls: "y-ai-reference-images" });
     const open = actions.createEl("button", { text: "Open note" });
     open.addEventListener("click", () => { this.close(); void this.app.workspace.openLinkText(this.reference.path, ""); });
+    const whole = actions.createEl("button", { text: "Use whole note" });
+    whole.disabled = !this.work.canChangeReference || this.reference.wholeNote === true;
+    whole.addEventListener("click", () => {
+      whole.disabled = true;
+      void this.work.useWholeNoteReference(this.reference).then(changed => { if (changed) this.close(); })
+        .catch(error => { if (this.alive) state.setText(error instanceof Error ? error.message : "The reference could not be updated."); })
+        .finally(() => { whole.disabled = !this.work.canChangeReference || this.reference.wholeNote === true; });
+    });
     if (this.snapshot) {
       text.setText(this.snapshot.text);
       state.setText(this.snapshot.partial ? "Saved preview of the opening passage." : "Saved reference from this message.");
@@ -26,14 +34,6 @@ export class ReferenceModal extends Modal {
       close.addEventListener("click", () => this.close());
       return;
     }
-    const whole = actions.createEl("button", { text: "Use whole note" });
-    whole.disabled = !this.work.canChangeReference || this.reference.wholeNote === true;
-    whole.addEventListener("click", () => {
-      whole.disabled = true;
-      void this.work.useWholeNoteReference(this.reference).then(changed => { if (changed) this.close(); })
-        .catch(error => { if (this.alive) state.setText(error instanceof Error ? error.message : "The reference could not be updated."); })
-        .finally(() => { whole.disabled = !this.work.canChangeReference; });
-    });
     if (this.work.reference?.id !== this.reference.id) {
       const use = actions.createEl("button", { text: "Use reference" });
       use.disabled = !this.work.canChangeReference;
