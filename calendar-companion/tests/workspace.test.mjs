@@ -849,3 +849,54 @@ test('a saved compaction is reused only in the same conversation with matching a
   assert(!JSON.stringify(bodies[3].input).includes('opaque-session-context'));
   assert.equal(f.saved().autoCompact, false);
 });
+
+for (const scope of ["folder", "vault"]) {
+  test("Send searches the " + scope + " and edits an allowed note when the previous attachment is missing", async () => {
+    const f = fixture();
+    const inside = await f.host.create("Studies/Seven Target.md", "Existing in-folder draft.");
+    const outside = await f.host.create("Other/Seven Target.md", "Existing other-folder draft.");
+    const excluded = await f.host.create("Studies/Excluded/Seven Target.md", "Excluded content.");
+    const goal = scope === "folder" ? inside : outside;
+    const prompt = "Read the existing target and append a new set.";
+    f.options.storage.load = async () => ({ source: "Studies/Old.md", prompt, outputFolder: "Studies",
+      mode: "all", readScope: scope, writeScope: scope, excluded: "Studies/Excluded" });
+    const responses = [];
+    const call = (id, name, args) => response([{ type: "function_call", call_id: id, name, arguments: JSON.stringify(args) }]);
+    const getOutput = (body, id) => JSON.parse(body.input.find(item => item.type === "function_call_output" && item.call_id === id).output);
+    f.options.transport = async request => {
+      const body = JSON.parse(request.body);
+      responses.push(body);
+      if (responses.length === 1) {
+        const input = JSON.parse(body.input[0].content);
+        assert.equal(input.request, prompt);
+        assert.equal(input.current_note.reference, undefined);
+        assert.match(input.current_note.note, /search_notes/);
+        assert.equal(input.permissions.data, scope);
+        assert.equal(input.permissions.changes, scope);
+        return call("search", "search_notes", { query: "Seven Target", limit: 8, offset: 0 });
+      }
+      if (responses.length === 2) {
+        const hits = getOutput(body, "search").notes;
+        assert.deepEqual(hits.map(note => note.path).sort(), scope === "folder" ? [inside.path] : [outside.path, inside.path]);
+        return call("read", "read_notes", { notes: [{ reference: hits.find(note => note.path === goal.path).reference, from_line: 1, through_line: 0 }] });
+      }
+      if (responses.length === 3) {
+        const note = getOutput(body, "read").notes[0];
+        assert.equal(note.path, goal.path);
+        return call("write", "apply_changes", { changes: [{ reference: note.reference, version: note.version, action: "append", markdown: "New synthetic section." }] });
+      }
+      return response([{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Updated the requested note." }] }]);
+    };
+    await f.work.initialize();
+    f.work.bind({ path: "Studies/Spare.md" });
+    await f.work.review();
+    assert(JSON.parse(f.work.preview).current_note.note.includes("search_notes"));
+    await f.work.run();
+    assert(responses.length >= 4);
+    assert.equal(f.work.chat.at(-1).status, "completed");
+    assert.match(goal.text, /New synthetic section/);
+    assert.equal((scope === "folder" ? outside : inside).text, scope === "folder" ? "Existing other-folder draft." : "Existing in-folder draft.");
+    assert.equal(excluded.text, "Excluded content.");
+    assert.equal(f.work.chat.at(-1).sourcePath, "");
+  });
+}

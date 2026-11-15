@@ -88,8 +88,11 @@ export class VaultAgent {
     return safeNoteMarkdown(withSources(value, sources), images);
   }
   constructor(readonly host: AgentHost, readonly policy: TaskPolicy, private readonly current: () => boolean) {
-    const source = host.files().find(file => file.path === policy.sourcePath);
-    if (source) this.refs.set("N1", { file: source, allowedRange: policy.readScope === "current" ? policy.selection : undefined });
+    const source = policy.sourcePath ? host.files().find(file => file.path === policy.sourcePath) : undefined;
+    // Folder and vault access work independently of the conversation's optional attachment.
+    if (policy.readScope !== "current" && policy.sourcePath && (!source || !allowedPath(policy, source.path, "read"))) {
+      this.policy = { ...policy, sourcePath: null, selection: undefined, selectionVersion: undefined };
+    } else if (source) this.refs.set("N1", { file: source, allowedRange: policy.readScope === "current" ? policy.selection : undefined });
   }
   private guard() { if (!this.current()) throw Error("This task stopped or the vault changed. No further file action is allowed."); }
   private async reserveOperations(count: number): Promise<void> {
@@ -195,7 +198,12 @@ export class VaultAgent {
     if (source && !this.allowedRef(source, "read")) throw Error("The attached note is outside the permitted data scope.");
     if (source && (deferNoteRead || [...this.refs.values()].some(ref => ref.provided && ref.file.identity === source.file.identity && ref.file.path === source.file.path)))
       return { reference: "N1", path: source.file.path, title: source.file.title, note: "Read N1 as needed within Access settings. The note body has not been included automatically." };
-    return source ? await this.excerpt(source, 1, 0, undefined, undefined, true) : { source: "No existing note is attached.", write_target: this.policy.writeScope, note: this.policy.writeScope === "current" ? "Current note has no writable target. The user must attach a note or explicitly choose New documents before creating notes." : "Only the selected write target grants changes." };
+    if (source) return await this.excerpt(source, 1, 0, undefined, undefined, true);
+    const search = this.policy.readScope === "current" ? "" : "Use search_notes to locate requested notes in the selected data scope. ";
+    const write = this.policy.writeScope === "current" ?
+      "Current note has no writable target. The user must attach a note or explicitly choose New documents before creating notes." :
+      "Only the selected write target grants changes.";
+    return { source: "No existing note is attached.", write_target: this.policy.writeScope, note: search + write };
   }
   async finish(): Promise<void> { this.journal.status = "complete"; if (this.journal.operations.length) await this.host.persist(this.journal); }
   private async prepareEdit(file: AgentFile, before: string, afterHash: string): Promise<JournalOp> {
@@ -210,9 +218,9 @@ export class VaultAgent {
     if (name === "search_notes") {
       closedObject(args, ["query", "limit", "offset"]); const terms = noteTerms(textField(args.query, 4000)); const count = Number(args.limit), offset = Number(args.offset);
       if (!Number.isInteger(count) || count < 1 || count > 32) throw Error("Search returns 1–32 note references.");
-      if (!Number.isInteger(offset) || offset < 0 || offset > 2000) throw Error("Use the returned bounded search offset.");
+      if (!Number.isSafeInteger(offset) || offset < 0) throw Error("Use the returned bounded search offset.");
       const allowed = this.host.files().filter(file => this.allowedRef({ file }, "read"));
-      const candidates = allowed.slice(0, 2000).map(file => ({ file, score: rankNote(file.title, terms) * 10 })).sort((a, b) => b.score - a.score).slice(offset, offset + 32);
+      const candidates = allowed.map(file => ({ file, score: rankNote(file.title, terms) * 10 })).sort((a, b) => b.score - a.score).slice(offset, offset + 32);
       const hits = []; let scanned = 0;
       for (const item of candidates) {
         this.guard(); if (!terms.length && !item.score && item.file.path !== this.policy.sourcePath) continue;
@@ -221,7 +229,7 @@ export class VaultAgent {
         if (!score && item.file.path !== this.policy.sourcePath) continue;
         safeOutbound(item.file.title + "\n" + item.file.path); hits.push({ reference: this.reference(item.file), title: item.file.title, path: item.file.path, score });
       }
-      return { notes: hits.sort((a, b) => b.score - a.score).slice(0, count), inspected: candidates.length, content_scanned: scanned, permitted_total: allowed.length, partial: allowed.length > offset + candidates.length, next_offset: offset + candidates.length < Math.min(allowed.length, 2000) ? offset + candidates.length : null, metadata_limit: 2000 };
+      return { notes: hits.sort((a, b) => b.score - a.score).slice(0, count), inspected: candidates.length, content_scanned: scanned, permitted_total: allowed.length, partial: allowed.length > offset + candidates.length, next_offset: offset + candidates.length < allowed.length ? offset + candidates.length : null };
     }
     if (name === "read_notes") {
       closedObject(args, ["notes"]); const output = [];

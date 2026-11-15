@@ -608,7 +608,7 @@ export class AiWorkspace {
       ? "provided" : effectiveSourceMode(this.sourceMode, request);
     if (this.delivery) this.calendar?.assertCanSave(this.delivery);
     const workspaceLookup = this.workspaceCalendar?.excerptsEnabled ? this.workspaceCalendar.modelDelivery() : null;
-    const scope = !this.delivery && !workspaceLookup && !attachments.length ? await this.contextScope(this.policy(), sourceMode, this.model.model, reference, deferNoteRead) : null;
+    const scope = !this.delivery && !workspaceLookup && !attachments.length ? await this.contextScope(agent.policy, sourceMode, this.model.model, reference, deferNoteRead) : null;
     const previous = this.previous.filter(turn => (sourceMode === "expanded" || turn.sourceMode !== "expanded") &&
       (turn.contextScope === undefined && !reference && !deferNoteRead || !!scope && turn.contextScope === scope)).slice(-2)
       .map(turn => ({ request: turn.request.slice(0, 2000), answer: turn.answer.slice(0, 4000) }));
@@ -979,7 +979,7 @@ export class AiWorkspace {
           this.chat = [...this.chat, turn].slice(-CHAT_HISTORY_LIMIT);
           const unsubscribe = this.watchTask(task);
           try { await task.run(input, { ...this.model }, this.mode, this.maximum, { mode: sourceMode, maximum: this.onlineMaximum },
-            calendarDraft ? undefined : this.source?.path, { autoCompact: this.autoCompact && !calendarDraft, items: context }); }
+            calendarDraft ? undefined : agent.policy.sourcePath, { autoCompact: this.autoCompact && !calendarDraft, items: context }); }
           finally { unsubscribe(); }
           if (this.current) { await this.collectTask(task, agent); completed = task.state === "completed"; }
         }

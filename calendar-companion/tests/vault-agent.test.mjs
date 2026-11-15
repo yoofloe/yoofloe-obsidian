@@ -210,3 +210,16 @@ test('repeated selection edits retain the authorized range, including deletion, 
  current=(await a.execute('read_notes',{notes:[{reference:'N1',from_line:1,through_line:0}]})).notes[0];assert.equal(current.text,'');assert.equal(f.policy.selection.to,7);assert.equal(f.files.get('Notes/Plan.md').text,'# Plan\n');
  f.files.get('Notes/Plan.md').text+='Human edit';await assert.rejects(a.execute('read_notes',{notes:[{reference:'N1',from_line:1,through_line:0}]}),/selected note changed/);
 });
+
+test("Vault search ranks permitted notes beyond the first 2,000 entries without unbounded content reads", async () => {
+  const { host, policy } = fixture({});
+  const agent = new VaultAgent(host, { ...policy, sourcePath: null, readScope: "vault" }, () => true);
+  for (let index = 0; index < 2010; index++) await host.create("Old/Note " + index + ".md", "Background.");
+  const tail = await host.create("Extra/Distinct Vault Target.md", "The content has a tail-keyword.");
+  const named = await agent.execute("search_notes", { query: "Distinct Vault Target", limit: 8, offset: 0 });
+  assert(named.notes.some(note => note.path === tail.path));
+  assert(named.content_scanned <= 32);
+  const page = await agent.execute("search_notes", { query: "tail-keyword", limit: 8, offset: 2010 });
+  assert.deepEqual(page.notes.map(note => note.path), [tail.path]);
+  assert.equal(page.next_offset, null);
+});
