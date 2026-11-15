@@ -251,12 +251,13 @@ function canonical(value: unknown): unknown {
 function sameQuery(a: WorkspaceQuery, b: WorkspaceQuery): boolean {
   return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 }
-export function validateWorkspaceLookup(value: unknown, request: WorkspaceQueryRequest, now = Date.now()): WorkspaceLookupDelivery {
+export function validateWorkspaceLookup(value: unknown, request: WorkspaceQueryRequest, now = Date.now(), manualTransfer = false): WorkspaceLookupDelivery {
   shape(value, ["version", "requestId", "datasetId", "exportedAt", "query", "context", "records", "capabilities"]);
   const { datasetId, exportedAt, records } = value;
+  // A manual reply can come from another device clock. It still has to fit this request window.
   assertId(datasetId);
   if (value.version !== 5 || value.requestId !== request.requestId || typeof exportedAt !== "number" || !Number.isSafeInteger(exportedAt) ||
-      exportedAt < request.createdAt - 60000 || exportedAt > now + 60000 || exportedAt > request.expiresAt)
+      exportedAt < request.createdAt - 60000 || exportedAt > request.expiresAt || !manualTransfer && exportedAt > now + 60000)
     throw Error("This Calendar reply belongs to a different request.");
   const query = validateWorkspaceQuery(value.query);
   if (!sameQuery(query, request.query)) throw Error("The Calendar reply changed the selected scope.");
@@ -286,7 +287,7 @@ export function validateWorkspaceLookup(value: unknown, request: WorkspaceQueryR
   if (usedBytes > (lookup?.maxTextBytes ?? 0)) throw Error("The Calendar reply exceeds the excerpt budget.");
   return { version: WORKSPACE_VERSION, requestId: request.requestId, datasetId, exportedAt, query, context, records: result, capabilities };
 }
-export async function openWorkspaceLookupReply(raw: string, request: WorkspaceQueryRequest, now = Date.now()): Promise<WorkspaceLookupDelivery> {
+export async function openWorkspaceLookupReply(raw: string, request: WorkspaceQueryRequest, now = Date.now(), manualTransfer = false): Promise<WorkspaceLookupDelivery> {
   if (!Number.isSafeInteger(now) || now > request.expiresAt || now < request.createdAt - 60000 || bytes(raw) > QUERY_REPLY_BYTES)
     throw Error("This Calendar request expired or its reply exceeds the size limit.");
   const reply: unknown = JSON.parse(raw);
@@ -298,7 +299,7 @@ export async function openWorkspaceLookupReply(raw: string, request: WorkspaceQu
     if (key.length !== 32 || iv.length !== 12 || ciphertext.length < 16) throw Error("The Calendar reply is incomplete.");
     const imported = await crypto.subtle.importKey("raw", key, { name: "AES-GCM" }, false, ["decrypt"]);
     const clear = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv, additionalData: workspaceQueryAad(request) }, imported, ciphertext));
-    try { return validateWorkspaceLookup(JSON.parse(decoder.decode(clear)), request, now); }
+    try { return validateWorkspaceLookup(JSON.parse(decoder.decode(clear)), request, now, manualTransfer); }
     finally { clear.fill(0); }
   } finally { key.fill(0); }
 }

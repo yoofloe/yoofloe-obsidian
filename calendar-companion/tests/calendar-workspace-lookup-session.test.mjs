@@ -284,3 +284,18 @@ test("reads native recurrence metadata and lowercase financial types from the ex
   await assert.rejects(makeSession(store).start({vaultId:original.vaultId,query:withoutProject}),/outside the selected workspaces/);
   assert.equal(calls.length,0);
 });
+
+test("manual lookup accepts an authenticated clock-skewed export within the exact live request window", async () => {
+  const { store, files } = memoryStore();
+  const session = makeSession(store);
+  const { id, request } = await start(session, files);
+  const reply = await replyTo(request, { exportedAt: now + 80_000 });
+  files.set(replyPath(id), reply);
+  await assert.rejects(session.receive(id), /could not be verified/);
+  const wrongTime = await replyTo(request, { exportedAt: request.expiresAt + 1 });
+  await assert.rejects(session.receive(id, { name: id + ".reply.json", contents: wrongTime }), /could not be verified/);
+  const accepted = await session.receive(id, { name: id + ".reply.json", contents: reply });
+  assert.equal(accepted.exportedAt, now + 80_000);
+  assert(!files.has(requestPath(id)));
+  assert(files.has(replyPath(id)));
+});

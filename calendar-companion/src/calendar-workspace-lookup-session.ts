@@ -149,7 +149,7 @@ export class CalendarWorkspaceLookupSession {
         raw = await store.read(path);
       }
       this.guard(transfer);
-      const delivery = await openWorkspaceLookupReply(raw, transfer.request, this.now()).catch(() => {
+      const delivery = await openWorkspaceLookupReply(raw, transfer.request, this.now(), imported !== undefined).catch(() => {
         throw Error("The Calendar lookup reply could not be verified. Approve the same lookup in Calendar and retry.");
       });
       if (imported === undefined) authenticatedReply = raw;
