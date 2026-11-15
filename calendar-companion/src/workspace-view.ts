@@ -25,6 +25,8 @@ import { InputBudgetModal } from "./input-budget-modal";
 import { calendarChangeCard, calendarChangeToggle, workspaceCalendarChangeToggle } from "./calendar-change-view";
 import { renderCalendarWorkspacePanel } from "./calendar-workspace-panel";
 import { downloadCalendarTransfer, pickCalendarTransfer } from "./calendar-workspace-file";
+import { renderChronoHudPanel } from "./chronohud-panel";
+import { CHRONOHUD_REPLY_BYTES } from "./chronohud-protocol";
 import { QUERY_REPLY_BYTES } from "./question-query";
 
 export const AI_VIEW = "yoofloe-ai";
@@ -740,6 +742,35 @@ export class YoofloeAiView extends ItemView {
     content.createEl("p", { text: `The request can include permitted notes and selected files. ${w.mode === "ask" ? "Access is read-only." : `Write access is set to ${WRITE_SCOPE_LABELS[w.writeScope]}.`}` });
     content.createEl("a", { text: "OpenAI API data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
   }
+  private chronoHudPanel(parent: HTMLElement): void {
+    const access = this.work.chronoHud;
+    if (!access) return;
+    const panel = this.details(parent, "chronohud", "ChronoHUD data");
+    this.settingSummary(panel, "ChronoHUD", "Optional app context", "timer");
+    const manual = Platform.isDesktopApp;
+    const saveRequest = () => { downloadCalendarTransfer(parent.ownerDocument.body, access.exportPending()); };
+    const requestContext = async () => {
+      const url = await access.open();
+      if (!url) return;
+      if (manual) saveRequest();
+      else this.contentEl.ownerDocument.defaultView?.open(url, "_self");
+    };
+    const checkReply = async () => {
+      const id = access.requestId;
+      if (!id) return;
+      try {
+        const file = manual ? await pickCalendarTransfer(this.contentEl, id + ".reply.json", CHRONOHUD_REPLY_BYTES, "Import ChronoHUD reply") : undefined;
+        if (!manual || file) await access.receive(id, file ?? undefined);
+      } catch (error) { new Notice(error instanceof Error ? error.message : "The ChronoHUD reply could not be opened."); }
+    };
+    renderChronoHudPanel(panel, {
+      draft: access.draft, locked: this.work.settingsLocked, manual, pending: access.pending, busy: access.busy,
+      delivery: access.delivery, message: access.message, includedIndices: access.includedIndices,
+      excerptsEnabled: access.excerptsEnabled, openSections: this.openDetails, requestContext, checkReply, saveRequest,
+      updateDraft: patch => access.updateDraft(patch), clearContext: () => access.clear(),
+      setIncluded: (index, included) => access.setIncluded(index, included), useExcerpts: enabled => access.useExcerpts(enabled),
+    });
+  }
   private workspaceCalendarPanel(parent: HTMLElement): void {
     const workspace = this.work, access = workspace.workspaceCalendar;
     if (!access) return;
@@ -929,6 +960,7 @@ export class YoofloeAiView extends ItemView {
       }
     }
     this.workspaceCalendarPanel(calendar);
+    this.chronoHudPanel(scroll);
     calendar.createEl("a", { text: "Discover Yoofloe Calendar ↗", href: STORE, attr: { target: "_blank", rel: "noopener noreferrer" } });
     scroll.append(secondarySettings);
     if (w.chat.length || this.chatQuery) this.conversation(messages);

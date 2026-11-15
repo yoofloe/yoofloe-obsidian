@@ -8,6 +8,8 @@ import { CalendarWorkspaceLookupSession } from "./calendar-workspace-lookup-sess
 import { CalendarWorkspaceChangeSession } from "./calendar-workspace-change-session";
 import { validateCalendarWorkspaceOperation } from "./calendar-workspace-catalog";
 import { temporaryCalendarTransferStore } from "./calendar-workspace-file";
+import { ChronoHudLookupSession } from "./chronohud-lookup-session";
+import { CHRONOHUD_ACTION, CHRONOHUD_INBOX } from "./chronohud-protocol";
 import { AiPreferences, localSecretBinding } from "./ai-preferences";
 import { OPENAI_ADAPTER } from "./openai";
 import { AiSession } from "./ai-session";
@@ -65,6 +67,13 @@ export default class YoofloeAiPlugin extends Plugin {
         this.actions.clear();
       });
     }
+    this.registerObsidianProtocolHandler(CHRONOHUD_ACTION, params => {
+      const access = this.work?.chronoHud;
+      if (!this.live || !Platform.isAndroidApp || params.version !== "1" || !params.requestId || params.requestId !== access?.requestId) return;
+      const leaf = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
+      if (leaf) void this.app.workspace.revealLeaf(leaf);
+      void access.receive(params.requestId);
+    });
     this.registerObsidianProtocolHandler(ACTION, params => {
       if (!this.live || !Platform.isAndroidApp) { new Notice("Direct Calendar lookup requires both apps on the same Android phone or tablet. Yoofloe itself works without Calendar."); return; }
       if (params.version === "5" && params.requestId) {
@@ -353,6 +362,8 @@ export default class YoofloeAiPlugin extends Plugin {
       } : {}),
       ...(Platform.isAndroidApp || Platform.isDesktopApp ? {
         workspaceLookup: () => new CalendarWorkspaceLookupSession(workspaceTransfer()),
+        chronoHudLookup: () => new ChronoHudLookupSession(workspaceTransfer()),
+        chronoHudInboxHint: () => adapter.getResourcePath(CHRONOHUD_INBOX + "/"),
         workspaceChange: () => new CalendarWorkspaceChangeSession({ ...workspaceTransfer(), validate: validateCalendarWorkspaceOperation }),
       } : {}),
     });

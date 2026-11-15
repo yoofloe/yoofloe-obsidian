@@ -34,9 +34,9 @@ export function downloadCalendarTransfer(container: HTMLElement, file: CalendarT
 }
 
 /** The user selects a single exact reply. It stays in memory until the session authenticates it. */
-export function pickCalendarTransfer(container: HTMLElement, name: string, maximum: number): Promise<CalendarTransferFile | null> {
+export function pickCalendarTransfer(container: HTMLElement, name: string, maximum: number, label = "Import Calendar reply"): Promise<CalendarTransferFile | null> {
   return new Promise((resolve, reject) => {
-    const input = container.createEl("input", { type: "file", attr: { accept: ".json", "aria-label": "Import Calendar reply" } });
+    const input = container.createEl("input", { type: "file", attr: { accept: ".json", "aria-label": label } });
     input.hidden = true;
     input.addEventListener("cancel", () => { input.remove(); resolve(null); }, { once: true });
     input.addEventListener("change", () => {

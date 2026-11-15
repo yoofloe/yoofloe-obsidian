@@ -1,0 +1,39 @@
+{
+  "now": 1938232860000,
+  "request": {
+    "format": "yoofloe.chronohud.request",
+    "version": 1,
+    "requestId": "ba01c347-b1b4-4356-897a-2d3e2585f496",
+    "vault": "Q2hyb25vSFVEIGludGVyb3AgdmF1bHQg7ZWc",
+    "vaultId": "bc521172-ce09-42bf-8738-af3bc2e1f983",
+    "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+    "key": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+    "createdAt": 1938232858800,
+    "expiresAt": 1938233458800,
+    "query": {
+      "areas": [
+        "dashboard",
+        "timeline",
+        "mandalart",
+        "matrix"
+      ],
+      "terms": [
+        "ćwiczenie",
+        "계획"
+      ],
+      "maxRecords": 6,
+      "maxTextBytes": 4096
+    }
+  },
+  "requestAad": "yoofloe-chronohud/v1|ba01c347-b1b4-4356-897a-2d3e2585f496|Q2hyb25vSFVEIGludGVyb3AgdmF1bHQg7ZWc|bc521172-ce09-42bf-8738-af3bc2e1f983|QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+  "launchUrl": "chronohud://obsidian/connect?version=1&requestId=ba01c347-b1b4-4356-897a-2d3e2585f496&vault=Q2hyb25vSFVEIGludGVyb3AgdmF1bHQg7ZWc&vaultId=bc521172-ce09-42bf-8738-af3bc2e1f983",
+  "callbackUrl": "obsidian://yoofloe-chronohud-context?version=1&requestId=ba01c347-b1b4-4356-897a-2d3e2585f496",
+  "plaintext": "{\"version\":1,\"requestId\":\"ba01c347-b1b4-4356-897a-2d3e2585f496\",\"exportedAt\":1938232860000,\"query\":{\"areas\":[\"dashboard\",\"timeline\",\"mandalart\",\"matrix\"],\"terms\":[\"ćwiczenie\",\"계획\"],\"maxRecords\":6,\"maxTextBytes\":4096},\"context\":{\"zone\":\"Europe/Warsaw\",\"scanned\":9,\"matched\":5,\"partial\":true},\"records\":[{\"area\":\"dashboard\",\"title\":\"Plan ćwiczenia\",\"text\":\"Until: 3 calendar days remaining\",\"date\":\"2031-06-06\"},{\"area\":\"timeline\",\"title\":\"계획 기록\",\"text\":\"Sketch the next chapter.\\nReview the first draft.\",\"date\":\"2031-06-03\"},{\"area\":\"mandalart\",\"title\":\"Ćwiczenie planowania\",\"text\":\"Goal: practice\\nSubgoal: writing\\nAction: outline the next chapter\",\"date\":null},{\"area\":\"matrix\",\"title\":\"계획 검토\",\"text\":\"Quadrant: important, not urgent\\nPlanned: 2031-06-04\\nDeadline: 2031-06-06\\nStatus: open\",\"date\":\"2031-06-04\"}]}",
+  "reply": {
+    "format": "yoofloe.chronohud.reply",
+    "version": 1,
+    "requestId": "ba01c347-b1b4-4356-897a-2d3e2585f496",
+    "iv": "YGFiY2RlZmdoaWpr",
+    "ciphertext": "mbbbzoGjEjqXZl2NOWgBHANy_nE1RDzrMYXbCb_g0A5UnFHhFaHk1mhPUG4fYkswKOQNzf9ry1aCP9YTJ_59H8pza1f2as_2DNlaab9MA9XFagP7RexExpII17aQ9as3gyHYp9uKVMAPCf9ps3lu--nagepQPVd_y-8lnEZ-yckhpEZ2ny1eK1lp9l-8-6nolwYOvj3utlZKu3ezwemJ2sxW4SpBLJe1pJtMa9FUl1JE2h93wvSbl0uJLVPYI2TLOxAxkYi28ikV4EppuqO3CAM1lxOS4jPIt35bbM2Gctkekuapt-LqrtBJbgWxIH0wTBaupG1lDUWNkrhSECbUSsUmkVG0TbIrgZNLy3M_GHEYgszIN7WBF501vgGiBNijRxwzUZfOtNvX9JPE-zoQ9ASw4CHZyK7Xx0QatUCZVAELrC--4cuZ8YuN6sytdlrFordTAodjfeQVT9XlEVxxFJOfHMdi-ErOYBTmS2C96ou2AJNJesM_MGjdSRXFjTA25dgO9KwOVm_4KAk31Q8VcJbmdvpMkzidM6ypBsRlx4ZfbcJqy-gl82JxJ8pivgmBKtqxSIS99_eTuvC-wZORHnvGGU0v1wYhm7xw7XrZtwjsVwGGiBIuSRuUgEIoMuanvzNM-5tZzYu9mtm08FIP2xIVo6Hop78_j-gcXvRYVqElCjiOortCohT4jIc1OUevs8lfDEC6fS_CTurRVjU3pVHI0ZmBtn9twdcXaO0rPT4-DUBSy_Y16iYo-W_B3s1Hvy0YCC5Os9mQAwn1OiBC9rk7a-WYuZLxeQh-6FkewXiX90FFieYvKvEFlZKOYQrVowv_3v7OqDKKuZUOQmix63Nw2M7bi4b-d018XeLO438eaPtgBp6P0t3MdG28DnByxMHiQj5ke7AzehP9lA_EtuEi8X3E1wzGjm-yReEcF525DDN8pf69tpWyX7gWvFidJCF_7x3maBEV-26Lwic2iRmu2Be9imtlNErRihmxhzm9hxWePpOxl_wzhO1HsxC-y2mVIXCX4cTfmQcUMDvb-oA7qHdrPPoaOtlx1z4CePWcP8fGlKqv-D1OEW5zFkA85rcfbVpq4k22vbyizEpb1UHmwSmhrAsboyxRpjbcXI9_u4yJYUJE6k4"
+  }
+}
