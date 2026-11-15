@@ -22,6 +22,7 @@ export class CalendarChangeSession {
   constructor(private readonly options: {
     store: TransferStore; vaultName: () => string; allowed: () => boolean; now?: () => number;
     wait?: (milliseconds: number) => Promise<void>;
+    canClean?: () => boolean;
   }) {}
 
   get requestId(): string | null { return this.pending?.request.requestId ?? null; }
@@ -30,6 +31,9 @@ export class CalendarChangeSession {
 
   private now(): number { return (this.options.now ?? Date.now)(); }
   private owns(owner: string): boolean { return this.options.allowed() && owner === this.options.vaultName(); }
+  private canClean(owner: string): boolean {
+    return this.options.vaultName() === owner && (this.options.canClean ?? this.options.allowed)();
+  }
   private guard(owner: string, pending?: PendingCalendarChange): void {
     if (!this.live || !this.owns(owner) || (pending && this.pending !== pending))
       throw Error("This vault session changed. Open Calendar from the active vault.");
@@ -141,11 +145,11 @@ export class CalendarChangeSession {
     if (this.pending === transfer) this.pending = null;
     const store = this.options.store;
     const removeExact = async (path: string, expected: string) => {
-      if (!this.owns(transfer.owner)) return;
+      if (!this.canClean(transfer.owner)) return;
       const size = await store.size(path);
       // Transfer file headers contain ASCII only, so byte size equals string length.
-      if (size !== expected.length || size > MAX_CALENDAR_CHANGE_TRANSFER_BYTES || !this.owns(transfer.owner)) return;
-      if (await store.read(path) === expected && this.owns(transfer.owner)) await store.remove(path);
+      if (size !== expected.length || size > MAX_CALENDAR_CHANGE_TRANSFER_BYTES || !this.canClean(transfer.owner)) return;
+      if (await store.read(path) === expected && this.canClean(transfer.owner)) await store.remove(path);
     };
     try {
       await removeExact(this.path(transfer, false), transfer.marker).catch(() => {});

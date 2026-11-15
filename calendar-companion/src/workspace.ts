@@ -125,6 +125,10 @@ export class AiWorkspace {
       inboxHint: () => this.options.inboxHint(),
       save: () => this.persist(),
       changed: () => this.changed(),
+      draftingChanged: () => {
+        this.previewEpoch++; this.preview = ""; this.message = "";
+        if (this.calendarChanges.enabled && this.followUps.length) this.holdQueue("Resume the existing queue after reviewing the Calendar proposal.");
+      },
     });
   }
   get current() { return this.alive && this.options.current(); }
@@ -153,12 +157,15 @@ export class AiWorkspace {
     try { requestLimit(this.maximum); return ""; } catch { return "Choose a positive whole number or no request-count limit."; }
   }
   get canResumeWithLimit() { return this.canContinue && !this.limitProblem && (this.maximum === "none" || this.maximum > (this.task?.requests ?? 0)); }
+  get calendarDraftActive(): boolean {
+    return this.calendarChanges.enabled || !!this.task?.draftingCalendar && (this.busy || this.canContinue);
+  }
   get canSteer(): boolean {
     return this.current && !this.stopRequested && !!this.activeAccess && !this.task?.draftingCalendar &&
       (!!this.task?.busy && this.task.state === "running" || this.canContinue);
   }
   get canResumeQueue(): boolean {
-    return this.ready && !this.settingsLocked && !this.followUpSaving && this.configured && !this.limitProblem &&
+    return this.ready && !this.calendarDraftActive && !this.settingsLocked && !this.followUpSaving && this.configured && !this.limitProblem &&
       !this.agent?.pendingTrash.length && this.queueHeld && this.followUps[0]?.status === "queued" && !this.editingFollowUpId;
   }
   subscribe(listener: (change: WorkspaceChange) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -594,6 +601,7 @@ export class AiWorkspace {
   }
   async review(): Promise<void> {
     if (this.settingsLocked || !this.current) return;
+    const epoch = ++this.previewEpoch;
     if (this.calendarChanges.enabled) {
       try {
         this.preview = JSON.stringify(JSON.parse(this.calendarProposalInput(this.prompt, this.delivery)), null, 2);
@@ -602,7 +610,7 @@ export class AiWorkspace {
       this.changed();
       return;
     }
-    const epoch = ++this.previewEpoch, run = this.runEpoch;
+    const run = this.runEpoch;
     const state = () => JSON.stringify([this.source, this.reference, this.deferNoteRead, this.prompt, this.readScope, this.writeScope, this.mode, this.outputFolder, this.excluded, this.sourceMode, this.attachments, this.delivery, this.calendarQuestion, this.area, this.period]);
     const before = state(), current = () => this.current && !this.settingsLocked && epoch === this.previewEpoch && run === this.runEpoch && before === state();
     try { const agent = new VaultAgent(this.options.host(current), this.policy(), current); const { input, context } = await this.prepare(agent); if (!current()) return; this.preview = context.length ? JSON.stringify({ context_items: context.length, current_request: JSON.parse(input) as unknown }, null, 2) : input; this.message = "Initial data below. During this task, relevant excerpts within the data scope may also be sent to OpenAI. Settings and excluded folders cannot be read."; }
@@ -707,7 +715,7 @@ export class AiWorkspace {
     await this.drainQueue();
   }
   async submitFollowUp(mode: FollowUpMode): Promise<boolean> {
-    if (!this.current || !this.ready || this.restoreFailed || this.followUpSaving || this.addingAttachments || this.stopRequested && this.busy) return false;
+    if (this.calendarDraftActive || !this.current || !this.ready || this.restoreFailed || this.followUpSaving || this.addingAttachments || this.stopRequested && this.busy) return false;
     const text = this.followUpDraft.trim();
     const existing = this.followUps.find(entry => entry.id === this.editingFollowUpId);
     if (existing && existing.status !== "review" && existing.status !== "queued") return false;
@@ -798,7 +806,7 @@ export class AiWorkspace {
     if (this.draining) return;
     this.draining = true;
     try {
-      while (this.current && !this.settingsLocked && !this.followUpSaving && this.configured && !this.limitProblem &&
+      while (this.current && !this.calendarDraftActive && !this.settingsLocked && !this.followUpSaving && this.configured && !this.limitProblem &&
         !this.queueHeld && !this.editingFollowUpId && !this.options.gate.busy && !this.agent?.pendingTrash.length) {
         const next = this.followUps[0];
         if (!next) break;
@@ -816,7 +824,8 @@ export class AiWorkspace {
   }
   async run(): Promise<void> {
     if (this.canContinue) { await this.continueTask(); return; }
-    if (await this.runRequest(this.prompt, this.attachments)) await this.drainQueue();
+    const calendarDraft = this.calendarChanges.enabled;
+    if (await this.runRequest(this.prompt, this.attachments) && !calendarDraft) await this.drainQueue();
   }
   private async runRequest(request: string, attachments: Attachment[], queued?: FollowUp): Promise<boolean> {
     const calendarDraft = !queued && this.calendarChanges.enabled;
@@ -977,7 +986,7 @@ export class AiWorkspace {
       }
     } catch (error) { this.message = error instanceof Error ? error.message : "This task could not continue. No retry was made."; }
     finally { unsubscribe(); }
-    if (await this.finishRun(task, completed)) await this.drainQueue();
+    if (await this.finishRun(task, completed) && !task.draftingCalendar) await this.drainQueue();
   }
   async finishHere(): Promise<boolean> {
     if (this.busy || !this.canContinue) return false;

@@ -97,3 +97,27 @@ test("cannot launch, consume, or clean a transfer after switching vaults during 
   assert.equal(session.requestId, null);
   assert.equal(files.size, 1, "must not delete the prior vault's files from another vault's session");
 });
+
+
+test("unloading in the same vault removes an exact marker even after request authority ends", async () => {
+  const { store, files } = memoryStore();
+  let enabled = true, owner = "Fixture vault";
+  const session = new CalendarChangeSession({ store, vaultName: () => owner, allowed: () => enabled,
+    canClean: () => owner === "Fixture vault", now: () => data.now });
+  await session.start(draft, { vaultId });
+  const marker = requestPath(session.requestId);
+  assert(files.has(marker));
+  enabled = false;
+  await session.dispose();
+  assert.equal(files.has(marker), false);
+
+  enabled = true;
+  const switched = new CalendarChangeSession({ store, vaultName: () => owner, allowed: () => enabled,
+    canClean: () => owner === "Fixture vault", now: () => data.now });
+  await switched.start(draft, { vaultId });
+  const kept = requestPath(switched.requestId);
+  owner = "Other vault";
+  enabled = false;
+  await switched.dispose();
+  assert(files.has(kept));
+});

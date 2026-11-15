@@ -65,6 +65,8 @@ test('a Calendar draft is local until user review, then an authenticated result 
       const body = JSON.parse(req.body);
       assert.deepEqual(body.tools.map(t => t.name), ['draft_calendar_changes']);
       assert(!req.body.includes('PRIVATE NOTE TEXT'));
+      assert.equal(await work.submitFollowUp('queue'), false);
+      assert.equal(await work.submitFollowUp('steer'), false);
       if (++calls === 1) return response([{ type:'function_call', call_id:'propose', name:'draft_calendar_changes',
         arguments:JSON.stringify({ operations:[operation()] }) }]);
       return response([result('Review this proposal in Calendar.')]);
@@ -74,7 +76,11 @@ test('a Calendar draft is local until user review, then an authenticated result 
   await work.initialize();
   work.calendarChanges.setEnabled(true);
   work.setPrompt('Add a test task');
+  work.setFollowUpDraft('Preserve this unsent follow-up locally');
+  assert.equal(await work.submitFollowUp('queue'), false);
   await work.run();
+  assert.equal(work.followUpDraft, 'Preserve this unsent follow-up locally');
+  assert.equal(work.followUps.length, 0);
   assert.equal(work.calendarChanges.state.status, 'draft');
   assert.equal(saved.calendarChange.status, 'draft');
   assert.equal(launches, 0);
@@ -115,4 +121,39 @@ test('a Calendar draft is local until user review, then an authenticated result 
   await desktop.initialize();
   assert.equal(desktop.calendarChanges.state.status, 'undone');
   assert.equal(await desktop.calendarChanges.open('status'), null);
+});
+
+
+test('changing Calendar proposal mode clears the visible data preview and invalidates an in-flight note preview', async () => {
+  let readStarted, finishRead;
+  const whenReading = new Promise(resolve => { readStarted = resolve; });
+  const readDelay = new Promise(resolve => { finishRead = resolve; });
+  const note = { path: 'Original.md', title: 'Original', size: 15, identity: {} };
+  const host = { files: () => [note], read: async () => {
+    readStarted(); await readDelay; return 'PRIVATE PREVIEW';
+  } };
+  const work = new AiWorkspace({
+    current: () => true, configDir: '.obsidian', gate: { busy: false }, inboxHint: () => '',
+    host: () => host, calendarChange: () => ({}),
+    preferences: { read: async () => ({model:'gpt-6-luna',effort:'none'}), hasKey: async () => true },
+    storage: { load: async () => ({ source: 'Original.md' }), save: async () => {}, history: async () => [] },
+  });
+  await work.initialize();
+  work.setPrompt('Draft the next step');
+  work.calendarChanges.setEnabled(true);
+  await work.review();
+  assert.match(work.preview, /Calendar proposal only/);
+
+  work.calendarChanges.setEnabled(false);
+  assert.equal(work.preview, '');
+  const pending = work.review();
+  await whenReading;
+  work.calendarChanges.setEnabled(true);
+  await work.review();
+  const approvedPreview = work.preview;
+  assert.match(approvedPreview, /Calendar proposal only/);
+  finishRead();
+  await pending;
+  assert.equal(work.preview, approvedPreview);
+  assert(!work.preview.includes('PRIVATE PREVIEW'));
 });

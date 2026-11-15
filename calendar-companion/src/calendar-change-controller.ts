@@ -37,6 +37,7 @@ export class CalendarChangeController {
     inboxHint(): string;
     save(): Promise<void>;
     changed(): void;
+    draftingChanged(): void;
   }) {}
 
   get requestId() { return this.session?.requestId ?? null; }
@@ -68,8 +69,9 @@ export class CalendarChangeController {
   }
 
   setEnabled(enabled: boolean): void {
-    if (enabled && !this.canDraft) return;
+    if (enabled === this.enabled || enabled && !this.canDraft) return;
     this.enabled = enabled;
+    this.options.draftingChanged();
     this.options.changed();
   }
 

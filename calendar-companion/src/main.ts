@@ -325,7 +325,7 @@ export default class YoofloeAiPlugin extends Plugin {
       },
       ...(Platform.isAndroidApp ? {
         calendar: () => new CalendarSession(companionOptions),
-        calendarChange: () => new CalendarChangeSession(companionOptions),
+        calendarChange: () => new CalendarChangeSession({ ...companionOptions, canClean: () => this.app.vault === owner }),
       } : {}),
     });
     return this.work;
