@@ -115,8 +115,14 @@ organization, within the read and change scopes you choose. It does not silently
 Credential-pattern detection blocks recognized keys in outgoing material but cannot identify every secret or personal detail.
 Write/edit modes can make real changes in their selected scope, including several files. Version checks,
 original backups, task records and conflict-aware Undo reduce mistakes; they cannot guarantee perfect model behavior.
-Obsidian Trash requires your separate choice. Calendar lookup is read-only. The Calendar app reviews, applies and
-undoes approved changes to supported events and tasks and keeps the result locally. Review facts and rights before publishing AI-assisted work.
+Obsidian Trash requires your separate choice. The Calendar app reviews, applies and undoes approved changes
+and keeps the result locally. Its capabilities determine the available Schedule, Study, Project and Notes actions.
+The workspace lookup has separate approvals for archive, Trash, financial records and attachment metadata. Sending
+an AI message uses the selected approved excerpts.
+
+Desktop keeps an active Calendar request in memory. A request file you save contains a one-time transfer key.
+Transfer it through local storage you control. After importing the authenticated reply, remove exported request and
+reply copies from both devices. Review facts and rights before publishing AI-assisted work.
 
 ## Personal data and legal responsibilities
 
