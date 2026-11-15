@@ -1,4 +1,5 @@
 import { setIcon } from "obsidian";
+import { renderCompanionStep } from "./companion-guide";
 import {
   CHRONOHUD_AREAS, CHRONOHUD_MAX_RECORDS, CHRONOHUD_MAX_TEXT_BYTES, chronohudExcerptReference, chronohudSearchTerms,
   validateChronoHudQuery,
@@ -21,7 +22,6 @@ type Action = () => void | Promise<unknown>;
 
 export interface ChronoHudPanelModel {
   draft: ChronoHudPanelDraft;
-  manual: boolean;
   locked?: boolean;
   pending?: boolean;
   busy?: boolean;
@@ -33,7 +33,6 @@ export interface ChronoHudPanelModel {
   updateDraft(patch: Partial<ChronoHudPanelDraft>): void;
   requestContext: Action;
   checkReply: Action;
-  saveRequest?: Action;
   clearContext: Action;
   setIncluded(index: number, included: boolean): void;
   useExcerpts(enabled: boolean): void | Promise<unknown>;
@@ -121,17 +120,26 @@ function renderDelivery(parent: HTMLElement, model: ChronoHudPanelModel, locked:
 export function renderChronoHudPanel(el: HTMLElement, model: ChronoHudPanelModel): void {
   const parent = el.createEl("section", { attr: { "aria-label": "Find context in ChronoHUD" } });
   const locked = !!model.locked || !!model.busy;
-  const editingLocked = locked || !!model.pending;
-  let draft = model.draft;
-  hint(parent, model.manual
-    ? "Open the saved request from About in ChronoHUD on Android. Approve it there, then import the reply here."
-    : "In ChronoHUD, choose the ChronoHUD Inbox folder inside this vault and review the excerpts.");
   if (model.message) parent.createEl("p", { cls: "y-ai-status", text: model.message, attr: { role: "status" } });
+  if (model.pending) {
+    renderCompanionStep(parent, "Approve in ChronoHUD", "Choose this vault’s ChronoHUD Inbox. Review the excerpts, then tap Approve and return to Obsidian.");
+    const actions = parent.createDiv({ cls: "y-ai-calendar-proposal-actions" });
+    button(actions, "Check ChronoHUD reply", model.checkReply, locked, true);
+    button(actions, "Cancel ChronoHUD request", model.clearContext, locked);
+    return;
+  }
+  if (model.delivery) {
+    renderCompanionStep(parent, "Review ChronoHUD excerpts", "Choose the excerpts to include in your next message.");
+    renderDelivery(parent, model, locked);
+  } else {
+    renderCompanionStep(parent, "Choose ChronoHUD data", "Select the areas to look up. In ChronoHUD, choose this vault’s ChronoHUD Inbox and approve the excerpts.");
+  }
+  let draft = model.draft;
 
   const areas = parent.createDiv({ cls: "y-ai-models", attr: { role: "group", "aria-label": "ChronoHUD areas" } });
   for (const area of CHRONOHUD_AREAS) {
     const label = AREA_LABELS[area];
-    toggle(areas, label, label + " in ChronoHUD", draft.areas.includes(area), editingLocked, checked => {
+    toggle(areas, label, label + " in ChronoHUD", draft.areas.includes(area), locked, checked => {
       apply({ areas: CHRONOHUD_AREAS.filter(value => value === area ? checked : draft.areas.includes(value)) });
     });
   }
@@ -141,7 +149,7 @@ export function renderChronoHudPanel(el: HTMLElement, model: ChronoHudPanelModel
     type: "text", attr: { "aria-label": "Search terms (optional) for ChronoHUD", autocomplete: "off" },
   });
   termsInput.value = draft.terms;
-  termsInput.disabled = editingLocked;
+  termsInput.disabled = locked;
   hint(parent, "Separate terms with commas, or leave blank for a recent snapshot.");
   const updateTerms = () => {
     if (termsInput.value !== draft.terms) apply({ terms: termsInput.value });
@@ -152,19 +160,12 @@ export function renderChronoHudPanel(el: HTMLElement, model: ChronoHudPanelModel
   termsInput.addEventListener("compositionend", updateTerms);
 
   const actions = parent.createDiv({ cls: "y-ai-calendar-proposal-actions" });
-  let request: HTMLButtonElement | undefined;
-  if (model.pending) {
-    button(actions, model.manual ? "Import ChronoHUD reply" : "Check ChronoHUD reply", model.checkReply, locked, true);
-    if (model.manual && model.saveRequest) button(actions, "Save request again", model.saveRequest, locked);
-    button(actions, "Cancel ChronoHUD request", model.clearContext, locked);
-  } else {
-    request = button(actions, model.manual ? "Save ChronoHUD request" : "Open ChronoHUD to approve", model.requestContext, locked, true);
-  }
+  const request = button(actions, "Open ChronoHUD to approve", model.requestContext, locked, true);
   const guidance = parent.createEl("p", { cls: "y-ai-hint", attr: { role: "status" } });
 
   function refresh(): void {
     let problem = "";
-    if (!editingLocked) {
+    if (!locked) {
       try {
         validateChronoHudQuery({
           areas: draft.areas, terms: chronohudSearchTerms(draft.terms),
@@ -174,7 +175,7 @@ export function renderChronoHudPanel(el: HTMLElement, model: ChronoHudPanelModel
         problem = error instanceof Error ? error.message : "Review the selected areas and terms.";
       }
     }
-    if (request) request.disabled = locked || !!problem;
+    request.disabled = locked || !!problem;
     guidance.setText(problem);
     guidance.hidden = !problem;
   }
@@ -186,5 +187,4 @@ export function renderChronoHudPanel(el: HTMLElement, model: ChronoHudPanelModel
   }
 
   refresh();
-  renderDelivery(parent, model, editingLocked);
 }

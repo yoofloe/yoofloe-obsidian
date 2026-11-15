@@ -59,7 +59,7 @@ export class ChronoHudAccess {
       const url = await session.start({ query, vaultId, inboxHint: this.options.inboxHint() });
       if (!this.options.current() || this.session !== session) return null;
       this.pending = true;
-      this.message = "Review the requested data in ChronoHUD.";
+      this.message = "";
       return url;
     } catch (error) {
       this.message = error instanceof Error ? error.message : "ChronoHUD could not be opened.";
@@ -86,7 +86,7 @@ export class ChronoHudAccess {
       this.pending = false;
       this.excerptsEnabled = false;
       this.includedIndices = new Set(delivery.records.map((_, i) => i));
-      this.message = "Review the ChronoHUD excerpts and choose what to include in your next message.";
+      this.message = "";
     } catch {
       this.message = "No verified ChronoHUD reply yet. Finish approving the request in ChronoHUD.";
     } finally {

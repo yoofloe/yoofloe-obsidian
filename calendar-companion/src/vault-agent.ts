@@ -11,6 +11,7 @@ export interface ReadCoverage { path: string; selection: boolean; read: number; 
 export interface JournalOp { kind: "edit" | "create" | "rename" | "trash" | "folder" | "asset"; path: string; target?: string; backup?: string; beforeHash: string; afterHash: string; previousHash: string; status: "pending" | "done" | "undone" }
 export interface WorkJournal { id: string; createdAt: number; status: "running" | "complete" | "interrupted" | "undone"; operations: JournalOp[] }
 export const MAX_JOURNAL_OPERATIONS = 200;
+const RECOVERY_BACKUP_PATH = /^Yoofloe AI\/Backups\/[0-9a-f-]{36}\.md$/;
 export function validateJournal(value: unknown): asserts value is WorkJournal {
   closedObject(value, ["id", "createdAt", "status", "operations"]);
   if (!/^[0-9a-f-]{36}$/.test(textField(value.id)) || !Number.isFinite(value.createdAt) || !["running", "complete", "interrupted", "undone"].includes(textField(value.status)) || !Array.isArray(value.operations) || value.operations.length > MAX_JOURNAL_OPERATIONS) throw Error("Invalid recovery record.");
@@ -21,7 +22,7 @@ export function validateJournal(value: unknown): asserts value is WorkJournal {
     const kind = textField(item.kind); if (!["edit", "create", "rename", "trash", "folder", "asset"].includes(kind) || !["pending", "done", "undone"].includes(textField(item.status))) throw Error("Invalid recovery action.");
     if (kind === "asset") generatedPath(textField(item.path)); else vaultPath(textField(item.path), kind === "folder");
     if (kind === "rename") vaultPath(textField(item.target));
-    if (item.backup !== undefined && !/^Yoofloe AI\/Backups\/[0-9a-f-]{36}\.md$/.test(textField(item.backup))) throw Error("Invalid recovery backup.");
+    if (item.backup !== undefined && !RECOVERY_BACKUP_PATH.test(textField(item.backup))) throw Error("Invalid recovery backup.");
     for (const key of ["beforeHash", "afterHash", "previousHash"]) if (!/^(?:[a-f0-9]{64})?$/.test(textField(item[key]))) throw Error("Invalid recovery digest.");
     if (["edit", "trash"].includes(kind) && !item.backup) throw Error("Missing original backup.");
   }
@@ -323,10 +324,11 @@ export class VaultAgent {
       if (!this.allowedRef(ref, sourceAction) || !destinationAllowed || ref.allowedRange) throw Error("Document renaming must stay inside the permitted change scope and requires the complete note.");
       if (this.policy.mode === "edit" && !sameFolder) throw Error("Write and edit can rename this document in its current folder. Choose an organizing mode explicitly to move it to another folder.");
       if (!ref.version || args.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("Read the current note version first.");
-      const affected = this.host.affected(ref.file.path).filter(item => item !== ref.file.path);
+      // Recovery copies intentionally retain the paths and links from the time they were saved.
+      const affected = this.host.affected(ref.file.path).filter(item => item !== ref.file.path && !RECOVERY_BACKUP_PATH.test(item));
       const filesByPath = new Map(this.host.files().map(file => [file.path, file]));
       const permittedBacklink = (path: string, action: "read" | "edit") => { const file = filesByPath.get(path); return !!file && this.allowedRef({ file }, action); };
-      if (affected.some(item => !permittedBacklink(item, "edit"))) throw Error("Backlinks outside the edit scope may change. Expand the scope explicitly before renaming.");
+      if (affected.some(item => !permittedBacklink(item, "edit"))) throw Error("A linked note is outside the allowed edit scope. Include it in the scope before renaming.");
       await this.reserveOperations(1);
       const oldPath = ref.file.path, op: JournalOp = { kind: "rename", path: oldPath, target: path, beforeHash: ref.version, afterHash: ref.version, previousHash: ref.version, status: "pending" };
       this.journal.operations.push(op); await this.host.persist(this.journal); this.guard(); await this.host.rename(ref.file, path); op.status = "done";
