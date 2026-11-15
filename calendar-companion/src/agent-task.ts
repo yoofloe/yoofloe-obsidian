@@ -334,7 +334,7 @@ export class AgentTask {
             if (this.stopped || !this.options.current()) break;
             try {
               const args: unknown = JSON.parse(call.arguments);
-              if (this.options.calendarDraft && call.name !== "draft_calendar_changes")
+              if (this.options.calendarDraft && call.name !== this.options.calendarDraft.definition.name)
                 throw Error("This task can only draft Calendar proposals.");
               const outcome = this.options.calendarDraft ?
                 await this.options.calendarDraft.draft(args) : await this.options.executor.execute(call.name, args);
@@ -465,6 +465,7 @@ export class AgentTask {
 
 const toolLabels: Record<string, string> = {
   draft_calendar_changes: "Draft Calendar changes",
+  draft_calendar_workspace_changes: "Draft Calendar workspace changes",
   search_notes: "Search notes",
   read_notes: "Read notes",
   read_next: "Read next passage",

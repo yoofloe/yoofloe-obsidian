@@ -1,11 +1,26 @@
 import { containsCredential } from "./agent-policy";
-import { readCalendarChangeDraft, type CalendarChangeAction, type CalendarChangeDraft, type CalendarChangeReply } from "./calendar-change";
-import type { CalendarChangeSession } from "./calendar-change-session";
+import type { CalendarChangeAction, CalendarChangeDraft, CalendarChangeReply } from "./calendar-change";
+import type { CalendarWorkspaceChangeReply } from "./calendar-workspace-change";
+import type { CalendarTransferFile } from "./calendar-workspace-file";
+
+interface ProposalIdentity {
+  datasetId: string | null;
+  operations: readonly { opId: string }[];
+}
+type ChangeReply = CalendarChangeReply | CalendarWorkspaceChangeReply;
+interface ChangeTransfer<Draft extends ProposalIdentity, Reply extends ChangeReply> {
+  readonly action: CalendarChangeAction | null;
+  readonly requestId: string | null;
+  start(draft: Draft, options: { vaultId: string; inboxHint?: string; action: CalendarChangeAction; datasetId: string | null }): Promise<string>;
+  receive(requestId: string, imported?: CalendarTransferFile): Promise<Reply>;
+  exportPending?(): CalendarTransferFile | null;
+  dispose(): Promise<void>;
+}
 import { assertId, shape } from "./protocol";
 
 export type CalendarChangeStatus = CalendarChangeReply["status"] | "draft" | "waiting";
-export interface CalendarChangeState {
-  draft: CalendarChangeDraft;
+export interface CalendarChangeState<Draft = CalendarChangeDraft> {
+  draft: Draft;
   titles: Record<string, string>;
   status: CalendarChangeStatus;
   datasetId: string | null;
@@ -23,15 +38,17 @@ const resultMessages: Record<CalendarChangeReply["status"], string> = {
 };
 
 /** Owns local proposal state. Android owns approval, writes and undo. */
-export class CalendarChangeController {
-  state: CalendarChangeState | null = null;
+export class CalendarChangeController<Draft extends ProposalIdentity = CalendarChangeDraft, Reply extends ChangeReply = CalendarChangeReply> {
+  state: CalendarChangeState<Draft> | null = null;
   enabled = false;
   busy = false;
   message = "";
-  lastReply: CalendarChangeReply | null = null;
-  private session: CalendarChangeSession | null = null;
+  lastReply: Reply | null = null;
+  private session: ChangeTransfer<Draft, Reply> | null = null;
   constructor(private readonly options: {
-    session(): CalendarChangeSession;
+    session(): ChangeTransfer<Draft, Reply>;
+    readDraft(saved: unknown): Promise<Draft>;
+    authorize?(draft: Draft): boolean;
     current(): boolean;
     vaultId(): Promise<string>;
     inboxHint(): string;
@@ -49,7 +66,7 @@ export class CalendarChangeController {
     this.lastReply = null;
     if (saved === null || saved === undefined) { this.state = null; return; }
     shape(saved, ["draft", "titles", "status", "datasetId", "applied"]);
-    const draft = await readCalendarChangeDraft(saved.draft);
+    const draft = await this.options.readDraft(saved.draft);
     const dataset = saved.datasetId;
     if (dataset !== null) assertId(dataset);
     if (!statuses.includes(saved.status as CalendarChangeStatus) || typeof saved.applied !== "boolean" ||
@@ -75,9 +92,9 @@ export class CalendarChangeController {
     this.options.changed();
   }
 
-  async stage(draft: CalendarChangeDraft, titles: Record<string, string>, current: () => boolean): Promise<void> {
+  async stage(draft: Draft, titles: Record<string, string>, current: () => boolean): Promise<void> {
     if (!current() || !this.canDraft) throw Error("Finish or clear the current Calendar proposal first.");
-    const state: CalendarChangeState = { draft, titles, status: "draft", datasetId: draft.datasetId, applied: false };
+    const state: CalendarChangeState<Draft> = { draft, titles, status: "draft", datasetId: draft.datasetId, applied: false };
     this.state = state;
     this.enabled = false;
     try { await this.options.save(); }
@@ -93,7 +110,7 @@ export class CalendarChangeController {
 
   canOpen(action: CalendarChangeAction): boolean {
     const state = this.state;
-    if (!state || !this.options.current() || this.busy) return false;
+    if (!state || !this.options.current() || this.busy || this.options.authorize?.(state.draft) === false) return false;
     if (action === "review") return !this.requestId && !state.applied && (state.status === "draft" || state.status === "cancelled");
     if (action === "undo") return !this.requestId && state.applied && state.datasetId !== null && state.status !== "waiting";
     return state.status !== "draft";
@@ -102,7 +119,7 @@ export class CalendarChangeController {
   async open(action: CalendarChangeAction): Promise<string | null> {
     const state = this.state;
     if (!state || !this.canOpen(action)) return null;
-    const waiting: CalendarChangeState = { ...state, status: "waiting" };
+    const waiting: CalendarChangeState<Draft> = { ...state, status: "waiting" };
     this.busy = true;
     this.options.changed();
     try {
@@ -137,13 +154,15 @@ export class CalendarChangeController {
     } finally { this.busy = false; this.options.changed(); }
   }
 
-  async receive(requestId: string): Promise<boolean> {
+  exportPending(): CalendarTransferFile | null { return this.session?.exportPending?.() ?? null; }
+
+  async receive(requestId: string, imported?: CalendarTransferFile): Promise<boolean> {
     const state = this.state, session = this.session;
     if (!state || !session || requestId !== session.requestId || !this.options.current() || this.busy) return false;
     const action = session.action;
     this.busy = true;
     try {
-      const reply = await session.receive(requestId);
+      const reply = await session.receive(requestId, imported);
       if (this.state !== state || !this.options.current()) return false;
       this.lastReply = reply;
       const confirmed = reply.status === "applied" || reply.status === "undone";

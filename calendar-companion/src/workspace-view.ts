@@ -22,7 +22,10 @@ import { selectionLabel } from "./selection-reference";
 import { ReferenceModal } from "./reference-modal";
 import { budgetLabel } from "./input-budget";
 import { InputBudgetModal } from "./input-budget-modal";
-import { calendarChangeCard, calendarChangeToggle } from "./calendar-change-view";
+import { calendarChangeCard, calendarChangeToggle, workspaceCalendarChangeToggle } from "./calendar-change-view";
+import { renderCalendarWorkspacePanel } from "./calendar-workspace-panel";
+import { downloadCalendarTransfer, pickCalendarTransfer } from "./calendar-workspace-file";
+import { QUERY_REPLY_BYTES } from "./question-query";
 
 export const AI_VIEW = "yoofloe-ai";
 const STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -737,6 +740,37 @@ export class YoofloeAiView extends ItemView {
     content.createEl("p", { text: `The request can include permitted notes and selected files. ${w.mode === "ask" ? "Access is read-only." : `Write access is set to ${WRITE_SCOPE_LABELS[w.writeScope]}.`}` });
     content.createEl("a", { text: "OpenAI API data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
   }
+  private workspaceCalendarPanel(parent: HTMLElement): void {
+    const workspace = this.work, access = workspace.workspaceCalendar;
+    if (!access) return;
+    const extended = this.details(parent, "calendar-workspaces", "Calendar workspaces"), manual = Platform.isDesktopApp;
+    const exportRequest = () => { downloadCalendarTransfer(parent.ownerDocument.body, access.exportPending()); };
+    const open = async (mode: "capabilities" | "records") => {
+      const url = await access.open(mode);
+      if (!url) return;
+      if (manual) exportRequest();
+      else this.contentEl.ownerDocument.defaultView?.open(url, "_self");
+    };
+    const check = async () => {
+      const id = access.requestId;
+      if (!id) return;
+      try {
+        const file = manual ? await pickCalendarTransfer(this.contentEl, id + ".reply.json", QUERY_REPLY_BYTES) : undefined;
+        if (!manual || file) await access.receive(id, file ?? undefined);
+      } catch (error) { new Notice(error instanceof Error ? error.message : "The Calendar reply could not be opened."); }
+    };
+    renderCalendarWorkspacePanel(extended, {
+      selection: access.selection, capabilities: access.capabilities, delivery: access.delivery,
+      message: access.message, pending: access.pending, locked: workspace.settingsLocked, canFind: access.canFind,
+      excerptsEnabled: access.excerptsEnabled, openSections: this.openDetails, manual,
+      includedIndices: access.includedIndices, setIncluded: (index, included) => access.setIncluded(index, included),
+      checkCapabilities: () => open("capabilities"), findRecords: () => open("records"),
+      checkReply: check, saveRequest: exportRequest,
+      clearContext: () => access.clear(), updateSelection: patch => access.updateSelection(patch),
+      useExcerpts: enabled => access.useExcerpts(enabled),
+    });
+    workspaceCalendarChangeToggle(extended, workspace);
+  }
   private render(): void {
     if (!this.work.current) return;
     if (this.composing) { this.pendingRender = true; return; }
@@ -894,6 +928,7 @@ export class YoofloeAiView extends ItemView {
         for (const record of w.delivery.records) { const item = calendar.createEl("details"); item.createEl("summary", { text: record.title }); item.createEl("pre", { text: record.text }); }
       }
     }
+    this.workspaceCalendarPanel(calendar);
     calendar.createEl("a", { text: "Discover Yoofloe Calendar ↗", href: STORE, attr: { target: "_blank", rel: "noopener noreferrer" } });
     scroll.append(secondarySettings);
     if (w.chat.length || this.chatQuery) this.conversation(messages);

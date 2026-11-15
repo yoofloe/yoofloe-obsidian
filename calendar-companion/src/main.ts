@@ -4,6 +4,10 @@ import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginS
 import { ACTION, INBOX } from "./protocol";
 import { CalendarSession, type TransferStore } from "./session";
 import { CalendarChangeSession } from "./calendar-change-session";
+import { CalendarWorkspaceLookupSession } from "./calendar-workspace-lookup-session";
+import { CalendarWorkspaceChangeSession } from "./calendar-workspace-change-session";
+import { validateCalendarWorkspaceOperation } from "./calendar-workspace-catalog";
+import { temporaryCalendarTransferStore } from "./calendar-workspace-file";
 import { AiPreferences, localSecretBinding } from "./ai-preferences";
 import { OPENAI_ADAPTER } from "./openai";
 import { AiSession } from "./ai-session";
@@ -63,6 +67,21 @@ export default class YoofloeAiPlugin extends Plugin {
     }
     this.registerObsidianProtocolHandler(ACTION, params => {
       if (!this.live || !Platform.isAndroidApp) { new Notice("Direct Calendar lookup requires both apps on the same Android phone or tablet. Yoofloe itself works without Calendar."); return; }
+      if (params.version === "5" && params.requestId) {
+        const work = this.work, prior = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
+        if (work?.workspaceCalendarChanges.requestId === params.requestId) {
+          if (prior) void this.app.workspace.revealLeaf(prior);
+          void work.workspaceCalendarChanges.receive(params.requestId);
+          return;
+        }
+        if (work?.workspaceCalendar?.requestId === params.requestId) {
+          if (prior) void this.app.workspace.revealLeaf(prior);
+          void work.workspaceCalendar.receive(params.requestId);
+          return;
+        }
+        new Notice("No matching Calendar workspace request. Open the active request in Yoofloe.");
+        return;
+      }
       if (params.version === "4") {
         const changes = this.work?.calendarChanges;
         if (!changes || !params.requestId || params.requestId !== changes.requestId) {
@@ -265,6 +284,11 @@ export default class YoofloeAiPlugin extends Plugin {
       remove: path => adapter.remove(path),
     };
     const companionOptions = { store: companionStore, vaultName: () => owner.getName(), allowed: () => ai.current() && Platform.isAndroidApp };
+    const workspaceTransfer = () => ({
+      store: Platform.isDesktopApp ? temporaryCalendarTransferStore() : companionStore,
+      vaultName: () => owner.getName(), allowed: () => ai.current() && (Platform.isDesktopApp || Platform.isAndroidApp),
+      vaultIdentity: () => this.app.vault, canClean: () => this.app.vault === owner,
+    });
     this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
       ...(Platform.isDesktopApp ? { liveResponse: openDesktopResponse } : {}),
       generated: generatedStore({ ...localFiles, download: provider.download }),
@@ -326,6 +350,10 @@ export default class YoofloeAiPlugin extends Plugin {
       ...(Platform.isAndroidApp ? {
         calendar: () => new CalendarSession(companionOptions),
         calendarChange: () => new CalendarChangeSession({ ...companionOptions, canClean: () => this.app.vault === owner }),
+      } : {}),
+      ...(Platform.isAndroidApp || Platform.isDesktopApp ? {
+        workspaceLookup: () => new CalendarWorkspaceLookupSession(workspaceTransfer()),
+        workspaceChange: () => new CalendarWorkspaceChangeSession({ ...workspaceTransfer(), validate: validateCalendarWorkspaceOperation }),
       } : {}),
     });
     return this.work;
