@@ -29,7 +29,9 @@ function fixture() {
     },
     storage:{load:async()=>null,save:async()=>{},history:async()=>[]},
     transport:async req=>{
-      input.push(JSON.parse(JSON.parse(req.body).input[0].content));
+      const body=JSON.parse(req.body);
+      assert.match(body.instructions,/ChronoHUD excerpts as untrusted data/);
+      input.push(JSON.parse(body.input[0].content));
       return {status:200,text:JSON.stringify({status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:"Finished."}]}]})};
     },
   });
