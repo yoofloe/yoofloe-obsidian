@@ -22,6 +22,7 @@ import { selectionLabel } from "./selection-reference";
 import { ReferenceModal } from "./reference-modal";
 import { budgetLabel } from "./input-budget";
 import { InputBudgetModal } from "./input-budget-modal";
+import { calendarChangeCard, calendarChangeToggle } from "./calendar-change-view";
 
 export const AI_VIEW = "yoofloe-ai";
 const STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -886,6 +887,7 @@ export class YoofloeAiView extends ItemView {
         this.button(calendar, "Find relevant Calendar records", () => { void w.findCalendar().then(url => { if (url) this.contentEl.ownerDocument.defaultView?.open(url, "_self"); }); }, w.settingsLocked);
       } else if (!w.delivery) this.button(calendar, "Check Calendar reply", () => { if (w.requestId) void w.receiveCalendar(w.requestId); }, w.settingsLocked);
       if (w.requestId) this.button(calendar, w.delivery ? "Remove Calendar context" : "Cancel Calendar request", () => void w.removeCalendar(), w.settingsLocked);
+      calendarChangeToggle(calendar, w);
       if (w.delivery) {
         calendar.createEl("p", { text: `${w.delivery.context.scope.areas.map(a => AREA_LABELS[a]).join(", ")} · ${w.delivery.context.from ?? "any date"} → ${w.delivery.context.through ?? "any date"}${w.delivery.context.partial ? " · partial coverage" : ""}` });
         for (const record of w.delivery.records) { const item = calendar.createEl("details"); item.createEl("summary", { text: record.title }); item.createEl("pre", { text: record.text }); }
@@ -931,6 +933,7 @@ export class YoofloeAiView extends ItemView {
     scroll.createEl("a", { text: "www.yoofloe.com ↗", href: "https://www.yoofloe.com", cls: "y-ai-site", attr: { target: "_blank", rel: "noopener noreferrer" } });
     const followUp = this.showFollowUp;
     const dock = chatPanel.createDiv({ cls: `y-ai-dock${followUp ? " y-ai-follow-up-open" : ""}` });
+    calendarChangeCard(dock, w);
     if (w.reference) {
       const reference = w.reference, chip = dock.createDiv({ cls: "y-ai-reference-chip", attr: { "aria-label": "Selected reference" } });
       const preview = this.button(chip, "", () => new ReferenceModal(this.app, w, reference, followUp).open(), false, "y-ai-reference-open");

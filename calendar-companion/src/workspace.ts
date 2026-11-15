@@ -1,4 +1,4 @@
-import { AgentTask, AGENT_INSTRUCTION, type AgentExecutor, type SteerStatus } from "./agent-task";
+import { AgentTask, AGENT_INSTRUCTION, type AgentExecutor, type CalendarDraftTool, type SteerStatus } from "./agent-task";
 import { VaultAgent, type AgentHost, type WorkJournal } from "./vault-agent";
 import { allowedPath, validTaskPath, containsCredential, safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
 import type { AiPreferences } from "./ai-preferences";
@@ -22,6 +22,9 @@ import { findOpenAiModel } from "./openai-models";
 import { captureSelectionReference, readSelectionReference, sameReference, selectionText, type ReferenceSnapshot, type SelectionReference } from "./selection-reference";
 import { estimateInput, type InputBudget } from "./input-budget";
 import { agentTools } from "./agent-protocol";
+import { CalendarChangeController } from "./calendar-change-controller";
+import type { CalendarChangeSession } from "./calendar-change-session";
+import { CALENDAR_DRAFT_TOOL, prepareCalendarChangeDraft } from "./calendar-change-draft";
 
 type WorkspaceChange = "state" | "progress";
 export interface WorkspaceSource { path: string; selection?: { from: number; to: number }; selectionVersion?: string; quote?: string }
@@ -106,10 +109,24 @@ export class AiWorkspace {
   private runEpoch = 0;
   private running = false;
   private stopRequested = false;
+  readonly calendarChanges: CalendarChangeController;
   constructor(private readonly options: {
     current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; generated?: GeneratedStore; attachments?: AttachmentStore;
-    gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; calendar?: () => CalendarSession; inboxHint(): string;
-  }) {}
+    gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; calendar?: () => CalendarSession;
+    calendarChange?: () => CalendarChangeSession; inboxHint(): string;
+  }) {
+    this.calendarChanges = new CalendarChangeController({
+      session: () => {
+        if (!this.options.calendarChange) throw Error("Calendar changes require both apps on the same Android device.");
+        return this.options.calendarChange();
+      },
+      current: () => !!this.options.calendarChange && this.current,
+      vaultId: () => this.options.preferences.vaultId(),
+      inboxHint: () => this.options.inboxHint(),
+      save: () => this.persist(),
+      changed: () => this.changed(),
+    });
+  }
   get current() { return this.alive && this.options.current(); }
   get requestId() { return this.calendar?.requestId ?? null; }
   get title() { return this.source?.path.split("/").at(-1)?.replace(/\.md$/i, "") ?? (this.writeScope === "new" ? "New documents" : "No note attached"); }
@@ -119,14 +136,15 @@ export class AiWorkspace {
   get canStop() { return this.busy && this.running && !this.stopRequested; }
   get stopping() { return this.busy && this.stopRequested; }
   get canContinue() { return this.current && !!this.task?.canResume && !!this.agent; }
-  get settingsLocked() { return this.switchingConversation || !this.ready || this.restoreFailed || this.busy || this.canContinue || this.addingAttachments; }
+  get settingsLocked() { return this.switchingConversation || !this.ready || this.restoreFailed || this.busy || this.canContinue || this.addingAttachments || this.calendarChanges.busy; }
+  get supportsCalendarChanges() { return !!this.options.calendarChange; }
   get canChangeReference() { return this.current && this.ready && !this.restoreFailed && !this.switchingConversation && !this.followUpSaving; }
   get canRestoreReference() { return this.canChangeReference && !this.reference && !!this.removedReference; }
   get referenceRevision() { return this.referenceEpoch; }
   get activeConversation(): Conversation { return this.library.conversations.find(conversation => conversation.id === this.library.active)!; }
   get canSwitchConversation(): boolean {
     return this.current && !this.librarySaving && !this.settingsLocked && !this.followUpSaving &&
-      !this.options.gate.busy && !this.requestId && !this.delivery && !this.agent?.pendingTrash.length;
+      !this.options.gate.busy && !this.requestId && !this.delivery && !this.calendarChanges.requestId && !this.agent?.pendingTrash.length;
   }
   get limitProblem(): string {
     if (this.customOnlineMaximum !== null && customRequestLimit(this.customOnlineMaximum) === null) return "Enter a positive tool count, or choose no tool-count limit.";
@@ -136,7 +154,7 @@ export class AiWorkspace {
   }
   get canResumeWithLimit() { return this.canContinue && !this.limitProblem && (this.maximum === "none" || this.maximum > (this.task?.requests ?? 0)); }
   get canSteer(): boolean {
-    return this.current && !this.stopRequested && !!this.activeAccess &&
+    return this.current && !this.stopRequested && !!this.activeAccess && !this.task?.draftingCalendar &&
       (!!this.task?.busy && this.task.state === "running" || this.canContinue);
   }
   get canResumeQueue(): boolean {
@@ -159,7 +177,7 @@ export class AiWorkspace {
         this.followUpDefault = followUpMode(saved.followUpDefault);
         this.autoCompact = saved.autoCompact !== false;
         this.library = readLibrary(saved.conversationLibrary);
-        this.applyConversation(saved);
+        await this.applyConversation(saved);
         if (typeof saved.mode === "string" && ["ask", "edit", "organize", "all"].includes(saved.mode)) this.mode = saved.mode as WorkMode;
         this.sourceMode = readSourceMode(saved.sourceMode);
         try { if (saved.onlineMaximum !== undefined) this.onlineMaximum = requestLimit(saved.onlineMaximum); } catch { this.onlineMaximum = 1; }
@@ -190,7 +208,8 @@ export class AiWorkspace {
     } catch { this.restoreFailed = true; this.message = "Saved work could not be read. Existing files and keys were kept; saving is disabled to preserve the original work record. Reopen this vault after restoring the record."; }
     finally { this.ready = true; this.attachFirstPending(); this.changed(); }
   }
-  private applyConversation(saved: Record<string, unknown>, id = this.library.active): void {
+  private async applyConversation(saved: Record<string, unknown>, id = this.library.active): Promise<void> {
+    await this.calendarChanges.restore(saved.calendarChange);
     this.prompt = ""; this.lastRequest = ""; this.source = null; this.nextSource = null;
     this.outputFolder = ""; this.autoAttachNote = true; this.preview = ""; this.message = "";
     this.followUpDraft = ""; this.editingFollowUpId = null; this.queueMessage = "";
@@ -257,6 +276,7 @@ export class AiWorkspace {
   }
   private conversationState(): Record<string, unknown> {
     return {
+      ...(this.calendarChanges.state ? { calendarChange: this.calendarChanges.state } : {}),
       prompt: this.prompt, lastRequest: this.lastRequest, source: this.source?.path ?? null,
       reference: this.reference,
       deferNoteRead: this.deferNoteRead,
@@ -322,13 +342,13 @@ export class AiWorkspace {
       if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) throw Error("The saved conversation could not be read.");
       this.runEpoch++;
       replaced = true;
-      this.applyConversation(incoming as Record<string, unknown>, library.active);
+      await this.applyConversation(incoming as Record<string, unknown>, library.active);
       this.library = library;
       await this.persist();
       return this.current;
     } catch {
       if (replaced) {
-        this.applyConversation(outgoing);
+        await this.applyConversation(outgoing);
         this.library = prior;
         this.chat = liveChat; this.task = liveTask; this.agent = liveAgent; this.activeChatId = liveChatId;
         this.queueHeld = queueHeld; this.preview = preview; this.message = message;
@@ -513,10 +533,10 @@ export class AiWorkspace {
     return { sourcePath: this.source?.path ?? null, folder: this.outputFolder.trim().replace(/\/$/, ""), readScope: this.readScope, writeScope: this.writeScope, mode: this.mode,
       configDir: this.options.configDir, excluded };
   }
-  private createTask(executor: AgentExecutor, current = () => this.current, writeScope = this.writeScope, attachments: Attachment[] = [], pastedTextIsRequest = false): AgentTask {
+  private createTask(executor: AgentExecutor, current = () => this.current, writeScope = this.writeScope, attachments: Attachment[] = [], pastedTextIsRequest = false, calendarDraft?: CalendarDraftTool): AgentTask {
     return new AgentTask({ current, preserve: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate, generated: this.options.generated, writeScope,
       liveResponse: this.options.liveResponse, steerStatus: (note, status) => this.updateSteer(note, status),
-      attachmentStore: this.options.attachments, countTokens: this.options.countTokens,
+      attachmentStore: this.options.attachments, countTokens: this.options.countTokens, calendarDraft,
       ...(attachments.length && this.options.attachments ? { attachments: this.options.attachments.forTask(attachments, pastedTextIsRequest) } : {}) });
   }
   private rememberJournal(journal: WorkJournal): void { if (journal.operations.length) this.history = [journal, ...this.history.filter(j => j.id !== journal.id)].slice(0, 30); }
@@ -559,8 +579,29 @@ export class AiWorkspace {
     const base = [this.library.active, policy, mode, model];
     return inputDigest(JSON.stringify(reference || deferNoteRead ? [...base, reference, deferNoteRead] : base));
   }
+  private calendarProposalInput(request: string, delivery: DeliveryV3 | null): string {
+    if (!request.trim() || new TextEncoder().encode(request).length > 4000)
+      throw Error("Enter a Calendar change request of up to 4000 UTF-8 bytes.");
+    if (delivery) this.calendar?.assertCanSave(delivery);
+    const records = delivery?.records.length ?
+      (JSON.parse(buildQuestionInput(delivery, request)) as { calendar_records: { kind: string }[] }).calendar_records : [];
+    return safeOutbound(JSON.stringify({
+      request: request.trim(),
+      mode: "Calendar proposal only; no direct Calendar writes or Obsidian note changes",
+      device_time: { utc: new Date().toISOString(), time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+      calendar_records: records.filter(record => record.kind === "event" || record.kind === "task"),
+    }));
+  }
   async review(): Promise<void> {
     if (this.settingsLocked || !this.current) return;
+    if (this.calendarChanges.enabled) {
+      try {
+        this.preview = JSON.stringify(JSON.parse(this.calendarProposalInput(this.prompt, this.delivery)), null, 2);
+        this.message = "This proposal sends your request and approved event or task excerpts. Apply changes in Calendar.";
+      } catch (error) { this.preview = ""; this.message = error instanceof Error ? error.message : "The Calendar proposal preview could not be prepared."; }
+      this.changed();
+      return;
+    }
     const epoch = ++this.previewEpoch, run = this.runEpoch;
     const state = () => JSON.stringify([this.source, this.reference, this.deferNoteRead, this.prompt, this.readScope, this.writeScope, this.mode, this.outputFolder, this.excluded, this.sourceMode, this.attachments, this.delivery, this.calendarQuestion, this.area, this.period]);
     const before = state(), current = () => this.current && !this.settingsLocked && epoch === this.previewEpoch && run === this.runEpoch && before === state();
@@ -569,6 +610,8 @@ export class AiWorkspace {
     this.changed();
   }
   async estimateRequest(followUp = false): Promise<InputBudget> {
+    if (!followUp && this.calendarChanges.enabled)
+      return estimateInput({ model: this.model.model, input: this.calendarProposalInput(this.prompt, this.delivery), tools: [CALENDAR_DRAFT_TOOL] });
     const reference = this.reference ? { ...this.reference } : null;
     const attachments = [...(followUp ? this.followUpAttachments : this.attachments)];
     const request = followUp ? this.followUpDraft : this.prompt;
@@ -776,11 +819,14 @@ export class AiWorkspace {
     if (await this.runRequest(this.prompt, this.attachments)) await this.drainQueue();
   }
   private async runRequest(request: string, attachments: Attachment[], queued?: FollowUp): Promise<boolean> {
+    const calendarDraft = !queued && this.calendarChanges.enabled;
+    const calendarLookup = calendarDraft ? this.delivery : null;
+    if (calendarDraft) attachments = [];
     const selectedReference = queued ? queued.context?.reference : this.reference;
-    const reference = selectedReference ? { ...selectedReference } : null;
+    const reference = selectedReference && !calendarDraft ? { ...selectedReference } : null;
     const deferNoteRead = queued ? queued.context?.deferNoteRead === true : this.deferNoteRead;
     const pastedTextIsRequest = !request.trim() && attachments.some(file => file.pastedText);
-    if (this.restoreFailed || !this.current || this.switchingConversation || this.busy || this.addingAttachments || !request.trim() && !pastedTextIsRequest) return false;
+    if (this.restoreFailed || !this.current || this.switchingConversation || this.busy || this.addingAttachments || this.calendarChanges.busy || !request.trim() && !pastedTextIsRequest) return false;
     if (attachments.length && !this.options.attachments) { this.message = "Attachment processing is unavailable. Existing files are kept."; this.changed(); return false; }
     if (this.limitProblem) { this.message = this.limitProblem; this.changed(); return false; }
     const epoch = ++this.runEpoch;
@@ -794,13 +840,22 @@ export class AiWorkspace {
       this.rememberLast();
       const access = this.followUpAccess();
       const agent = new VaultAgent(this.options.host(current), this.policy(), current);
-      const { input, sourceMode, scope, context, snapshot } = await this.prepare(agent, request, attachments, reference, deferNoteRead);
+      const { input, sourceMode, scope, context, snapshot } = calendarDraft ?
+        { input: this.calendarProposalInput(request, calendarLookup), sourceMode: "provided" as const, scope: null, context: [], snapshot: undefined } :
+        await this.prepare(agent, request, attachments, reference, deferNoteRead);
       if (current()) {
         await this.persist(); // Preserve the draft and a queue claim before a billable request.
         if (current()) {
           if (queued && (this.queueHeld || !this.matchesAccess(queued, this.followUpAccess())))
             throw Error("The queued message needs a fresh review of its note and access.");
-          task = this.createTask(agent, () => this.current && epoch === this.runEpoch, agent.policy.writeScope, attachments, pastedTextIsRequest);
+          task = this.createTask(agent, () => this.current && epoch === this.runEpoch, agent.policy.writeScope, attachments, pastedTextIsRequest,
+            calendarDraft ? { definition: CALENDAR_DRAFT_TOOL, draft: async args => {
+              if (!current() || this.delivery !== calendarLookup) throw Error("The Calendar lookup changed. Review it again before drafting changes.");
+              if (calendarLookup) this.calendar?.assertCanSave(calendarLookup);
+              const proposal = await prepareCalendarChangeDraft(args, calendarLookup);
+              await this.calendarChanges.stage(proposal.draft, proposal.titles, current);
+              return { status: "drafted", operations: proposal.draft.operations.length, next: "Review in Calendar" };
+            } } : undefined);
           this.task = task; this.agent = agent; this.lastRequest = request; this.activeAccess = access;
           this.activeChatId = crypto.randomUUID();
           this.touchConversation(conversationName(request) || this.title);
@@ -809,7 +864,8 @@ export class AiWorkspace {
           if (snapshot) turn.referenceSnapshot = snapshot;
           this.chat = [...this.chat, turn].slice(-CHAT_HISTORY_LIMIT);
           const unsubscribe = this.watchTask(task);
-          try { await task.run(input, { ...this.model }, this.mode, this.maximum, { mode: sourceMode, maximum: this.onlineMaximum }, this.source?.path, { autoCompact: this.autoCompact, items: context }); }
+          try { await task.run(input, { ...this.model }, this.mode, this.maximum, { mode: sourceMode, maximum: this.onlineMaximum },
+            calendarDraft ? undefined : this.source?.path, { autoCompact: this.autoCompact && !calendarDraft, items: context }); }
           finally { unsubscribe(); }
           if (this.current) { await this.collectTask(task, agent); completed = task.state === "completed"; }
         }
@@ -858,7 +914,8 @@ export class AiWorkspace {
     if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
     if (this.source && agent.policy.selection) { this.source.selection = { ...agent.policy.selection }; this.source.selectionVersion = agent.policy.selectionVersion; }
     const hasConfirmedChanges = agent.operations.some(op => op.status === "done");
-    if (!this.activeQueueId && !task.fileWarnings.length && (hasConfirmedChanges && task.state !== "paused" ||
+    if (task.draftingCalendar && this.calendarChanges.state?.status === "draft" && task.state !== "paused") this.prompt = "";
+    else if (!task.draftingCalendar && !this.activeQueueId && !task.fileWarnings.length && (hasConfirmedChanges && task.state !== "paused" ||
         task.state === "completed" && (task.text || task.generated.length > 0) || task.state === "stopped" && task.text)) {
       this.prompt = ""; this.attachments = [];
     }
@@ -1105,5 +1162,5 @@ export class AiWorkspace {
       ...(this.customMaximum !== null ? { customMaximum: this.customMaximum } : {}) };
     const next = this.saveQueue.then(async () => { if (!this.current) return; await this.options.storage.save(value); }); this.saveQueue = next.catch(() => {}); return next;
   }
-  dispose(): void { this.alive = false; this.task?.dispose(); this.listeners.clear(); void this.calendar?.dispose(); }
+  dispose(): void { this.alive = false; this.task?.dispose(); this.listeners.clear(); void this.calendar?.dispose(); this.calendarChanges.dispose(); }
 }

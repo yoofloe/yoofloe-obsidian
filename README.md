@@ -58,8 +58,8 @@ Yoofloe has no server or cloud database. Yoofloe does not receive your notes, pr
 When you choose Send, task data goes directly to OpenAI using your API key; API charges apply.
 Drafts, answers, recent context and recovery records remain on your device and may be copied by vault sync.
 See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local removal and scope details.
-Note titles and vault-relative paths returned by search can also go to OpenAI. Select a passage and open Yoofloe to add
-a reference chip above the composer. Click the chip to preview it or create local image pages. Use its x button to remove
+Note titles and vault-relative paths returned by search can also go to OpenAI. Select a passage while the Yoofloe pane is
+open to add a reference chip above the composer. Opening Yoofloe from a selected passage works too. Click the chip to preview it or create local image pages. Use its x button to remove
 the reference and its selected images from the next message, or **Undo removal** to restore them.
 References guide the task. **Access** continues to control which notes the task can read and edit, including other passages
 or notes. Open editor text, including unsaved changes, is used. Changed references require a fresh selection.
@@ -115,8 +115,8 @@ Read [OpenAI pricing](https://developers.openai.com/api/docs/pricing) before cho
 
 The model requests typed tools; local code checks permissions, paths, note versions and recovery before performing them.
 Expanded mode adds OpenAI-hosted web search, Python analysis and image generation when needed. The analysis
-container has network disabled. No code is executed on the user's computer or phone. Hidden/configuration files and
-Calendar writes remain blocked. Active HTML, remote embeds, executable plugin blocks and unsafe Mermaid features
+container has network disabled. No code is executed on the user's computer or phone. Hidden/configuration files are
+blocked. Calendar proposals go through a separate review in the Android app. Active HTML, remote embeds, executable plugin blocks and unsafe Mermaid features
 are made inert. Verified generated local image attachments can be embedded in notes.
 Other installed plugins can still interpret ordinary Markdown; review generated content in the context of your vault.
 
@@ -177,7 +177,12 @@ Review/adjust the workspaces and dates when needed. An ambiguous workspace searc
 workspaces, rather than exporting all records. The app asks you to approve the local retrieval.
 Back in Obsidian, review excerpts and coverage before sending the task to OpenAI.
 Local lookup makes **no AI call**. The native v2/v3 protocol, Inbox name and callback are unchanged.
-Sources are read-only: this cannot complete Calendar tasks, alter records, change Flow items or award points.
+Calendar lookup is read-only. With a Calendar build that supports change proposals, enable **Draft Calendar changes**
+to prepare additions, edits or moves to Trash for one-off events and non-recurring tasks. Find the latest record first
+when editing or deleting it. **Send** sends your request and approved event or task excerpts to OpenAI. **Review in Calendar**
+opens the Android approval screen. The Calendar app validates current records and saves the approved batch.
+Use **Undo in Calendar** for a confirmed batch or **Check status in Calendar** to recover a missed reply. A changed
+record can prevent undo. Desktop and iOS can keep local drafts and use Markdown exports.
 Full-record Markdown snapshot import without AI remains an advanced setting.
 
 ## Data, rights and privacy
