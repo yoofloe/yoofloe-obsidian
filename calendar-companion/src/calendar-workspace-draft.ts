@@ -133,9 +133,8 @@ function reviewedTarget(record: WorkspaceRecord | null, values: ChangeValues): {
   };
 }
 
-function mayTarget(record: WorkspaceRecord, action: CalendarWorkspaceAction, values?: ChangeValues): boolean {
-  if (action === "restore") return record.state === "trashed" ||
-    record.kind === "event" && !record.details.origin && record.state === "active" && (values === undefined || values?.scope === "occurrence");
+function mayTarget(record: WorkspaceRecord, action: CalendarWorkspaceAction): boolean {
+  if (action === "restore") return record.state === "trashed";
   return record.state !== "trashed" && (action !== "archive" || record.state === "active");
 }
 
@@ -187,7 +186,7 @@ export async function prepareCalendarWorkspaceDraft(value: unknown, lookup: Work
     const values = prepareCalendarWorkspaceValues(recordKind, actionName, reviewed.values, target, scope, resolveRelated, {
       taskFolder: existing?.details.taskFolder, reviewedOccurrences: reviewed.reviewedOccurrences,
     });
-    if (existing && !mayTarget(existing, actionName, values))
+    if (existing && !mayTarget(existing, actionName))
       throw Error("Choose a Calendar record in the correct state for this action.");
     const opId = crypto.randomUUID();
     const title = existing?.title ?? createTitle(values);

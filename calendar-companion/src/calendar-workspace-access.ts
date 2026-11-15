@@ -1,15 +1,17 @@
 
 import type { CalendarWorkspaceLookupSession } from "./calendar-workspace-lookup-session";
 import type { CalendarWorkspacePanelSelection, CalendarWorkspaceSelectionPatch } from "./calendar-workspace-panel";
-import { emptyWorkspaceFilters, validateWorkspaceQuery, workspaceKindAllowed, type WorkspaceCapabilities, type WorkspaceLookupDelivery, type WorkspaceQuery } from "./calendar-workspace-query";
+import { emptyWorkspaceFilters, validateWorkspaceQuery, workspaceKindAllowed, workspaceSearchTerms, type WorkspaceCapabilities, type WorkspaceLookupDelivery, type WorkspaceQuery } from "./calendar-workspace-query";
 import { civilDate, validateQuestionQuery } from "./question-query";
 import type { CalendarTransferFile } from "./calendar-workspace-file";
 
+function defaultSelection(): CalendarWorkspacePanelSelection {
+  return { topic: "", areas: ["calendar"], period: "next_7_days", from: null, through: null,
+    kinds: ["event", "task"], includeLinkedNotes: false, filters: emptyWorkspaceFilters() };
+}
+
 export class CalendarWorkspaceAccess {
-  selection: CalendarWorkspacePanelSelection = {
-    topic: "", areas: ["calendar"], period: "next_7_days", from: null, through: null,
-    kinds: ["event", "task"], includeLinkedNotes: false, filters: emptyWorkspaceFilters(),
-  };
+  selection = defaultSelection();
   capabilities: WorkspaceCapabilities | null = null;
   delivery: WorkspaceLookupDelivery | null = null;
   pending: "capabilities" | "records" | null = null;
@@ -38,8 +40,8 @@ export class CalendarWorkspaceAccess {
     const { topic, areas, period, from, through, kinds, filters, includeLinkedNotes } = this.selection;
     if (!this.capabilities || !areas.length || period === "custom" && (!civilDate(from) || !civilDate(through) || from > through)) return null;
     try {
-      const terms = [...new Set(topic.split(/[,\n]/).map(term => term.trim().normalize("NFC").toLowerCase()).filter(Boolean))];
-      const profile = period === "any" && !terms.length ? "next_steps" : filters.includeFinancials && areas.includes("project") ? "budget" : "summary";
+      const terms = workspaceSearchTerms(topic);
+      const profile = filters.includeFinancials && areas.includes("project") ? "budget" : "summary";
       const lookup = validateQuestionQuery({
         areas, period, from: period === "custom" ? from : null, through: period === "custom" ? through : null,
         zone: Intl.DateTimeFormat().resolvedOptions().timeZone, terms, profile, includeLinkedNotes, maxRecords: 20, maxTextBytes: 32768,
@@ -132,7 +134,7 @@ export class CalendarWorkspaceAccess {
     const included = this.included;
     if (!included) return full;
     return {
-      ...full, records: full.records.filter((_, i) => included.has(i)),
+      ...full, records: full.records.filter((_, i) => included.has(i)), approvedExcerptCount: full.records.length,
       excerptReferences: full.records.map((_, i) => "C" + (i + 1)).filter((_, i) => included.has(i)),
     };
   }
@@ -140,7 +142,8 @@ export class CalendarWorkspaceAccess {
     return this.verified ? JSON.stringify([this.verified.requestId, this.excerptsEnabled, [...this.included ?? []]]) : null;
   }
 
-  async clear(): Promise<void> {
+  async clear(resetSelection = false): Promise<void> {
+    if (resetSelection) this.selection = defaultSelection();
     const session = this.session;
     this.session = null; this.pending = null; this.verified = null; this.delivery = null;
     this.capabilities = null; this.excerptsEnabled = false; this.included = null; this.message = "";

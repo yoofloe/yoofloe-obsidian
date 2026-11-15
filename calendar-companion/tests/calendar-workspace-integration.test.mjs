@@ -33,7 +33,7 @@ function makeFixture() {
         {id:"s1",sourceId:studyId,revision:9,kind:"study_session",title:"Synthetic study",text:"APPROVED EXCERPT",state:"active",date:"2031-06-03",details:{recordedSeconds:3600}},
       ] : [];
       approved={version:5,requestId:id,query:request,exportedAt:Date.now(),datasetId,records,capabilities,
-        context: request.lookup ? {scope:request.lookup,from:"2031-06-01",through:"2031-06-08",zone:request.lookup.zone,partial:true,
+        context: request.lookup ? {scope:request.lookup,from:"2031-06-01",through:"2031-06-08",zone:request.lookup.zone,partial:false,
           scanned:2,matched:2,metrics:[]} : null};
       return approved;
     },
@@ -97,6 +97,10 @@ test("V5 workspace proposal shares selected excerpts, persists a scoped draft, a
   await w.review();
   assert(w.preview.includes("APPROVED EXCERPT") && !w.preview.includes("WITHHOLD THIS EXCERPT"));
   assert.deepEqual(JSON.parse(w.preview).calendar_records.map(record => record.reference), ["C2"]);
+  const scope=JSON.parse(w.preview).scope;
+  assert.equal(scope.lookup_partial,false);
+  assert.equal(scope.withheld_excerpts,1);
+  assert.equal(scope.partial,true);
   await w.run();
   assert.equal(data.requests,2);
   assert.equal(w.workspaceCalendarChanges.state.status,"draft");
@@ -182,4 +186,53 @@ test("an older v4 proposal cannot clear a v5 draft that staged no new change", a
   assert.equal(w.calendarChanges.state.draft.proposalId,oldDraft.proposalId);
   assert.equal(w.workspaceCalendarChanges.state,null);
   assert.equal(w.prompt,"Draft a new task after the old proposal.");
+});
+
+test("Any date keeps ordinary record statuses and requires a search term", async () => {
+  const {work:w}=makeFixture();
+  await w.initialize();
+  const access=w.workspaceCalendar;
+  assert(await access.open("capabilities"));
+  await access.receive(access.requestId);
+  access.updateSelection({period:"any",topic:""});
+  assert.equal(access.canFind,false);
+  access.updateSelection({topic:"Seven Target"});
+  assert.equal(access.canFind,true);
+  assert(await access.open("records"));
+  await access.receive(access.requestId);
+  assert.equal(access.delivery.query.lookup.profile,"summary");
+  assert.deepEqual(access.delivery.query.lookup.terms,["seven target"]);
+});
+
+test("Calendar workspace search choices reset on a conversation change", async () => {
+  const {work:w}=makeFixture();
+  await w.initialize();
+  const access=w.workspaceCalendar;
+  access.updateSelection({topic:"Previous topic",areas:["project"],kinds:["project"],filters:{includeFinancials:true,includeTrash:true}});
+  await access.clear();
+  assert.equal(access.selection.topic,"Previous topic");
+  assert.equal(await w.createConversation(),true);
+  assert.equal(access.selection.topic,"");
+  assert.deepEqual(access.selection.areas,["calendar"]);
+  assert.equal(access.selection.filters.includeFinancials,false);
+  assert.equal(access.selection.filters.includeTrash,false);
+});
+
+test("legacy and workspace Calendar excerpts keep distinct labels in a combined preview", async () => {
+  const {work:w}=makeFixture();
+  await w.initialize();
+  const access=w.workspaceCalendar;
+  assert(await access.open("capabilities"));
+  await access.receive(access.requestId);
+  access.updateSelection({areas:["calendar","study"],kinds:["event","study_session"],period:"custom",from:"2031-06-01",through:"2031-06-08"});
+  assert(await access.open("records"));
+  await access.receive(access.requestId);
+  const { context, records, query, ...base } = access.delivery;
+  w.delivery={...base,version:3,context:{...context,scanned:1,matched:1,partial:false},records:[records[0]]};
+  access.useExcerpts(true);
+  w.setPrompt("Read the two synthetic sources.");
+  await w.review();
+  const json=JSON.parse(w.preview);
+  assert.deepEqual(json.calendar.calendar_records.map(x=>x.reference),["L1"]);
+  assert.deepEqual(json.calendar_workspace.calendar_records.map(x=>x.reference),["C1","C2"]);
 });

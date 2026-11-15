@@ -70,6 +70,10 @@ export interface WorkspaceLookupDelivery {
   capabilities: WorkspaceCapabilities;
   /** Local projection of the original source labels. The native reply schema excludes it. */
   excerptReferences?: readonly string[];
+  approvedExcerptCount?: number;
+}
+export function workspaceSearchTerms(topic: string): string[] {
+  return [...new Set(topic.split(/[,\n]/).map(term => term.trim().normalize("NFC").toLowerCase()).filter(Boolean))];
 }
 export function workspaceExcerptReference(delivery: WorkspaceLookupDelivery, index: number): string {
   return delivery.excerptReferences?.[index] ?? "C" + (index + 1);

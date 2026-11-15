@@ -298,3 +298,7 @@ test("excluded excerpts keep the original C labels for destructive proposals", a
   assert.deepEqual(draft.operations[0].target, { id: second.sourceId, revision: second.revision });
   await assert.rejects(prepare(delivery, change("note","delete","C1")), /approved Calendar lookup/);
 });
+test("active one-off events do not advertise Restore", () => {
+  const delivery = lookup({ records: [record("event", 1)], writeKinds: [write("event", ["restore"])] });
+  assert.equal(workspaceDraftTool(delivery), null);
+});

@@ -1,5 +1,5 @@
 import { setIcon } from "obsidian";
-import { workspaceExcerptReference } from "./calendar-workspace-query";
+import { workspaceExcerptReference, workspaceSearchTerms } from "./calendar-workspace-query";
 import { buildCalendarInsights, type CalendarInsightEntry, type CalendarInsights } from "./calendar-insights";
 import type {
   WorkspaceCapabilities, WorkspaceFilters, WorkspaceFolderKind, WorkspaceLookupDelivery, WorkspaceRecordDetails,
@@ -405,8 +405,13 @@ export function renderCalendarWorkspacePanel(el: HTMLElement, model: CalendarWor
   function refresh() {
     workspaces.title.setText("Workspaces · " + selection.areas.length + " selected");
     kinds.title.setText("Record types · " + selection.kinds.length + " selected");
+    const terms = workspaceSearchTerms(selection.topic);
     let problem = "";
-    if (hasIncompatibleFilters(selection)) problem = "Remove folder or project filters outside the search scope, or include their workspace.";
+    if (terms.length > 8 || terms.some(term => new TextEncoder().encode(term).length > 80)) {
+      problem = "Use up to eight search terms, each up to 80 UTF-8 bytes.";
+    } else if (selection.period === "any" && !terms.length) {
+      problem = "Enter a search term for Any date, or choose a date range.";
+    } else if (hasIncompatibleFilters(selection)) problem = "Remove folder or project filters outside the search scope, or include their workspace.";
     else if (!selection.areas.length || !selection.kinds.length) problem = "Choose at least one workspace and record type.";
     else if (selection.kinds.some(kind => !validKind(selection, kind, capabilities)))
       problem = "Review the selected record types and their required filters.";
