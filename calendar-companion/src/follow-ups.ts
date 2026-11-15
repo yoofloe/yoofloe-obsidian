@@ -1,4 +1,6 @@
 import { containsCredential, type WorkScope, type WriteScope } from "./agent-policy";
+import { readSelectionReference, type SelectionReference } from "./selection-reference";
+import { readAttachments, type Attachment } from "./attachments";
 
 export type FollowUpMode = "queue" | "steer";
 export type FollowUpStatus = "queued" | "steer-pending" | "sending" | "review";
@@ -13,6 +15,17 @@ export interface FollowUp {
   text: string;
   status: FollowUpStatus;
   access: FollowUpAccess;
+  context?: FollowUpContext;
+}
+export interface FollowUpContext { reference: SelectionReference | null; attachments: Attachment[]; needsReview?: boolean; deferNoteRead?: boolean }
+
+export function readFollowUpContext(value: unknown): FollowUpContext | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object") return { reference: null, attachments: [], needsReview: true };
+  const raw = value as Record<string, unknown>, reference = readSelectionReference(raw.reference), attachments = readAttachments(raw.attachments);
+  const invalid = raw.needsReview === true || raw.reference !== null && !reference || reference?.needsReview ||
+    !Array.isArray(raw.attachments) || raw.attachments.length !== attachments.length;
+  return { reference, attachments, ...(invalid ? { needsReview: true } : {}), ...(raw.deferNoteRead === true ? { deferNoteRead: true } : {}) };
 }
 
 export const FOLLOW_UP_LIMIT = 20;
@@ -26,7 +39,7 @@ export function readFollowUps(value: unknown): FollowUp[] {
   const ids = new Set<string>();
   for (const item of value.slice(0, FOLLOW_UP_LIMIT) as unknown[]) {
     if (!item || typeof item !== "object") continue;
-    const { id, text, status, access } = item as Record<string, unknown>;
+    const { id, text, status, access, context: rawContext } = item as Record<string, unknown>;
     if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(id) || ids.has(id) ||
       typeof text !== "string" || !text.trim() || text.length > FOLLOW_UP_TEXT_LIMIT || containsCredential(text) ||
       !access || typeof access !== "object") continue;
@@ -36,7 +49,8 @@ export function readFollowUps(value: unknown): FollowUp[] {
       !["none", "current", "new", "folder", "vault"].includes(String(write)) ||
       typeof signature !== "string" || signature.length > 12000 || containsCredential(signature)) continue;
     ids.add(id);
-    entries.push({ id, text, status: status === "queued" ? "queued" : "review",
+    const context = readFollowUpContext(rawContext);
+    entries.push({ id, text, status: status === "queued" && !context?.needsReview ? "queued" : "review", ...(context ? { context } : {}),
       access: { target, read: read as WorkScope, write: write as WriteScope | "none", signature } });
   }
   return entries;

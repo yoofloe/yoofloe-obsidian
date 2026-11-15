@@ -18,6 +18,10 @@ import { formatWorkDuration } from "./work-activity";
 import { AUTO_COMPACT_TOKENS } from "./conversation-context";
 import { CONVERSATION_NAME_LIMIT, MAX_CONVERSATIONS, MAX_FOLDERS, turnConversation, type Conversation } from "./conversation-library";
 import { CHAT_HISTORY_LIMIT, chatMatches, confirmedChangeCount, searchChatPreview, taskFailure, type ChatTurn } from "./chat-history";
+import { selectionLabel } from "./selection-reference";
+import { ReferenceModal } from "./reference-modal";
+import { budgetLabel } from "./input-budget";
+import { InputBudgetModal } from "./input-budget-modal";
 
 export const AI_VIEW = "yoofloe-ai";
 const STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -43,6 +47,8 @@ export class YoofloeAiView extends ItemView {
   private rendering: Component | null = null;
   private saveTimer: number | undefined;
   private durationTimer: number | undefined;
+  private budgetTimer: number | undefined;
+  private budgetEpoch = 0;
   private followUpClosed = false;
   private composing = false;
   private pendingRender = false;
@@ -96,6 +102,8 @@ export class YoofloeAiView extends ItemView {
     this.stopViewport = this.watchViewport(); this.render(); await this.work.initialize();
   }
   async onClose(): Promise<void> {
+    this.budgetEpoch++;
+    this.contentEl.ownerDocument.defaultView?.clearTimeout(this.budgetTimer);
     this.searchEpoch++; if (this.searchTimer !== undefined) this.contentEl.ownerDocument.defaultView?.clearTimeout(this.searchTimer);
     this.unsubscribe?.(); this.stopViewport?.(); this.rendering?.unload();
     this.contentEl.ownerDocument.defaultView?.clearInterval(this.durationTimer);
@@ -104,8 +112,31 @@ export class YoofloeAiView extends ItemView {
     await this.work.persist().catch(() => {});
   }
   private saveSoon(): void {
+    this.scheduleBudget();
     const win = this.contentEl.ownerDocument.defaultView; if (!win) return;
     win.clearTimeout(this.saveTimer); this.saveTimer = win.setTimeout(() => { void this.work.persist().catch(() => new Notice("The draft could not be saved locally. Keep this view open.")); }, 400);
+  }
+  private scheduleBudget(): void {
+    const win = this.contentEl.ownerDocument.defaultView;
+    if (!win) return;
+    win.clearTimeout(this.budgetTimer);
+    const epoch = ++this.budgetEpoch;
+    this.budgetTimer = win.setTimeout(() => {
+      const button = this.contentEl.querySelector<HTMLButtonElement>(".y-ai-input-budget");
+      if (!button || this.composing || !this.work.ready) return;
+      void this.work.estimateRequest(this.showFollowUp).then(budget => {
+        if (epoch !== this.budgetEpoch || !button.isConnected) return;
+        button.setText(budgetLabel(budget));
+        button.onclick = () => new InputBudgetModal(this.app, budget, this.work.task?.usage ?? { input: 0, output: 0 }).open();
+        setTooltip(button, "Estimated input size. Click for details.");
+      }).catch(error => {
+        if (epoch !== this.budgetEpoch || !button.isConnected) return;
+        button.setText("Review input");
+        const message = error instanceof Error ? error.message : "The input preview is unavailable.";
+        button.onclick = () => new Notice(message);
+        setTooltip(button, message);
+      });
+    }, 350);
   }
   private button(el: HTMLElement, text: string, action: () => void, disabled = false, cls = ""): HTMLButtonElement {
     const b = el.createEl("button", { text, cls, attr: { type: "button" } }); b.disabled = disabled; b.addEventListener("click", action); return b;
@@ -237,6 +268,11 @@ export class YoofloeAiView extends ItemView {
     if (turn.request || turn.attachments?.length) {
       const user = exchange.createDiv({ cls: "y-ai-message y-ai-user" }); user.createEl("strong", { text: "You", cls: "y-ai-message-label" }); user.createEl("p", { text: turn.request, cls: "y-ai-request-text" });
       if (turn.attachments?.length) { const files = user.createDiv({ cls: "y-ai-sent-files" }); for (const file of turn.attachments) files.createSpan({ text: file.name, cls: "y-ai-sent-file" }); this.button(files, "Attach again", () => w.useAttachments(turn.attachments!), w.settingsLocked); }
+      if (turn.reference) {
+        const reference = turn.reference;
+        const source = this.button(user, selectionLabel(reference), () => new ReferenceModal(this.app, w, reference, this.showFollowUp, turn.referenceSnapshot).open(), false, "y-ai-sent-reference");
+        setTooltip(source, "View the reference used for this message");
+      }
     }
     const assistant = exchange.createDiv({ cls: "y-ai-message y-ai-assistant", attr: { "aria-label": "Assistant response" } });
     const metadata = this.details(assistant, "turn-" + turn.id, "");
@@ -411,6 +447,7 @@ export class YoofloeAiView extends ItemView {
   }
   private updateWorkHeading(metadata: HTMLElement, turn: ChatTurn): void {
     const label = turn.status === "running" && this.work.stopping ? "Stopping…" :
+      turn.status === "paused" && turn.pausedForInput ? "Paused at input verification" :
       turn.status === "failed" && confirmedChangeCount(turn) > 0 ? "Changes saved · Could not finish" : WORK_STATUS[turn.status];
     metadata.querySelector(".y-ai-work-label")?.setText(label);
     metadata.querySelector(".y-ai-work-mode")?.setText(turn.sourceMode === "expanded" ? "Expanded" : "Provided only");
@@ -423,6 +460,14 @@ export class YoofloeAiView extends ItemView {
   private renderWorkDetails(el: HTMLElement, turn: ChatTurn): void {
     el.empty();
     el.createEl("p", { text: `${turn.model || "Saved conversation"} · ${turn.requests} API request(s)${turn.online ? ` · web ${turn.online.search} · analysis ${turn.online.analysis} · images ${turn.online.image}` : ""}${turn.transcriptions ? ` · audio ${turn.transcriptions}` : ""}`, cls: "y-ai-hint" });
+    if (turn.inputTokens || turn.outputTokens)
+      el.createEl("p", { text: `Task usage · ${turn.inputTokens.toLocaleString()} input · ${turn.outputTokens.toLocaleString()} output tokens`, cls: "y-ai-hint" });
+    for (const coverage of turn.readCoverage ?? []) {
+      if (!coverage.total) continue;
+      const note = coverage.path.split("/").at(-1) ?? coverage.path;
+      const scope = coverage.selection ? "Reference" : "Note";
+      el.createEl("p", { text: `${scope} · ${note} · ${coverage.read.toLocaleString()} / ${coverage.total.toLocaleString()} characters read`, cls: "y-ai-hint" });
+    }
     if (turn.activity?.length) {
       const timeline = el.createEl("ol", { cls: "y-ai-timeline", attr: { "aria-label": "Task activity" } });
       for (const event of turn.activity) {
@@ -468,6 +513,8 @@ export class YoofloeAiView extends ItemView {
       const item = el.createEl("article", { cls: "y-ai-queue-entry" });
       item.createEl("small", { text: QUEUE_STATUS[entry.status] });
       item.createEl("p", { text: entry.text, cls: "y-ai-queue-text" });
+      if (entry.context?.reference) item.createEl("small", { text: selectionLabel(entry.context.reference), cls: "y-ai-reference-label" });
+      if (entry.context?.attachments.length) item.createEl("small", { text: `${entry.context.attachments.length} attachment(s)` });
       item.createEl("small", { text: `${entry.access.target ?? "No note attached"} · Read ${SCOPE_LABELS[entry.access.read]} · ${entry.access.write === "none" ? "Read only" : `Write ${WRITE_SCOPE_LABELS[entry.access.write]}`}`, cls: "y-ai-queue-access" });
       if (entry.status !== "queued" && entry.status !== "review") continue;
       const row = item.createDiv({ cls: "y-ai-queue-actions" });
@@ -570,7 +617,7 @@ export class YoofloeAiView extends ItemView {
     el.querySelectorAll<HTMLButtonElement>(".y-ai-submit-follow-up").forEach(submit => {
       const mode = submit.dataset.followUp;
       submit.classList.toggle("mod-cta", mode === w.followUpDefault);
-      submit.disabled = w.followUpSaving || !w.followUpDraft.trim() || w.stopping ||
+      submit.disabled = w.followUpSaving || w.addingAttachments || !w.followUpDraft.trim() || w.stopping ||
         w.followUps.length >= FOLLOW_UP_LIMIT && !w.editingFollowUpId || mode === "steer" && !w.canSteer;
     });
   }
@@ -777,8 +824,7 @@ export class YoofloeAiView extends ItemView {
     this.select(scope, "Allowed actions", MODE_LABELS, w.mode, value => { w.mode = value; this.render(); });
     if (w.mode === "all") scope.createEl("p", { text: "All actions still follow the read scope and write target below. They never expand access to other notes.", cls: "y-ai-hint" });
     this.select(scope, "Notes AI can read", SCOPE_LABELS, w.readScope, value => { w.readScope = value; this.render(); });
-    scope.createEl("p", { text: "This scope controls notes. Selected attachments and the source mode are separate context choices.", cls: "y-ai-hint" });
-    if (w.source?.selection) this.button(scope, "Use whole attached note", () => { if (!w.source) return; delete w.source.selection; delete w.source.selectionVersion; w.preview = ""; this.saveSoon(); this.render(); }, w.settingsLocked);
+    scope.createEl("p", { text: "Access controls note reads and changes. Selected reference excerpts and attachments are additional context.", cls: "y-ai-hint" });
     if (w.mode !== "ask") {
       this.select(scope, "Write target", WRITE_SCOPE_LABELS, w.writeScope, value => { w.writeScope = value; w.preview = ""; this.render(); });
       scope.createEl("p", { text: w.writeScope === "current" ? w.source ? "Only the attached note can change. Choose New documents to create notes." : "No note attached. Attach a note to edit it, or choose New documents to create notes." : w.writeScope === "new" ? "Create notes in the output folder; read and revise this task's new notes. Existing notes stay unchanged." : "Edit notes inside this scope and create new notes in the output folder. Excluded folders remain protected.", cls: "y-ai-hint" });
@@ -885,17 +931,31 @@ export class YoofloeAiView extends ItemView {
     scroll.createEl("a", { text: "www.yoofloe.com ↗", href: "https://www.yoofloe.com", cls: "y-ai-site", attr: { target: "_blank", rel: "noopener noreferrer" } });
     const followUp = this.showFollowUp;
     const dock = chatPanel.createDiv({ cls: `y-ai-dock${followUp ? " y-ai-follow-up-open" : ""}` });
-    if (w.attachments.length) {
+    if (w.reference) {
+      const reference = w.reference, chip = dock.createDiv({ cls: "y-ai-reference-chip", attr: { "aria-label": "Selected reference" } });
+      const preview = this.button(chip, "", () => new ReferenceModal(this.app, w, reference, followUp).open(), false, "y-ai-reference-open");
+      setIcon(preview.createSpan({ cls: "y-ai-reference-icon" }), "text-select");
+      preview.createSpan({ text: selectionLabel(reference) });
+      setTooltip(preview, "Preview reference. Access settings control where edits are allowed.");
+      const remove = this.button(chip, "", () => w.removeReference(), !w.canChangeReference, "clickable-icon y-ai-reference-remove");
+      remove.setAttribute("aria-label", "Remove reference from the next message"); setTooltip(remove, "Remove reference");
+      setIcon(remove, "x");
+    } else if (w.canRestoreReference) {
+      const undo = this.button(dock, "Undo removal", () => w.restoreReference(), false, "y-ai-reference-undo");
+      setTooltip(undo, "Restore the last reference and its selected images");
+    }
+    const selectedAttachments = followUp ? w.followUpAttachments : w.attachments;
+    if (selectedAttachments.length) {
       const attachments = dock.createDiv({ cls: "y-ai-attachments", attr: { "aria-label": "Attached files" } });
-      for (const file of w.attachments) { const chip = attachments.createDiv({ cls: "y-ai-attachment" }); const icon = chip.createSpan(); setIcon(icon, file.kind === "audio" ? "audio-lines" : file.kind === "image" ? "image" : "file-text"); setTooltip(chip.createSpan({ text: file.name, cls: "y-ai-attachment-name" }), `${file.name} · ${(file.bytes / 1024).toFixed(0)} KiB${file.kind === "audio" ? " · transcription charges apply" : ""}`); const remove = this.button(chip, "", () => w.removeAttachment(file.id), w.settingsLocked, "clickable-icon"); remove.setAttribute("aria-label", `Remove ${file.name} from this request`); setIcon(remove, "x"); }
+      for (const file of selectedAttachments) { const chip = attachments.createDiv({ cls: "y-ai-attachment" }); const icon = chip.createSpan(); setIcon(icon, file.kind === "audio" ? "audio-lines" : file.kind === "image" ? "image" : "file-text"); setTooltip(chip.createSpan({ text: file.name, cls: "y-ai-attachment-name" }), `${file.name} · ${(file.bytes / 1024).toFixed(0)} KiB${file.kind === "audio" ? " · transcription charges apply" : ""}`); const remove = this.button(chip, "", () => w.removeAttachment(file.id, followUp), !w.canChangeReference || w.addingAttachments, "clickable-icon"); remove.setAttribute("aria-label", `Remove ${file.name} from this request`); setIcon(remove, "x"); }
     }
     const compose = dock.createDiv({ cls: "y-ai-compose" });
     const prompt = compose.createEl("textarea", { text: w.prompt, cls: "y-ai-primary-prompt", attr: { rows: "1", "aria-label": "Ask", placeholder: "Ask…" } });
     prompt.disabled = w.settingsLocked && !w.addingAttachments; prompt.maxLength = 32000;
     const controls = dock.createDiv({ cls: `y-ai-row${w.busy ? " y-ai-running-controls" : ""}` });
     const picker = controls.createEl("input", { attr: { type: "file", multiple: "", "aria-label": "Choose attachments" } }); picker.hidden = true;
-    picker.addEventListener("change", () => { const files = Array.from(picker.files ?? []); picker.value = ""; void w.addAttachments(files); });
-    const attach = this.button(controls, "", () => picker.click(), w.settingsLocked, "y-ai-attach clickable-icon"); attach.setAttribute("aria-label", "Attach images, files or audio"); setTooltip(attach, ATTACHMENT_LIMIT_LABEL); setIcon(attach, "plus");
+    picker.addEventListener("change", () => { const files = Array.from(picker.files ?? []); picker.value = ""; void w.addAttachments(files, undefined, undefined, followUp); });
+    const attach = this.button(controls, "", () => picker.click(), !w.canChangeReference || w.addingAttachments, "y-ai-attach clickable-icon"); attach.setAttribute("aria-label", "Attach images, files or audio"); setTooltip(attach, ATTACHMENT_LIMIT_LABEL); setIcon(attach, "plus");
     const mode = this.select(controls, "AI mode", { expanded: "Expanded", provided: "Provided only" }, w.sourceMode, value => w.setSourceMode(value)); setTooltip(mode, SOURCE_MODES[w.sourceMode]);
     if (followUp) {
       this.followUpEditor(compose, controls);
@@ -912,6 +972,9 @@ export class YoofloeAiView extends ItemView {
     setIcon(addMessage, "message-square-plus");
     const run = this.button(controls, "", () => { if (w.busy) w.stop(); else { prompt.blur(); void w.run(); } }, false, "y-ai-send");
     this.apiDisclosure(dock);
+    const budget = dock.createEl("button", { text: "Estimating input…", cls: "y-ai-input-budget", attr: { "aria-label": "Input size details" } });
+    budget.type = "button";
+    this.scheduleBudget();
     this.refreshComposer();
     prompt.addEventListener("input", () => { w.setPrompt(prompt.value); this.sizeComposerInput(prompt); run.disabled = !this.actionReady(); this.saveSoon(); });
     prompt.addEventListener("paste", event => {

@@ -78,6 +78,108 @@ test('selection stays bounded and a partial excerpt cannot replace an entire doc
   const large = fixture({ 'Notes/Plan.md': 'x'.repeat(40000) });
   assert.equal((await large.agent.initialContext()).partial, true);
 });
+test('long Unicode selections can be read to the end without exposing surrounding text or repeating pages', async () => {
+  const selected = '한글 😀 and Polish łódź\n'.repeat(2600) + 'SELECTED END';
+  const full = 'PRIVATE PREFIX\n' + selected + '\nPRIVATE SUFFIX';
+  const f = fixture({ 'Notes/Plan.md': full });
+  f.policy.readScope = 'current';
+  f.policy.selection = { from: 'PRIVATE PREFIX\n'.length, to: 'PRIVATE PREFIX\n'.length + selected.length };
+  const agent = new VaultAgent(f.host, f.policy, () => true);
+  let page = await agent.initialContext(), combined = page.text;
+  while (page.next_cursor !== null) {
+    const next = await agent.execute('read_next', { reference: page.reference, version: page.version, cursor: page.next_cursor });
+    page = next.notes[0];
+    assert(page.text.length > 0);
+    combined += page.text;
+  }
+  assert.equal(combined, selected);
+  assert.equal(page.read_characters, selected.length);
+  assert.equal(page.total_characters, selected.length);
+  assert(!combined.includes('PRIVATE'));
+});
+test('a single long line is paged with a versioned cursor and a complete read permits replacement', async () => {
+  const original = 'a'.repeat(70000) + 'END';
+  const f = fixture({ 'Notes/Plan.md': original });
+  let page = await f.agent.initialContext(), text = page.text;
+  await assert.rejects(f.agent.execute('read_next', { reference: 'N1', version: page.version, cursor: 1 }), /next_cursor/);
+  while (page.next_cursor !== null) {
+    page = (await f.agent.execute('read_next', { reference: 'N1', version: page.version, cursor: page.next_cursor })).notes[0];
+    text += page.text;
+  }
+  assert.equal(text, original);
+  assert.equal(page.partial, false);
+  await f.agent.execute('apply_changes', { changes: [{ reference: 'N1', version: page.version, action: 'replace', markdown: 'Revised' }] });
+  assert.equal(f.files.get('Notes/Plan.md').text, 'Revised');
+});
+test('continuation rejects an external edit before reading another page', async () => {
+  const f = fixture({ 'Notes/Plan.md': 'a'.repeat(50000) });
+  const page = await f.agent.initialContext();
+  f.files.get('Notes/Plan.md').text += 'Human change';
+  await assert.rejects(f.agent.execute('read_next', { reference: 'N1', version: page.version, cursor: page.next_cursor }), /changed/);
+});
+test('a selected reference guides the task while Access allows edits elsewhere in the note and vault', async () => {
+  const f = fixture({ 'Notes/Plan.md': 'Focus\nOther paragraph', 'Notes/Other.md': 'Another note' });
+  f.policy.readScope = 'vault'; f.policy.writeScope = 'vault';
+  const agent = new VaultAgent(f.host, f.policy, () => true);
+  const source = await agent.initialContext();
+  const ref = await agent.addReference({ id: crypto.randomUUID(), path: 'Notes/Plan.md', version: source.version, from: 0, to: 5, firstLine: 1, lastLine: 1 });
+  assert.equal(ref.text, 'Focus');
+  const focused = await agent.initialContext();
+  assert.equal(focused.text, undefined, 'the initial note is not duplicated beside its selected reference');
+  const note = (await agent.execute('read_notes', { notes: [{ reference: 'N1', from_line: 1, through_line: 0 }] })).notes[0];
+  assert(note.text.includes('Other paragraph'));
+  await agent.execute('apply_changes', { changes: [{ reference: 'N1', version: note.version, action: 'replace', markdown: 'Focus\nRevised elsewhere' }] });
+  const found = await agent.execute('search_notes', { query: 'Other', limit: 4, offset: 0 });
+  const other = found.notes.find(n => n.path === 'Notes/Other.md');
+  const read = (await agent.execute('read_notes', { notes: [{ reference: other.reference, from_line: 1, through_line: 0 }] })).notes[0];
+  await agent.execute('apply_changes', { changes: [{ reference: other.reference, version: read.version, action: 'append', markdown: 'Revised too' }] });
+  assert.equal(f.files.get('Notes/Plan.md').text, 'Focus\nRevised elsewhere');
+  assert(f.files.get('Notes/Other.md').text.includes('Revised too'));
+});
+test('an explicit reference outside Current note can be read but cannot grant edits to that other note', async () => {
+  const f = fixture({ 'Notes/Plan.md': 'Current', 'Notes/Other.md': 'Reference\nPrivate tail' });
+  f.policy.readScope = 'current'; f.policy.writeScope = 'current';
+  const temp = new VaultAgent(f.host, { ...f.policy, sourcePath: 'Notes/Other.md' }, () => true);
+  const other = await temp.initialContext();
+  const agent = new VaultAgent(f.host, f.policy, () => true);
+  const ref = await agent.addReference({ id: crypto.randomUUID(), path: 'Notes/Other.md', version: other.version, from: 0, to: 9, firstLine: 1, lastLine: 1 });
+  assert.equal(ref.text, 'Reference');
+  await assert.rejects(agent.execute('apply_changes', { changes: [{ reference: ref.reference, version: ref.version, action: 'replace_selection', markdown: 'No' }] }), /scope/);
+  assert.equal(f.files.get('Notes/Other.md').text, 'Reference\nPrivate tail');
+});
+test('reading-view reference tools only reveal the quoted selection', async () => {
+  const f=fixture({ 'Notes/Plan.md': '# Private heading\nHidden note body' });
+  const note=await f.agent.initialContext();
+  const quote='# Selected heading\nVisible quote';
+  const ref=await f.agent.addReference({id:crypto.randomUUID(),path:note.path,version:note.version,from:0,to:note.text.length,firstLine:1,lastLine:2,quote});
+  assert.equal(ref.text,quote);
+  const outline=await f.agent.execute('read_outline',{reference:ref.reference});
+  assert.deepEqual(outline.headings.map(heading=>heading.text),['# Selected heading']);
+  await assert.rejects(f.agent.execute('apply_changes',{changes:[{reference:ref.reference,version:ref.version,action:'replace_selection',markdown:'No'}]}),/scope/);
+});
+test('selected outline line numbers can be used to read the original note range', async () => {
+  const prefix = 'Title\n\nAnother section\n\n';
+  const selection = '## Target\nText in selected passage.\n';
+  const f = fixture({ 'Notes/Plan.md': prefix + selection + '\nPrivate tail' });
+  const note = await f.agent.initialContext();
+  const ref = await f.agent.addReference({ id: crypto.randomUUID(), path: note.path, version: note.version, from: prefix.length, to: prefix.length + selection.length, firstLine: 5, lastLine: 6 });
+  const outline = await f.agent.execute('read_outline', { reference: ref.reference });
+  assert.deepEqual(outline.headings, [{ line: 5, text: '## Target' }]);
+  const result = await f.agent.execute('read_notes', { notes: [{ reference: ref.reference, from_line: outline.headings[0].line, through_line: 6 }] });
+  assert.equal(result.notes[0].text, selection);
+});
+test('whole-note and bounded replacements preserve the original trailing line breaks', async () => {
+  const whole = fixture({ 'Notes/Plan.md': 'Before\n\n' });
+  const full = await whole.agent.initialContext();
+  await whole.agent.execute('apply_changes', { changes: [{ reference: full.reference, version: full.version, action: 'replace', markdown: 'Updated' }] });
+  assert.equal(whole.files.get('Notes/Plan.md').text, 'Updated\n\n');
+
+  const f = fixture({ 'Notes/Plan.md': '# Title\n\nOld paragraph\n\n## Next heading\n' });
+  await f.agent.initialContext();
+  const read = await f.agent.execute('read_notes', { notes: [{ reference: 'N1', from_line: 3, through_line: 4 }] });
+  await f.agent.execute('apply_changes', { changes: [{ reference: 'N1', version: read.notes[0].version, action: 'replace_selection', markdown: 'Updated' }] });
+  assert.equal(f.files.get('Notes/Plan.md').text, '# Title\n\nUpdated\n\n## Next heading\n');
+});
 test('create collision, excluded secrets, corrupted backups and uncertain journals cannot overwrite an original', async () => {
   const f = fixture();
   await assert.rejects(f.agent.execute('create_note', { path: 'Notes/Plan.md', markdown: 'Bad' }), /exists/);

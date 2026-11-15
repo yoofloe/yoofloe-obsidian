@@ -5,7 +5,9 @@ import { noteTerms, rankNote } from "./note-workspace";
 import { agentTools } from "./agent-protocol";
 import { generatedPath, generatedExtension, readGeneratedFiles, type GeneratedFile } from "./generated-files";
 import { sourceList, withSources, type WebSource } from "./research";
+import { selectionText, type SelectionReference } from "./selection-reference";
 export interface AgentFile { identity: object; path: string; title: string; size: number }
+export interface ReadCoverage { path: string; selection: boolean; read: number; total: number }
 export interface JournalOp { kind: "edit" | "create" | "rename" | "trash" | "folder" | "asset"; path: string; target?: string; backup?: string; beforeHash: string; afterHash: string; previousHash: string; status: "pending" | "done" | "undone" }
 export interface WorkJournal { id: string; createdAt: number; status: "running" | "complete" | "interrupted" | "undone"; operations: JournalOp[] }
 export const MAX_JOURNAL_OPERATIONS = 200;
@@ -33,9 +35,27 @@ export interface AgentHost {
   persist(journal: WorkJournal): Promise<void>;
   createAsset?(file: GeneratedFile, path: string): Promise<void>; assetHash?(path: string): Promise<string | null>; trashAsset?(path: string, hash: string): Promise<void>;
 }
-interface Ref { file: AgentFile; version?: string; complete?: boolean; range?: { from: number; to: number }; allowedRange?: { from: number; to: number } }
+interface Ref {
+  file: AgentFile;
+  version?: string;
+  complete?: boolean;
+  range?: { from: number; to: number };
+  allowedRange?: { from: number; to: number };
+  next?: { from: number; to: number };
+  coverage?: { from: number; to: number }[];
+  total?: number;
+  provided?: SelectionReference;
+}
 const encoder = new TextEncoder();
 const limitBytes = 32768;
+function preserveLineBreaks(markdown: string, previous: string): string {
+  if (!markdown) return markdown;
+  let end = previous.length;
+  while (end > 0 && " \t\r\n".includes(previous.charAt(end - 1))) end--;
+  const trailing = previous.slice(end);
+  const firstBreak = trailing.search(/\r?\n/);
+  return firstBreak === -1 ? markdown : markdown + trailing.slice(firstBreak);
+}
 function list(value: unknown, maximum = 16): unknown[] { if (!Array.isArray(value) || !value.length || value.length > maximum) throw Error("Choose a bounded set of notes."); return value; }
 /** The model only requests typed work. Scope, source versions and recovery are enforced locally. */
 export class VaultAgent {
@@ -43,6 +63,12 @@ export class VaultAgent {
   readonly journals: WorkJournal[] = [this.currentJournal];
   get journal(): WorkJournal { return this.currentJournal; }
   get operations(): JournalOp[] { return this.journals.flatMap(journal => journal.operations); }
+  get readCoverage(): ReadCoverage[] {
+    return [...this.refs.values()].flatMap(ref => ref.total !== undefined ? [{
+      path: ref.file.path, selection: !!ref.allowedRange,
+      read: ref.coverage?.reduce((sum, part) => sum + part.to - part.from, 0) ?? 0, total: ref.total,
+    }] : []).slice(-24);
+  }
   readonly sent: { title: string; path: string; bytes: number }[] = [];
   readonly pendingTrash: { reference: string; title: string; version: string }[] = [];
   private refs = new Map<string, Ref>();
@@ -76,6 +102,8 @@ export class VaultAgent {
   }
   private ref(reference: unknown): Ref { const r = this.refs.get(textField(reference)); if (!r) throw Error("Read a reference returned by this task's search first."); return r; }
   private allowedRef(ref: Ref, action: "read" | "edit" | "organize"): boolean {
+    if (action === "read" && ref.provided) return validTaskPath(this.policy, ref.file.path);
+    if (ref.provided?.quote && action !== "read") return false;
     if (allowedPath(this.policy, ref.file.path, action)) return true;
     if (this.policy.writeScope !== "new" || this.createdNotes.get(ref.file.identity) !== ref.file.path || !allowedPath(this.policy, ref.file.path, "create")) return false;
     return action !== "organize" || this.policy.mode === "organize" || this.policy.mode === "all";
@@ -86,35 +114,89 @@ export class VaultAgent {
     return this.host.isCurrentNote ? this.host.isCurrentNote(ref.file) : this.host.files().some(file => file.identity === ref.file.identity && file.path === ref.file.path);
   }
   private reference(file: AgentFile): string {
-    for (const [id, ref] of this.refs) if (ref.file.identity === file.identity && ref.file.path === file.path) return id;
+    for (const [id, ref] of this.refs) if (!ref.provided && ref.file.identity === file.identity && ref.file.path === file.path) return id;
     const id = `N${this.next++}`; this.refs.set(id, { file }); return id;
   }
   private async read(ref: Ref): Promise<string> {
     this.guard(); if (!this.allowedRef(ref, "read")) throw Error("This note is outside the permitted data scope.");
-    const text = await this.host.read(ref.file); this.guard(); if (text === null) throw Error("The note was renamed, deleted or replaced."); return text;
+    const text = await this.host.read(ref.file); this.guard(); if (text === null) throw Error("The note was renamed, deleted or replaced.");
+    return text;
   }
-  private async excerpt(ref: Ref, fromLine = 1, throughLine = 0) {
-    const original = await this.read(ref), version = await inputDigest(original); this.guard();
+  async addReference(reference: SelectionReference) {
+    this.guard();
+    if (!validTaskPath(this.policy, reference.path)) throw Error("This reference is outside the permitted note paths.");
+    const file = this.host.files().find(item => item.path === reference.path);
+    if (!file) throw Error("The reference note is unavailable.");
+    const id = `S${this.next++}`;
+    const range = reference.quote ? { from: 0, to: reference.quote.length } : { from: reference.from, to: reference.to };
+    const ref: Ref = { file, provided: { ...reference }, allowedRange: range };
+    this.refs.set(id, ref);
+    try { return await this.excerpt(ref); }
+    catch (error) { this.refs.delete(id); throw error; }
+  }
+  private async excerpt(ref: Ref, fromLine = 1, throughLine = 0, cursor?: number, expectedVersion?: string, initialNote = false) {
+    const document = await this.read(ref), version = await inputDigest(document), original = ref.provided?.quote ?? document;
+    if (ref.provided) await selectionText(ref.provided, document, version);
+    this.guard();
+    if (expectedVersion && version !== expectedVersion) throw Error("The note changed. Read its current version before continuing.");
+    if (ref.version !== version) { ref.coverage = []; ref.next = undefined; }
+    if (!Number.isInteger(fromLine) || !Number.isInteger(throughLine) || fromLine < 1 || throughLine < 0) throw Error("Use positive line numbers, or zero through_line for a bounded first excerpt.");
     let from = 0, to = original.length;
     if (ref.allowedRange) {
-      if (this.policy.selectionVersion && version !== this.policy.selectionVersion) throw Error("The selected note changed. Select the text again before starting this task.");
+      if (!ref.provided && this.policy.selectionVersion && version !== this.policy.selectionVersion) throw Error("The selected note changed. Select the text again before starting this task.");
       ({ from, to } = ref.allowedRange);
       if (from < 0 || to < from || to > original.length) throw Error("The original selection is no longer available.");
     }
-    else {
-      if (!Number.isInteger(fromLine) || !Number.isInteger(throughLine) || fromLine < 1 || throughLine < 0) throw Error("Use positive line numbers, or zero through_line for a bounded first excerpt.");
+    if (fromLine !== 1 || throughLine !== 0) {
       const lines = original.split("\n"), start = Math.min(fromLine - 1, lines.length), end = throughLine ? Math.min(throughLine, lines.length) : lines.length;
       if (end < start) throw Error("The line range is reversed.");
-      from = lines.slice(0, start).reduce((n, line) => n + line.length + 1, 0); to = Math.min(original.length, lines.slice(0, end).reduce((n, line) => n + line.length + 1, 0));
+      from = Math.max(from, lines.slice(0, start).reduce((n, line) => n + line.length + 1, 0));
+      to = Math.min(to, lines.slice(0, end).reduce((n, line) => n + line.length + 1, 0));
+      if (from > to) throw Error("The requested lines are outside this reference.");
     }
-    let text = original.slice(from, to);
-    if (encoder.encode(text).length > limitBytes) { text = new TextDecoder().decode(encoder.encode(text).slice(0, limitBytes - 4)); if (text.endsWith("�")) text = text.slice(0, -1); to = from + text.length; }
-    safeOutbound(ref.file.title + "\n" + text); ref.version = version; ref.complete = from === 0 && to === original.length; ref.range = { from, to };
+    if (cursor !== undefined) {
+      if (!Number.isSafeInteger(cursor) || cursor !== ref.next?.from || cursor < from || cursor >= to) throw Error("Use the next_cursor returned by the last read.");
+      from = cursor;
+      to = ref.next.to;
+    }
+    const rangeEnd = to;
+    const maximum = initialNote && rangeEnd - from > limitBytes ? 8 * 1024 : limitBytes;
+    const candidate = original.slice(from, Math.min(rangeEnd, from + maximum + 1));
+    const encoded = encoder.encodeInto(candidate, new Uint8Array(maximum));
+    to = from + encoded.read;
+    const text = original.slice(from, to);
+    // Catch credentials spanning a page boundary without inspecting outside the
+    // deliberately selected passage.
+    const guardFrom = Math.max(ref.allowedRange?.from ?? 0, from - 256);
+    const guardTo = Math.min(ref.allowedRange?.to ?? original.length, to + 256);
+    safeOutbound(ref.file.title + "\n" + original.slice(guardFrom, guardTo));
+    ref.version = version; ref.range = { from, to };
+    ref.next = to < rangeEnd ? { from: to, to: rangeEnd } : undefined;
+    const coverage: { from: number; to: number }[] = [];
+    for (const part of [...ref.coverage ?? [], { from, to }].sort((a, b) => a.from - b.from)) {
+      const previous = coverage.at(-1);
+      if (previous && part.from <= previous.to) previous.to = Math.max(previous.to, part.to);
+      else coverage.push({ ...part });
+    }
+    ref.coverage = coverage;
+    ref.total = ref.allowedRange ? ref.allowedRange.to - ref.allowedRange.from : original.length;
+    ref.complete = coverage.length === 1 && coverage[0].from === 0 && coverage[0].to === original.length;
+    const readCharacters = coverage.reduce((sum, part) => sum + part.to - part.from, 0);
     this.sent.push({ title: ref.file.title, path: ref.file.path, bytes: encoder.encode(text).length });
-    return { reference: this.reference(ref.file), title: ref.file.title, path: ref.file.path, version, text, from_line: original.slice(0, from).split("\n").length,
-      through_line: original.slice(0, to).split("\n").length, total_lines: original.split("\n").length, partial: !ref.complete, selection_only: !!ref.allowedRange };
+    const id = [...this.refs].find(([, item]) => item === ref)?.[0] ?? this.reference(ref.file);
+    return { reference: id, title: ref.file.title, path: ref.file.path, version, text, from_line: original.slice(0, from).split("\n").length,
+      through_line: original.slice(0, Math.max(from, to - 1)).split("\n").length, total_lines: original.split("\n").length, partial: !ref.complete, selection_only: !!ref.allowedRange,
+      ...(ref.provided ? { purpose: "User-selected reference. Access settings determine permitted edits. Read a normal note reference to edit outside this excerpt.", quoted_text: !!ref.provided.quote } : {}),
+      next_cursor: ref.next?.from ?? null, read_characters: readCharacters, total_characters: ref.total };
   }
-  async initialContext(): Promise<unknown> { const source = this.refs.get("N1"); if (this.policy.sourcePath && !source) throw Error("The attached note is unavailable. Open it again or choose another note before sending."); return source ? await this.excerpt(source) : { source: "No existing note is attached.", write_target: this.policy.writeScope, note: this.policy.writeScope === "current" ? "Current note has no writable target. The user must attach a note or explicitly choose New documents before creating notes." : "Only the selected write target grants changes." }; }
+  async initialContext(deferNoteRead = false): Promise<unknown> {
+    const source = this.refs.get("N1");
+    if (this.policy.sourcePath && !source) throw Error("The attached note is unavailable. Open it again or choose another note before sending.");
+    if (source && !this.allowedRef(source, "read")) throw Error("The attached note is outside the permitted data scope.");
+    if (source && (deferNoteRead || [...this.refs.values()].some(ref => ref.provided && ref.file.identity === source.file.identity && ref.file.path === source.file.path)))
+      return { reference: "N1", path: source.file.path, title: source.file.title, note: "Read N1 as needed within Access settings. The note body has not been included automatically." };
+    return source ? await this.excerpt(source, 1, 0, undefined, undefined, true) : { source: "No existing note is attached.", write_target: this.policy.writeScope, note: this.policy.writeScope === "current" ? "Current note has no writable target. The user must attach a note or explicitly choose New documents before creating notes." : "Only the selected write target grants changes." };
+  }
   async finish(): Promise<void> { this.journal.status = "complete"; if (this.journal.operations.length) await this.host.persist(this.journal); }
   private async prepareEdit(file: AgentFile, before: string, afterHash: string): Promise<JournalOp> {
     this.guard(); const beforeHash = await inputDigest(before); this.guard();
@@ -146,11 +228,20 @@ export class VaultAgent {
       for (const item of list(args.notes, 4)) { closedObject(item, ["reference", "from_line", "through_line"]); output.push(await this.excerpt(this.ref(item.reference), Number(item.from_line), Number(item.through_line))); }
       return { notes: output };
     }
+    if (name === "read_next") {
+      closedObject(args, ["reference", "version", "cursor"]);
+      return { notes: [await this.excerpt(this.ref(args.reference), 1, 0, Number(args.cursor), textField(args.version))] };
+    }
     if (name === "read_outline") {
-      closedObject(args, ["reference"]); const ref = this.ref(args.reference), text = await this.read(ref), visible = ref.allowedRange ? text.slice(ref.allowedRange.from, ref.allowedRange.to) : text;
+      closedObject(args, ["reference"]);
+      const ref = this.ref(args.reference), text = await this.read(ref);
+      const visible = ref.provided ? await selectionText(ref.provided, text) : ref.allowedRange ? text.slice(ref.allowedRange.from, ref.allowedRange.to) : text;
+      this.guard();
+      const firstLine = ref.allowedRange && !ref.provided?.quote ? text.slice(0, ref.allowedRange.from).split("\n").length : 1;
       const headings = []; let fence = false;
-      for (const [index, line] of visible.split("\n").entries()) { if (/^\s*(`{3,}|~{3,})/.test(line)) fence = !fence; if (!fence && /^#{1,6} /.test(line)) headings.push({ line: index + 1, text: line.slice(0, 180) }); }
-      safeOutbound(JSON.stringify(headings)); return { title: ref.file.title, headings: headings.slice(0, 200), total_lines: visible.split("\n").length, selection_only: !!ref.allowedRange, partial: headings.length > 200 };
+      const lines = visible.split("\n");
+      for (const [index, line] of lines.entries()) { if (/^\s*(`{3,}|~{3,})/.test(line)) fence = !fence; if (!fence && /^#{1,6} /.test(line)) headings.push({ line: firstLine + index, text: line.slice(0, 180) }); }
+      safeOutbound(JSON.stringify(headings)); return { title: ref.file.title, headings: headings.slice(0, 200), from_line: firstLine, total_lines: lines.length, selection_only: !!ref.allowedRange, partial: headings.length > 200 };
     }
     if (name === "apply_changes") {
       closedObject(args, ["changes"]); const plans = [], seen = new Set<string>();
@@ -160,9 +251,12 @@ export class VaultAgent {
         if (seen.has(ref.file.path)) throw Error("Use one change per note in a batch."); seen.add(ref.file.path);
         if (!ref.version || change.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("The note changed. Read its new version before editing.");
         const markdown = this.markdown(textField(change.markdown, 4 * 1024 * 1024), before, change.action === "replace_selection", change.action === "append"); let after: string;
-        if (change.action === "replace" && ref.complete) after = markdown;
+        if (change.action === "replace" && ref.complete) after = preserveLineBreaks(markdown, before);
         else if (change.action === "append" && !ref.allowedRange) after = before + (before.endsWith("\n\n") || !before ? "" : before.endsWith("\n") ? "\n" : "\n\n") + markdown + "\n";
-        else if (change.action === "replace_selection" && ref.range) after = before.slice(0, ref.range.from) + markdown + before.slice(ref.range.to);
+        else if (change.action === "replace_selection" && ref.range) {
+          const { from, to } = ref.range;
+          after = before.slice(0, from) + preserveLineBreaks(markdown, before.slice(from, to)) + before.slice(to);
+        }
         else throw Error("Read the complete note before replacing it, or replace only the reviewed selection.");
         plans.push({ ref, before, after, hash: await inputDigest(after) });
       }
@@ -171,9 +265,12 @@ export class VaultAgent {
         this.guard(); await this.host.replace(plan.ref.file, plan.before, plan.after); this.editedNotes.add(plan.ref.file.identity);
         if (plan.ref.allowedRange) {
           plan.ref.allowedRange = { from: plan.ref.allowedRange.from, to: plan.ref.allowedRange.to + plan.after.length - plan.before.length };
-          this.policy.selection = { ...plan.ref.allowedRange }; this.policy.selectionVersion = plan.hash;
+          if (plan.ref.provided) plan.ref.provided = { ...plan.ref.provided, ...plan.ref.allowedRange, version: plan.hash };
+          else { this.policy.selection = { ...plan.ref.allowedRange }; this.policy.selectionVersion = plan.hash; }
         }
-        plan.ref.version = plan.hash; plan.ref.complete = false; plan.ref.range = undefined; ops[index].status = "done"; await this.host.persist(this.journal);
+        // The saved version must be read again before another edit.
+        plan.ref.complete = false; plan.ref.range = undefined; plan.ref.next = undefined;
+        ops[index].status = "done"; await this.host.persist(this.journal);
       }
       return { status: "applied", notes: plans.map(plan => ({ reference: this.reference(plan.ref.file), path: plan.ref.file.path, version: plan.hash })), undo_available: true };
     }

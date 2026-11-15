@@ -58,8 +58,18 @@ Yoofloe has no server or cloud database. Yoofloe does not receive your notes, pr
 When you choose Send, task data goes directly to OpenAI using your API key; API charges apply.
 Drafts, answers, recent context and recovery records remain on your device and may be copied by vault sync.
 See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local removal and scope details.
-Note titles and vault-relative paths returned by search can also go to OpenAI. Selection scope sends the selected passage,
-not the whole note. Open editor text, including unsaved changes, is used. A changed selection must be selected again.
+Note titles and vault-relative paths returned by search can also go to OpenAI. Select a passage and open Yoofloe to add
+a reference chip above the composer. Click the chip to preview it or create local image pages. Use its x button to remove
+the reference and its selected images from the next message, or **Undo removal** to restore them.
+References guide the task. **Access** continues to control which notes the task can read and edit, including other passages
+or notes. Open editor text, including unsaved changes, is used. Changed references require a fresh selection.
+Long passages have versioned continuation cursors and reading coverage. Queue stores each message's reference and
+attachments. A steer containing new reference material or attachments joins the next safe model request.
+
+The input-size indicator is a local estimate for the next message. After sending, large requests, files and compacted
+context are counted through the OpenAI input-token endpoint before generation. Known models reserve room for output and
+reasoning. A failed size check keeps the draft and completed work. The activity details separately report cumulative
+model usage. Image previews use the selected Markdown only, with embedded files shown as text.
 
 ## Sources and attachments
 
