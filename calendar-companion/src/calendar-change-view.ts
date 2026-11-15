@@ -1,7 +1,5 @@
-import { Notice, Platform } from "obsidian";
+import { Platform } from "obsidian";
 import type { AiWorkspace } from "./workspace";
-import { downloadCalendarTransfer, pickCalendarTransfer } from "./calendar-workspace-file";
-import { MAX_CALENDAR_WORKSPACE_CHANGE_TRANSFER_BYTES } from "./calendar-workspace-change";
 import type { CalendarChangeAction } from "./calendar-change";
 import type { CalendarChangeStatus } from "./calendar-change-controller";
 import { isRecordKind, recordLabel } from "./record-types";
@@ -9,7 +7,7 @@ import { isRecordKind, recordLabel } from "./record-types";
 const statusLabels: Record<CalendarChangeStatus, string> = {
   draft: "Proposal ready", waiting: "Waiting for Calendar", applied: "Applied in Calendar",
   cancelled: "Cancelled in Calendar", conflict: "Calendar found a conflict", not_found: "No saved result found",
-  undone: "Undone in Calendar", rejected: "Rejected by Calendar",
+  undone: "Reverted in Calendar", rejected: "Rejected by Calendar",
 };
 const actionLabels: Record<string, string> = {
   create: "Add", update: "Edit", delete: "Move to Trash", restore: "Restore",
@@ -46,8 +44,8 @@ export function workspaceCalendarChangeToggle(container: HTMLElement, workspace:
 }
 
 export function calendarChangeCard(container: HTMLElement, workspace: AiWorkspace): void {
-  if (workspace.supportsCalendarChanges) renderCard(container, workspace, false);
-  if (workspace.workspaceCalendar) renderCard(container, workspace, true);
+  if (workspace.supportsCalendarChanges || workspace.calendarChanges.state) renderCard(container, workspace, false);
+  if (workspace.workspaceCalendar || workspace.workspaceCalendarChanges.state) renderCard(container, workspace, true);
 }
 function renderCard(container: HTMLElement, workspace: AiWorkspace, extended: boolean): void {
   const controller = extended ? workspace.workspaceCalendarChanges : workspace.calendarChanges, record = controller.state;
@@ -78,6 +76,10 @@ function renderCard(container: HTMLElement, workspace: AiWorkspace, extended: bo
       item.createDiv({ text: `${label} · ${display.length > 800 ? display.slice(0, 800) + "…" : display}`, cls: "y-ai-hint" });
     }
   }
+  if (!Platform.isAndroidApp) {
+    card.createEl("p", { text: "Review Calendar proposals in Obsidian on Android.", cls: "y-ai-hint" });
+    return;
+  }
   if (extended && record.draft.datasetId !== workspace.workspaceCalendar?.datasetId)
     card.createEl("p", { text: "Check the original Calendar connection to review this proposal.", cls: "y-ai-hint" });
   if (controller.message) card.createEl("p", { text: controller.message, cls: "y-ai-hint", attr: { role: "status" } });
@@ -87,28 +89,19 @@ function renderCard(container: HTMLElement, workspace: AiWorkspace, extended: bo
     element.disabled = workspace.settingsLocked;
     element.addEventListener("click", () => { if (!element.disabled) void action(); });
   };
-  const manual = extended && Platform.isDesktopApp;
-  const save = () => downloadCalendarTransfer(container.ownerDocument.body, controller.exportPending());
   const open = (action: CalendarChangeAction) => async () => {
     const url = await controller.open(action);
-    if (!url) return;
-    if (manual) save();
-    else container.ownerDocument.defaultView?.open(url, "_self");
+    if (url) container.ownerDocument.defaultView?.open(url, "_self");
   };
-  if (controller.canOpen("review")) button(manual ? "Save review request" : "Review in Calendar", open("review"), true);
-  if (controller.canOpen("undo")) button(manual ? "Save undo request" : "Undo in Calendar", open("undo"), true);
+  if (controller.canOpen("review")) button("Review in Calendar", open("review"), true);
+  if (controller.canOpen("undo")) button("Revert in Calendar", open("undo"), true);
   if (controller.requestId) {
-    button(manual ? "Import Calendar reply" : "Check Calendar reply", async () => {
+    button("Check Calendar reply", async () => {
       const id = controller.requestId;
-      if (!id) return;
-      try {
-        const file = manual ? await pickCalendarTransfer(container.ownerDocument.body, id + ".change.reply.json", MAX_CALENDAR_WORKSPACE_CHANGE_TRANSFER_BYTES) : undefined;
-        if (!manual || file) await controller.receive(id, file ?? undefined);
-      } catch (error) { new Notice(error instanceof Error ? error.message : "The Calendar reply could not be opened."); }
+      if (id) await controller.receive(id);
     });
-    if (manual) button("Save request again", save);
     button("Close local connection", () => controller.disconnect());
   }
-  if (!controller.requestId && controller.canOpen("status")) button(manual ? "Save status request" : "Check status in Calendar", open("status"));
+  if (!controller.requestId && controller.canOpen("status")) button("Check status in Calendar", open("status"));
   if (!controller.requestId && record.status !== "waiting") button("Clear proposal", () => controller.clear());
 }

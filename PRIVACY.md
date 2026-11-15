@@ -20,7 +20,7 @@ the plugin sends requests directly to `https://api.openai.com/v1/responses`:
 
 - Your task prompt, attached note or selected text, selected files/images/audio, and bounded prior task context.
 - Relevant note excerpts, outlines, titles and vault-relative paths returned by permitted search/read tools.
-- The optional Calendar excerpts and search totals you added, including their dates and coverage.
+- Optional approved Calendar and ChronoHUD excerpts you selected, including their dates and coverage.
 - Requested file operations, their results, model/effort settings and conversation/reasoning state needed to continue the task.
 
 One task may make multiple requests up to its selected finite maximum, or without a plugin request-count cap when you explicitly choose that option. Additional excerpts can be sent during that task,
@@ -31,7 +31,7 @@ and repeated blocked steps stop locally. A finite pause resumes only after your 
 total limit or no count cap, retaining the original model and scopes. No continuation request is replayed automatically after app restart.
 The API key goes in the authorization header, never in a prompt or URL. Do not put credentials in notes or prompts.
 
-No OpenAI request is made by opening the plugin, selecting a model, saving a key, selecting attachments, searching local chat history or looking up Calendar records locally.
+No OpenAI request is made by opening the plugin, selecting a model, saving a key, selecting attachments, searching local chat history or looking up Calendar or ChronoHUD records locally.
 There are no background AI jobs, automatic retries, paid search planners, embedding uploads or Yoofloe telemetry.
 Yoofloe operates no relay or database for this plugin. Expanded mode can invoke OpenAI web search when you send a task. Store/help links open only when you choose them;
 Obsidian's own updates and other plugins have their own network behavior.
@@ -84,7 +84,7 @@ Requests already in flight may still be processed and charged after Stop.
   archived conversation is local only; a new task sends limited recent context rather than the whole chat archive.
 - Original Markdown backups are stored under `Yoofloe AI/Backups/`; task journals list changed paths/digests under
   the configuration directory's `plugins/yoofloe/tasks/`. Old panel layout state is backed up there before consolidation.
-- Optional Calendar handoffs use the local Inbox and authenticated encrypted replies. Change proposals use a
+- Optional Calendar and ChronoHUD handoffs use the chosen vault’s local Inbox on Android and authenticated encrypted replies. Calendar change proposals use a
   separate encrypted payload and a short-lived transfer key in the Inbox request file. Keep the Inbox out of
   cloud sync if possible. Software that can read the Inbox can access its request files. Exact session files are
   cleaned up only when safe; independently changed or uncertain files are preserved.
@@ -103,7 +103,7 @@ directory as well if you want to remove full archived conversations. Older chat 
 their previews leave the recent 50-task display. For a custom configuration directory, substitute that directory for `.obsidian`.
 Task journals are under `plugins/yoofloe/tasks/` in that same configuration directory; original backups are ordinary
 vault files under `Yoofloe AI/Backups/`. Delete those only when you no longer need recovery. Removing a backup can make
-Undo unavailable. Other sync/backup copies and provider-side retention are managed separately.
+recovery unavailable. Other sync/backup copies and provider-side retention are managed separately.
 
 ## Scope, safety and your choices
 
@@ -114,15 +114,13 @@ The output folder does not enable creation under Current note. In Note folder mo
 organization, within the read and change scopes you choose. It does not silently change those scopes.
 Credential-pattern detection blocks recognized keys in outgoing material but cannot identify every secret or personal detail.
 Write/edit modes can make real changes in their selected scope, including several files. Version checks,
-original backups, task records and conflict-aware Undo reduce mistakes; they cannot guarantee perfect model behavior.
+original backups, task records and conflict-aware recovery reduce mistakes; they cannot guarantee perfect model behavior.
 Obsidian Trash requires your separate choice. The Calendar app reviews, applies and undoes approved changes
 and keeps the result locally. Its capabilities determine the available Schedule, Study, Project and Notes actions.
 The workspace lookup has separate approvals for archive, Trash, financial records and attachment metadata. Sending
 an AI message uses the selected approved excerpts.
 
-Desktop keeps an active Calendar request in memory. A request file you save contains a one-time transfer key.
-Transfer it through local storage you control. After importing the authenticated reply, remove exported request and
-reply copies from both devices. Review facts and rights before publishing AI-assisted work.
+Review facts and rights before publishing AI-assisted work.
 
 ## Personal data and legal responsibilities
 

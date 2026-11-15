@@ -84,7 +84,7 @@ export class CalendarWorkspaceAccess {
       const url = await session.start({ query, vaultId, inboxHint: this.options.inboxHint() });
       if (!this.options.current() || this.session !== session) return null;
       this.pending = mode;
-      this.message = mode === "capabilities" ? "Check the available workspaces in the Calendar app." : "Review this lookup in the Calendar app.";
+      this.message = "";
       return url;
     } catch (error) {
       this.message = error instanceof Error ? error.message : "Calendar could not be opened.";
@@ -105,7 +105,7 @@ export class CalendarWorkspaceAccess {
       this.approvedVersion = this.selectionVersion;
       this.delivery = reply.query.mode === "records" ? reply : null;
       this.excerptsEnabled = false; this.included = null;
-      this.message = this.delivery ? "Review these local results before including excerpts in a chat." : "Calendar confirmed the available record types and actions.";
+      this.message = "";
     } catch { this.message = "No verified Calendar reply yet. Finish reviewing in Calendar, then check again."; }
     finally { this.busy = false; this.options.changed(); }
   }

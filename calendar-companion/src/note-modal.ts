@@ -194,7 +194,7 @@ export class NoteModal extends Modal {
       const more = footer.createEl("details"); more.createEl("summary", { text: "More actions" });
       if (!proposal && work.source?.scope === "selection") this.button(more, "Replace selected text", () => void work.apply("replace"), work.busy || work.applied);
       this.button(more, "Save as new note", () => void work.saveNew(), work.busy || work.saved);
-      if (work.canUndo) this.button(more, "Undo last AI edit", () => void work.undo(), work.busy);
+      if (work.canUndo) this.button(more, "Revert last AI edit", () => void work.undo(), work.busy);
       this.button(more, "Continue with this answer", () => void work.followUp(), work.busy);
       this.button(more, "Copy result", () => {
         const clipboard = this.contentEl.ownerDocument.defaultView?.navigator.clipboard;

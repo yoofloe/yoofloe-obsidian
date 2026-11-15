@@ -1,4 +1,5 @@
 import { setIcon } from "obsidian";
+import { renderCompanionStep } from "./companion-guide";
 import { workspaceExcerptReference, workspaceSearchTerms } from "./calendar-workspace-query";
 import { buildCalendarInsights, type CalendarInsightEntry, type CalendarInsights } from "./calendar-insights";
 import type {
@@ -28,7 +29,6 @@ type Action = () => void | Promise<unknown>;
 export interface CalendarWorkspacePanelModel {
   selection: CalendarWorkspacePanelSelection;
   locked?: boolean;
-  manual?: boolean;
   pending?: "capabilities" | "records" | null;
   message?: string;
   capabilities?: WorkspaceCapabilities | null;
@@ -43,7 +43,6 @@ export interface CalendarWorkspacePanelModel {
   checkCapabilities: Action;
   findRecords: Action;
   checkReply: Action;
-  saveRequest?: Action;
   clearContext: Action;
   updateSelection(patch: CalendarWorkspaceSelectionPatch): void;
   useExcerpts(enabled: boolean): void | Promise<unknown>;
@@ -309,7 +308,7 @@ function renderDelivery(parent: HTMLElement, model: CalendarWorkspacePanelModel)
   const delivery = model.delivery;
   if (!delivery?.context || delivery.query.mode !== "records") return;
   const approved = delivery.context;
-  const { body } = section(parent, "sources", "Approved sources · " + delivery.records.length, model.openSections);
+  const body = parent.createDiv({ attr: { role: "group", "aria-label": "Approved Calendar excerpts" } });
   const range = approved.from && approved.through ? approved.from + " to " + approved.through : "Any date";
   const scope = [approved.scope.areas.map(area => AREA_LABELS[area]).join(", "), range, approved.zone];
   hint(body, scope.join(" · "));
@@ -357,14 +356,31 @@ function renderDelivery(parent: HTMLElement, model: CalendarWorkspacePanelModel)
 /** Render Calendar controls without launching the companion or sending a provider request. */
 export function renderCalendarWorkspacePanel(el: HTMLElement, model: CalendarWorkspacePanelModel): void {
   const parent = el.createEl("section", { attr: { "aria-label": "Find Calendar records" } });
-  const locked = !!model.locked || !!model.pending;
+  const locked = !!model.locked;
   const capabilities = model.capabilities ?? model.delivery?.capabilities;
-  let selection = model.selection;
-  const manual = model.manual === true;
-  hint(parent, manual
-    ? "Save a request file and put it in the Yoofloe Calendar Inbox. Approve the request in Calendar, then import the reply here. Remove your exported request copy after use."
-    : "Choose what Calendar may look up, then approve the search in Calendar. The lookup runs on this device.");
   if (model.message) parent.createEl("p", { cls: "y-ai-status", text: model.message, attr: { role: "status" } });
+
+  if (model.pending) {
+    renderCompanionStep(parent, "Approve in Calendar", model.pending === "capabilities"
+      ? "If asked, choose this vault’s Yoofloe Calendar Inbox. Tap Share capabilities, then return to Obsidian."
+      : "Review the search in Calendar, then tap Find relevant records. Return to Obsidian to review the excerpts.");
+    const actions = parent.createDiv({ cls: "y-ai-calendar-proposal-actions" });
+    button(actions, "Check Calendar reply", model.checkReply, locked, true);
+    button(actions, "Cancel Calendar request", model.clearContext, locked);
+    return;
+  }
+  if (!capabilities) {
+    renderCompanionStep(parent, "Connect Calendar", "In Calendar, choose this vault’s Yoofloe Calendar Inbox if prompted, then tap Share capabilities.");
+    button(parent, "Check Calendar connection", model.checkCapabilities, locked, true);
+    return;
+  }
+  if (model.delivery) {
+    renderCompanionStep(parent, "Review Calendar excerpts", "Choose the excerpts to include in your next message.");
+    renderDelivery(parent, model);
+  } else {
+    renderCompanionStep(parent, "Choose Calendar records", "Choose what to look up. Calendar will ask you to approve the excerpts it shares.");
+  }
+  let selection = model.selection;
 
   const topic = field(parent, "Search terms (optional)").createEl("input", { type: "text", attr: { "aria-label": "Search terms (optional)" } });
   topic.value = selection.topic;
@@ -390,16 +406,8 @@ export function renderCalendarWorkspacePanel(el: HTMLElement, model: CalendarWor
 
   const refreshFilters = filters(parent, model, locked, () => selection, apply);
   const actions = parent.createDiv({ cls: "y-ai-calendar-proposal-actions" });
-  let findButton: HTMLButtonElement | undefined;
-  if (model.pending) {
-    button(actions, manual ? "Import Calendar reply" : "Check Calendar reply", model.checkReply, !!model.locked, true);
-    if (manual && model.saveRequest) button(actions, "Save request again", model.saveRequest, !!model.locked);
-    button(actions, "Cancel Calendar request", model.clearContext, !!model.locked);
-  } else {
-    findButton = button(actions, manual ? "Save Calendar lookup request" : "Find records in Calendar", model.findRecords, locked, true);
-    const capabilityLabel = manual ? "Save capabilities request" : capabilities ? "Refresh capabilities" : "Check Calendar capabilities";
-    button(actions, capabilityLabel, model.checkCapabilities, locked);
-  }
+  const findButton = button(actions, "Find records in Calendar", model.findRecords, locked, true);
+  button(actions, "Refresh Calendar connection", model.checkCapabilities, locked);
   const guidance = parent.createEl("p", { cls: "y-ai-hint", attr: { role: "status" } });
 
   function refresh() {
@@ -417,10 +425,7 @@ export function renderCalendarWorkspacePanel(el: HTMLElement, model: CalendarWor
       problem = "Review the selected record types and their required filters.";
     else if (selection.period === "custom" && (!civilDate(selection.from) || !civilDate(selection.through) || selection.from > selection.through))
       problem = "Choose a valid start and end date.";
-    else if (!capabilities && model.canFind === false) {
-      problem = manual ? "Import a capabilities reply before searching." : "Check Calendar capabilities before searching.";
-    }
-    if (findButton) findButton.disabled = locked || model.canFind === false || !!problem;
+    findButton.disabled = locked || model.canFind === false || !!problem;
     guidance.setText(locked ? "" : problem);
     guidance.hidden = locked || !problem;
   }
@@ -471,5 +476,4 @@ export function renderCalendarWorkspacePanel(el: HTMLElement, model: CalendarWor
   drawKinds();
   refresh();
   renderCapabilities(parent, model);
-  renderDelivery(parent, model);
 }

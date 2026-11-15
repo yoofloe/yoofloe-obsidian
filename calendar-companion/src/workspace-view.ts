@@ -24,11 +24,11 @@ import { budgetLabel } from "./input-budget";
 import { InputBudgetModal } from "./input-budget-modal";
 import { calendarChangeCard, calendarChangeToggle, workspaceCalendarChangeToggle } from "./calendar-change-view";
 import { renderCalendarWorkspacePanel } from "./calendar-workspace-panel";
-import { downloadCalendarTransfer, pickCalendarTransfer } from "./calendar-workspace-file";
-import { QUERY_REPLY_BYTES } from "./question-query";
+import { renderChronoHudPanel } from "./chronohud-panel";
 
 export const AI_VIEW = "yoofloe-ai";
-const STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
+const CALENDAR_STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
+const CHRONOHUD_STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.chronohud";
 const FOLLOW_UP_LABELS = { queue: "Queue after this task", steer: "Steer the current task" };
 const COMPOSER_ACTIONS = {
   send: { label: "Send", icon: "arrow-up" },
@@ -740,36 +740,118 @@ export class YoofloeAiView extends ItemView {
     content.createEl("p", { text: `The request can include permitted notes and selected files. ${w.mode === "ask" ? "Access is read-only." : `Write access is set to ${WRITE_SCOPE_LABELS[w.writeScope]}.`}` });
     content.createEl("a", { text: "OpenAI API data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
   }
+  revealAppContext(app: "calendar" | "chronohud"): void {
+    if (!Platform.isAndroidApp || !this.work.current) return;
+    this.openDetails.delete("calendar");
+    this.openDetails.delete("chronohud");
+    this.openDetails.add(app);
+    this.libraryOpen = false;
+    if (this.settingsExpanded) this.render();
+    else this.toggleSettings();
+    this.contentEl.querySelector(".y-ai-app-context-title")?.scrollIntoView({ block: "start" });
+  }
+  private appContext(parent: HTMLElement): void {
+    const group = parent.createEl("section", { cls: "y-ai-app-context", attr: { "aria-label": "App context" } });
+    group.createEl("h3", { cls: "y-ai-app-context-title", text: "App context" });
+    if (!Platform.isAndroidApp) {
+      group.createEl("p", { cls: "y-ai-hint y-ai-app-context-guide", text: "Connect Yoofloe Calendar and ChronoHUD in Obsidian on an Android phone or tablet." });
+      return;
+    }
+    const apps: { key: "calendar" | "chronohud"; name: string; icon: string; store: string }[] = [
+      { key: "calendar", name: "Yoofloe Calendar", icon: "calendar-days", store: CALENDAR_STORE },
+    ];
+    if (this.work.chronoHud) apps.push({ key: "chronohud", name: "ChronoHUD", icon: "timer", store: CHRONOHUD_STORE });
+    const open = apps.find(app => this.openDetails.has(app.key));
+    const controls = group.createDiv({ cls: "y-ai-app-context-buttons" });
+    for (const app of apps) {
+      const button = controls.createEl("button", {
+        cls: "y-ai-app-context-button",
+        attr: { type: "button", "aria-expanded": String(open === app), "data-context-app": app.key },
+      });
+      setIcon(button.createSpan({ cls: "y-ai-setting-icon", attr: { "aria-hidden": "true" } }), app.icon);
+      button.createSpan({ cls: "y-ai-app-context-name", text: app.name });
+      setIcon(button.createSpan({ cls: "y-ai-setting-chevron", attr: { "aria-hidden": "true" } }), "chevron-down");
+      button.addEventListener("click", () => {
+        if (open === app) { this.openDetails.delete(app.key); this.render(); }
+        else this.revealAppContext(app.key);
+        this.contentEl.querySelector<HTMLButtonElement>('[data-context-app="' + app.key + '"]')?.focus({ preventScroll: true });
+      });
+    }
+    group.createEl("p", { cls: "y-ai-hint y-ai-app-context-guide", text: "Use Obsidian and the selected app on the same Android phone or tablet. Approve each lookup in the app." });
+    if (!open) return;
+    const body = group.createDiv({ cls: "y-ai-app-context-body", attr: { role: "region", "aria-label": open.name } });
+    if (open.key === "calendar") this.calendarPanel(body);
+    else this.chronoHudPanel(body);
+    const footer = body.createDiv({ cls: "y-ai-app-context-footer" });
+    const store = footer.createEl("a", {
+      href: open.store, text: "View on Google Play",
+      attr: { target: "_blank", rel: "noopener noreferrer", "aria-label": "View " + open.name + " on Google Play" },
+    });
+    setIcon(store.createSpan({ attr: { "aria-hidden": "true" } }), "external-link");
+  }
+  private chronoHudPanel(parent: HTMLElement): void {
+    const access = this.work.chronoHud;
+    if (!access) return;
+    const requestContext = async () => {
+      const url = await access.open();
+      if (url) this.contentEl.ownerDocument.defaultView?.open(url, "_self");
+    };
+    const checkReply = async () => {
+      const id = access.requestId;
+      if (id) await access.receive(id);
+    };
+    renderChronoHudPanel(parent, {
+      draft: access.draft, locked: this.work.settingsLocked, pending: access.pending, busy: access.busy,
+      delivery: access.delivery, message: access.message, includedIndices: access.includedIndices,
+      excerptsEnabled: access.excerptsEnabled, openSections: this.openDetails, requestContext, checkReply,
+      updateDraft: patch => access.updateDraft(patch), clearContext: () => access.clear(),
+      setIncluded: (index, included) => access.setIncluded(index, included), useExcerpts: enabled => access.useExcerpts(enabled),
+    });
+  }
   private workspaceCalendarPanel(parent: HTMLElement): void {
     const workspace = this.work, access = workspace.workspaceCalendar;
     if (!access) return;
-    const extended = this.details(parent, "calendar-workspaces", "Calendar workspaces"), manual = Platform.isDesktopApp;
-    const exportRequest = () => { downloadCalendarTransfer(parent.ownerDocument.body, access.exportPending()); };
     const open = async (mode: "capabilities" | "records") => {
       const url = await access.open(mode);
-      if (!url) return;
-      if (manual) exportRequest();
-      else this.contentEl.ownerDocument.defaultView?.open(url, "_self");
+      if (url) this.contentEl.ownerDocument.defaultView?.open(url, "_self");
     };
     const check = async () => {
       const id = access.requestId;
-      if (!id) return;
-      try {
-        const file = manual ? await pickCalendarTransfer(this.contentEl, id + ".reply.json", QUERY_REPLY_BYTES) : undefined;
-        if (!manual || file) await access.receive(id, file ?? undefined);
-      } catch (error) { new Notice(error instanceof Error ? error.message : "The Calendar reply could not be opened."); }
+      if (id) await access.receive(id);
     };
-    renderCalendarWorkspacePanel(extended, {
+    renderCalendarWorkspacePanel(parent, {
       selection: access.selection, capabilities: access.capabilities, delivery: access.delivery,
       message: access.message, pending: access.pending, locked: workspace.settingsLocked, canFind: access.canFind,
-      excerptsEnabled: access.excerptsEnabled, openSections: this.openDetails, manual,
+      excerptsEnabled: access.excerptsEnabled, openSections: this.openDetails,
       includedIndices: access.includedIndices, setIncluded: (index, included) => access.setIncluded(index, included),
       checkCapabilities: () => open("capabilities"), findRecords: () => open("records"),
-      checkReply: check, saveRequest: exportRequest,
+      checkReply: check,
       clearContext: () => access.clear(), updateSelection: patch => access.updateSelection(patch),
       useExcerpts: enabled => access.useExcerpts(enabled),
     });
-    workspaceCalendarChangeToggle(extended, workspace);
+    workspaceCalendarChangeToggle(parent, workspace);
+  }
+  private calendarPanel(parent: HTMLElement): void {
+    const w = this.work;
+    this.workspaceCalendarPanel(parent);
+    if (Platform.isAndroidApp) {
+      const calendar = this.details(parent, "quick-calendar", "Quick Calendar lookup");
+      calendar.createEl("p", { text: "If prompted, choose this vault’s Yoofloe Calendar Inbox. Review returned excerpts here before sharing them with OpenAI.", cls: "y-ai-hint" });
+      if (!w.requestId) {
+        const query = calendar.createEl("textarea", { text: w.calendarQuestion, attr: { rows: "2", placeholder: "E.g. Study and project plans for next week", "aria-label": "Calendar question" } }); query.disabled = w.settingsLocked;
+        query.addEventListener("input", () => { w.calendarQuestion = query.value; });
+        this.select(calendar, "Calendar workspace", { auto: "Automatic · relevant workspaces", ...AREA_LABELS }, w.area, value => { w.area = value; });
+        const periods = { auto: "Automatic · from question", ...PERIOD_LABELS }; delete (periods as Partial<typeof periods>).custom;
+        this.select(calendar, "Calendar period", periods, w.period, value => { w.period = value; });
+        this.button(calendar, "Find relevant Calendar records", () => { void w.findCalendar().then(url => { if (url) this.contentEl.ownerDocument.defaultView?.open(url, "_self"); }); }, w.settingsLocked);
+      } else if (!w.delivery) this.button(calendar, "Check Calendar reply", () => { if (w.requestId) void w.receiveCalendar(w.requestId); }, w.settingsLocked);
+      if (w.requestId) this.button(calendar, w.delivery ? "Remove Calendar context" : "Cancel Calendar request", () => void w.removeCalendar(), w.settingsLocked);
+      calendarChangeToggle(calendar, w);
+      if (w.delivery) {
+        calendar.createEl("p", { text: `${w.delivery.context.scope.areas.map(a => AREA_LABELS[a]).join(", ")} · ${w.delivery.context.from ?? "any date"} → ${w.delivery.context.through ?? "any date"}${w.delivery.context.partial ? " · partial coverage" : ""}` });
+        for (const record of w.delivery.records) { const item = calendar.createEl("details"); item.createEl("summary", { text: record.title }); item.createEl("pre", { text: record.text }); }
+      }
+    }
   }
   private render(): void {
     if (!this.work.current) return;
@@ -907,29 +989,7 @@ export class YoofloeAiView extends ItemView {
     for (const text of [DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, CONTROL_NOTICE]) data.createEl("p", { text, cls: "y-ai-hint" });
     data.createEl("a", { text: "Privacy and local data controls ↗", href: PRIVACY_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
     data.createEl("p").createEl("a", { text: "OpenAI data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
-    const calendar = this.details(scroll, "calendar", w.delivery ? `Calendar · ${w.delivery.records.length} excerpt(s)` : "Add Yoofloe Calendar context (optional)");
-    calendar.classList.add("y-ai-calendar-setting"); this.settingSummary(calendar, "Yoofloe Calendar", w.delivery ? `${w.delivery.records.length} record(s) added` : "Optional app context", "calendar-days");
-    if (!Platform.isAndroidApp) {
-      calendar.createEl("p", { text: "Yoofloe works here without Calendar. Direct Calendar lookup requires both apps on the same Android phone or tablet and user profile. Existing Markdown snapshots can be used as notes." });
-    } else {
-      calendar.createEl("p", { text: "Local lookup makes no AI request. Calendar remembers the approved inbox in shared storage. Review the returned excerpts before sending to OpenAI.", cls: "y-ai-hint" });
-      if (!w.requestId) {
-        const query = calendar.createEl("textarea", { text: w.calendarQuestion, attr: { rows: "2", placeholder: "E.g. Study and project plans for next week", "aria-label": "Calendar question" } }); query.disabled = w.settingsLocked;
-        query.addEventListener("input", () => { w.calendarQuestion = query.value; });
-        this.select(calendar, "Calendar workspace", { auto: "Automatic · relevant workspaces", ...AREA_LABELS }, w.area, value => { w.area = value; });
-        const periods = { auto: "Automatic · from question", ...PERIOD_LABELS }; delete (periods as Partial<typeof periods>).custom;
-        this.select(calendar, "Calendar period", periods, w.period, value => { w.period = value; });
-        this.button(calendar, "Find relevant Calendar records", () => { void w.findCalendar().then(url => { if (url) this.contentEl.ownerDocument.defaultView?.open(url, "_self"); }); }, w.settingsLocked);
-      } else if (!w.delivery) this.button(calendar, "Check Calendar reply", () => { if (w.requestId) void w.receiveCalendar(w.requestId); }, w.settingsLocked);
-      if (w.requestId) this.button(calendar, w.delivery ? "Remove Calendar context" : "Cancel Calendar request", () => void w.removeCalendar(), w.settingsLocked);
-      calendarChangeToggle(calendar, w);
-      if (w.delivery) {
-        calendar.createEl("p", { text: `${w.delivery.context.scope.areas.map(a => AREA_LABELS[a]).join(", ")} · ${w.delivery.context.from ?? "any date"} → ${w.delivery.context.through ?? "any date"}${w.delivery.context.partial ? " · partial coverage" : ""}` });
-        for (const record of w.delivery.records) { const item = calendar.createEl("details"); item.createEl("summary", { text: record.title }); item.createEl("pre", { text: record.text }); }
-      }
-    }
-    this.workspaceCalendarPanel(calendar);
-    calendar.createEl("a", { text: "Discover Yoofloe Calendar ↗", href: STORE, attr: { target: "_blank", rel: "noopener noreferrer" } });
+    this.appContext(scroll);
     scroll.append(secondarySettings);
     if (w.chat.length || this.chatQuery) this.conversation(messages);
     else if (w.result) this.markdown(messages, w.result);
@@ -958,11 +1018,11 @@ export class YoofloeAiView extends ItemView {
       if (w.agent) for (const sent of w.agent.sent) activity.createEl("p", { text: `Read for OpenAI: ${sent.path} · ${sent.bytes} bytes`, cls: "y-ai-hint" });
     }
     if (w.history.length) {
-      const history = this.details(secondarySettings, "history", "Changed files and recovery"); this.settingSummary(history, "Recovery", "Undo", "history");
+      const history = this.details(secondarySettings, "history", "Changed files and recovery"); this.settingSummary(history, "Recovery", "Note changes", "history");
       for (const journal of w.history.slice(0, 10)) {
-        const item = history.createDiv({ cls: "y-ai-card" }); item.createEl("strong", { text: `${new Date(journal.createdAt).toLocaleString()} · ${journal.status}` });
-        for (const op of journal.operations) item.createEl("p", { text: `${op.kind}: ${op.path}${op.target ? ` → ${op.target}` : ""} · ${op.status}`, cls: "y-ai-hint" });
-        this.button(item, "Undo this task", () => void w.undo(journal), w.settingsLocked || journal.status === "undone");
+        const item = history.createDiv({ cls: "y-ai-card" }); item.createEl("strong", { text: `${new Date(journal.createdAt).toLocaleString()} · ${journal.status === "undone" ? "Reverted" : journal.status}` });
+        for (const op of journal.operations) item.createEl("p", { text: `${op.kind}: ${op.path}${op.target ? ` → ${op.target}` : ""} · ${op.status === "undone" ? "reverted" : op.status}`, cls: "y-ai-hint" });
+        this.button(item, "Revert changes from this task", () => void w.undo(journal), w.settingsLocked || journal.status === "undone");
       }
     }
     if (w.preview) { const preview = this.details(scroll, "preview", "Data to be sent · initial preview"); preview.open = true; preview.createEl("pre", { text: w.preview }); }
@@ -980,7 +1040,7 @@ export class YoofloeAiView extends ItemView {
       remove.setAttribute("aria-label", "Remove reference from the next message"); setTooltip(remove, "Remove reference");
       setIcon(remove, "x");
     } else if (w.canRestoreReference) {
-      const undo = this.button(dock, "Undo removal", () => w.restoreReference(), false, "y-ai-reference-undo");
+      const undo = this.button(dock, "Restore reference", () => w.restoreReference(), false, "y-ai-reference-undo");
       setTooltip(undo, "Restore the last reference and its selected images");
     }
     const selectedAttachments = followUp ? w.followUpAttachments : w.attachments;

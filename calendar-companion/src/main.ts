@@ -7,7 +7,8 @@ import { CalendarChangeSession } from "./calendar-change-session";
 import { CalendarWorkspaceLookupSession } from "./calendar-workspace-lookup-session";
 import { CalendarWorkspaceChangeSession } from "./calendar-workspace-change-session";
 import { validateCalendarWorkspaceOperation } from "./calendar-workspace-catalog";
-import { temporaryCalendarTransferStore } from "./calendar-workspace-file";
+import { ChronoHudLookupSession } from "./chronohud-lookup-session";
+import { CHRONOHUD_ACTION, CHRONOHUD_INBOX } from "./chronohud-protocol";
 import { AiPreferences, localSecretBinding } from "./ai-preferences";
 import { OPENAI_ADAPTER } from "./openai";
 import { AiSession } from "./ai-session";
@@ -65,6 +66,14 @@ export default class YoofloeAiPlugin extends Plugin {
         this.actions.clear();
       });
     }
+    this.registerObsidianProtocolHandler(CHRONOHUD_ACTION, params => {
+      const access = this.work?.chronoHud;
+      if (!this.live || !Platform.isAndroidApp || params.version !== "1" || !params.requestId || params.requestId !== access?.requestId) return;
+      const leaf = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
+      if (leaf?.view instanceof YoofloeAiView) leaf.view.revealAppContext("chronohud");
+      if (leaf) void this.app.workspace.revealLeaf(leaf);
+      void access.receive(params.requestId);
+    });
     this.registerObsidianProtocolHandler(ACTION, params => {
       if (!this.live || !Platform.isAndroidApp) { new Notice("Direct Calendar lookup requires both apps on the same Android phone or tablet. Yoofloe itself works without Calendar."); return; }
       if (params.version === "5" && params.requestId) {
@@ -75,6 +84,7 @@ export default class YoofloeAiPlugin extends Plugin {
           return;
         }
         if (work?.workspaceCalendar?.requestId === params.requestId) {
+          if (prior?.view instanceof YoofloeAiView) prior.view.revealAppContext("calendar");
           if (prior) void this.app.workspace.revealLeaf(prior);
           void work.workspaceCalendar.receive(params.requestId);
           return;
@@ -285,8 +295,7 @@ export default class YoofloeAiPlugin extends Plugin {
     };
     const companionOptions = { store: companionStore, vaultName: () => owner.getName(), allowed: () => ai.current() && Platform.isAndroidApp };
     const workspaceTransfer = () => ({
-      store: Platform.isDesktopApp ? temporaryCalendarTransferStore() : companionStore,
-      vaultName: () => owner.getName(), allowed: () => ai.current() && (Platform.isDesktopApp || Platform.isAndroidApp),
+      ...companionOptions,
       vaultIdentity: () => this.app.vault, canClean: () => this.app.vault === owner,
     });
     this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
@@ -351,8 +360,10 @@ export default class YoofloeAiPlugin extends Plugin {
         calendar: () => new CalendarSession(companionOptions),
         calendarChange: () => new CalendarChangeSession({ ...companionOptions, canClean: () => this.app.vault === owner }),
       } : {}),
-      ...(Platform.isAndroidApp || Platform.isDesktopApp ? {
+      ...(Platform.isAndroidApp ? {
         workspaceLookup: () => new CalendarWorkspaceLookupSession(workspaceTransfer()),
+        chronoHudLookup: () => new ChronoHudLookupSession(workspaceTransfer()),
+        chronoHudInboxHint: () => adapter.getResourcePath(CHRONOHUD_INBOX + "/"),
         workspaceChange: () => new CalendarWorkspaceChangeSession({ ...workspaceTransfer(), validate: validateCalendarWorkspaceOperation }),
       } : {}),
     });

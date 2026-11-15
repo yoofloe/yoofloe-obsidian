@@ -38,6 +38,26 @@ test('Write and edit renames the document file/title in place without changing b
  await a.undo();assert(f.files.has('Notes/Plan.md'));assert.equal(f.policy.sourcePath,'Notes/Plan.md');
  const g=fixture();g.policy.mode='edit';const b=new VaultAgent(g.host,g.policy,()=>true),source=await b.initialContext();await assert.rejects(b.execute('rename_note',{reference:'N1',version:source.version,path:'Notes/Sub/Title.md'}),/organizing mode|change scope/);assert(g.files.has('Notes/Plan.md'));
 });
+test('Recovery backlinks do not block an allowed rename, while links from other live notes keep their protection', async () => {
+  const f = fixture();
+  const backup = await f.host.create(`Yoofloe AI/Backups/${crypto.randomUUID()}.md`, '[[Notes/Plan]]');
+  const peer = await f.host.create('Notes/Peer.md', '[[Notes/Plan]]');
+  const other = await f.host.create('Outside/Peer.md', '[[Notes/Plan]]');
+  const before = await f.agent.initialContext();
+  const rename = () => f.agent.execute('rename_note', { reference: 'N1', version: before.version, path: 'Notes/Renamed.md' });
+
+  f.host.affected = () => [backup.path, peer.path, other.path];
+  await assert.rejects(rename(), /linked note is outside the allowed edit scope/i);
+  assert(f.files.has('Notes/Plan.md'));
+
+  f.host.affected = () => [backup.path, peer.path];
+  const result = await rename();
+  assert.deepEqual(result.links_to_review, [peer.path]);
+  assert.equal(f.files.get('Notes/Renamed.md').text, '# Plan\nOriginal');
+  assert.equal(backup.text, '[[Notes/Plan]]');
+  assert.equal(peer.text, '[[Notes/Plan]]');
+  assert.equal(other.text, '[[Notes/Plan]]');
+});
 test('more than two hundred mutations split into independently valid recoverable journals',async()=>{
  const f=fixture(),saved=new Map();f.host.persist=async journal=>{validateJournal(journal);saved.set(journal.id,structuredClone(journal));};
  for(let i=0;i<201;i++)await f.agent.execute('create_note',{path:`Notes/Bulk ${i}.md`,markdown:'# Synthetic'});

@@ -3,7 +3,7 @@
 Research, write and organize your Obsidian Markdown with your own OpenAI API key.
 Visit [www.yoofloe.com](https://www.yoofloe.com) for Yoofloe apps and support.
 Use one workspace from the sparkle ribbon, note header, note menu, or **Yoofloe: Open** command.
-Yoofloe Calendar is optional: the plugin is useful on its own, including when no note is open.
+Yoofloe Calendar and ChronoHUD are optional. Open Yoofloe on its own whenever you need it, including without an open note.
 
 Requires Obsidian **1.11.5+**. The same implementation runs on desktop and mobile.
 The 0.7.0 release was verified in Windows Obsidian and on a physical Android phone;
@@ -60,7 +60,7 @@ Drafts, answers, recent context and recovery records remain on your device and m
 See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local removal and scope details.
 Note titles and vault-relative paths returned by search can also go to OpenAI. Select a passage while the Yoofloe pane is
 open to add a reference chip above the composer. Opening Yoofloe from a selected passage works too. Click the chip to preview it or create local image pages. Use its x button to remove
-the reference and its selected images from the next message, or **Undo removal** to restore them.
+the reference and its selected images from the next message. Use **Restore reference** to bring them back.
 References guide the task. **Access** continues to control which notes the task can read and edit, including other passages
 or notes. Open editor text, including unsaved changes, is used. Changed references require a fresh selection.
 Long passages have versioned continuation cursors and reading coverage. Queue stores each message's reference and
@@ -149,7 +149,7 @@ A new task keeps up to two bounded prior turns as context. Opening another note 
 
 Before content changes, exact originals are verified in **Yoofloe AI/Backups/** and a recovery record is written
 in `.obsidian/plugins/yoofloe/tasks/` (or the vault's custom configuration directory).
-**Undo this task** only restores files whose current content still matches the recorded version.
+**Revert changes from this task** only restores files whose current content still matches the recorded version.
 Newer user edits, occupied filenames, modified backups and uncertain operations are kept.
 Empty folders are retained. Review the changed-file list and use original backups for manual recovery if needed.
 **Trash always requires a separate user choice** after reviewing the concrete notes.
@@ -161,46 +161,34 @@ Old Writer and Capture panels are consolidated into this one workspace after the
 Existing Markdown, plugin settings and secret IDs are preserved. No Yoofloe account, hosted database or migration sign-in is required.
 Historical cloud and MCP-wrapper releases through 0.3.31 remain historical; this release does not reactivate or ship them.
 
-## Optional Yoofloe Calendar context
+## Optional Android app context
 
-[Yoofloe Calendar for Android](https://play.google.com/store/apps/details?id=com.yoofloe.calendar)
-brings together plans, tasks, events, notes, study, projects, Garden focus and Flow.
-Use **Add Yoofloe Calendar context** in the same AI workspace when a task needs those records.
+Open **Workspace settings → App context** in Obsidian on the Android phone or tablet that runs the selected app.
+Use the same Android profile and a vault in shared device storage. The plugin shows the next step as you start a lookup,
+approve it in the app, and return to review excerpts. **Check reply** is available while a request is pending.
+Local lookups make **no AI call**. Choose the excerpts to include before sending a message to OpenAI.
 
-Direct lookup requires **both apps on the same Android phone/tablet and Android profile**, Calendar **1.8.5+**,
-and a vault in shared device storage. Desktop can transfer request files with Calendar 1.8.14 or later.
-On iPhone and iPad, use Markdown snapshots for Calendar context.
-Android may require one initial folder grant to **Yoofloe Calendar Inbox** inside the vault; Calendar remembers it.
-App-private vaults and unsupported cloud document providers cannot use this local handoff.
+### Yoofloe Calendar
 
-Describe what you need. A local planner recognizes common workspace, topic and date phrases in English, Korean and Polish.
-Review/adjust the workspaces and dates when needed. An ambiguous workspace search uses bounded matching excerpts across
-workspaces, rather than exporting all records. The app asks you to approve the local retrieval.
-Back in Obsidian, review excerpts and coverage before sending the task to OpenAI.
-Local lookup makes **no AI call**. The native v2/v3 protocol, Inbox name and callback are unchanged.
-Calendar lookup is read-only. With a Calendar build that supports change proposals, enable **Draft Calendar changes**
-to prepare additions, edits or moves to Trash for one-off events and non-recurring tasks. Find the latest record first
-when editing or deleting it. **Send** sends your request and approved event or task excerpts to OpenAI. **Review in Calendar**
-opens the Android approval screen. The Calendar app validates current records and saves the approved batch.
-Use **Undo in Calendar** for a confirmed batch or **Check status in Calendar** to recover a missed reply. A changed
-record can prevent undo. Full-record Markdown snapshot import without AI remains an advanced setting.
+With [Yoofloe Calendar 1.8.14 or later](https://play.google.com/store/apps/details?id=com.yoofloe.calendar), choose
+**Check Calendar connection**. If prompted, choose this vault’s **Yoofloe Calendar Inbox**, then tap **Share capabilities**.
+Return to Obsidian, choose workspaces, record types and dates, and tap **Find records in Calendar**.
+Review the search in Calendar and return to Obsidian for the excerpts. **Quick Calendar lookup** supports Calendar 1.8.5 or later.
 
-### Calendar workspaces
+Archive, Trash, financial records and attachment metadata have separate controls. **Draft workspace changes** prepares
+supported Schedule, Study, Project and Notes changes. Review and apply proposals in Calendar. Use **Revert in Calendar**
+for a confirmed batch or **Check status in Calendar** to recover a missed reply. Full-record Markdown snapshot import remains available in Settings.
 
-With Calendar **1.8.14+**, open **Calendar workspaces** and check the app's capabilities. Choose workspaces, record types
-and dates. Archive, Trash, financial records and attachment metadata have separate controls. Review the local summary
-and select the excerpts to include in your message. The original source labels stay stable when you deselect excerpts.
+### ChronoHUD
 
-**Draft workspace changes** prepares supported Schedule, Study, Project and Notes changes. Calendar previews the
-affected records, applies an approved batch and can undo it while its saved revisions still match.
-
-On Desktop, save the request, transfer it into **Yoofloe Calendar Inbox** on Android and open it from Calendar settings.
-Bring the reply back and import it in the same conversation before the request expires. The request file contains a
-one-time transfer key. After importing the reply, remove your exported request and reply copies on both devices.
+With [ChronoHUD 1.3.0 or later](https://play.google.com/store/apps/details?id=com.yoofloe.chronohud), choose date cards,
+timeline text, Mandalart goals or Eisenhower tasks. Tap **Open ChronoHUD to approve** and choose this vault’s
+**ChronoHUD Inbox** in ChronoHUD. Review the excerpts and tap **Approve and return to Obsidian**.
+ChronoHUD is a read-only source. It calculates date metrics locally and keeps each excerpt’s original H reference.
 
 ## Data, rights and privacy
 
-**This is online AI. Permitted note text, prompts, selected Calendar context and relevant tool results go directly to OpenAI,
+**This is online AI. Permitted note text, prompts, selected app excerpts and relevant tool results go directly to OpenAI,
 using your key.** Yoofloe does not relay them through a server or collect plugin telemetry.
 API billing is separate from ChatGPT subscriptions. Local key storage does not make the model local.
 

@@ -178,7 +178,7 @@ export class NoteWork {
       await applyNote(this.source, this.draft.text, mode, () => this.current);
       const after = this.target.read();
       if (before !== null && after !== null) this.rememberSourceEdit(before, after);
-      this.applied = true; this.appliedProposals.add(this.selectedProposal); this.message = "Added to the original note. Use Undo last AI edit or Obsidian Undo to revert it.";
+      this.applied = true; this.appliedProposals.add(this.selectedProposal); this.message = "Added to the original note. Use Revert last AI edit to restore the previous text.";
     }
     catch (error) { this.message = error instanceof Error ? error.message : "The note was kept. Copy or save the result instead."; }
     finally { this.busy = false; this.changed(); }
@@ -212,7 +212,7 @@ export class NoteWork {
         await doc!.replace(before, after);
         this.lastEdit = { before, after, restore: () => { if (!this.current) return Promise.reject(Error("Vault changed")); return doc!.replace(after, before); } };
       }
-      this.applied = true; this.appliedProposals.add(this.selectedProposal); this.message = `Applied to ${change.title || doc?.title || this.target.title}. Original backed up in AI backups. Undo is available.`;
+      this.applied = true; this.appliedProposals.add(this.selectedProposal); this.message = `Applied to ${change.title || doc?.title || this.target.title}. The original is stored in AI backups. Use Revert last AI edit to restore it.`;
     } catch (error) { this.message = error instanceof Error ? error.message : "Could not apply this proposal. The original and result are kept."; }
     finally { this.busy = false; this.changed(); }
   }
