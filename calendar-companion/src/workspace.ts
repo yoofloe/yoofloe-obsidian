@@ -1156,7 +1156,7 @@ export class AiWorkspace {
   async receiveCalendar(id: string): Promise<void> {
     if (!this.current || this.settingsLocked || !this.calendar || this.delivery) return;
     this.busy = true;
-    try { const reply = await this.calendar.receive(id); if (!this.current || reply.version !== 3) return; this.delivery = reply; this.message = `${reply.records.length} Calendar excerpt(s) added. Local lookup made no AI request. Review before sending to OpenAI.`; }
+    try { const reply = await this.calendar.receive(id); if (!this.current || reply.version !== 3) return; this.delivery = reply; this.previewEpoch++; this.preview = ""; this.message = `${reply.records.length} Calendar excerpt(s) added. Local lookup made no AI request. Review before sending to OpenAI.`; }
     catch { this.message = "No verified Calendar reply yet. Approve the local search in Calendar, then check again."; }
     finally { this.busy = false; this.changed(); }
   }

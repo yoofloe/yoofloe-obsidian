@@ -26,6 +26,7 @@ export class CalendarChangeSession {
   }) {}
 
   get requestId(): string | null { return this.pending?.request.requestId ?? null; }
+  get action(): CalendarChangeAction | null { return this.pending?.request.action ?? null; }
   get expiresAt(): number | null { return this.pending?.request.expiresAt ?? null; }
   get isBusy(): boolean { return this.busy; }
 

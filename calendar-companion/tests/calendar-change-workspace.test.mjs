@@ -44,6 +44,7 @@ test('a Calendar draft is local until user review, then an authenticated result 
   };
   const bridge = {
     get requestId() { return requestId; },
+    get action() { return requestId ? changes.at(-1).action : null; },
     start: async (draft, options) => {
       if (failMarker) throw Error('The Calendar change marker could not be verified.');
       launches++; requestId = crypto.randomUUID(); changes.push({ draft, ...options });
@@ -121,6 +122,21 @@ test('a Calendar draft is local until user review, then an authenticated result 
   await desktop.initialize();
   assert.equal(desktop.calendarChanges.state.status, 'undone');
   assert.equal(await desktop.calendarChanges.open('status'), null);
+
+  await work.calendarChanges.clear();
+  const retry = await prepareCalendarChangeDraft({ operations: [operation()] }, null);
+  await work.calendarChanges.stage(retry.draft, retry.titles, () => true);
+  assert(await work.calendarChanges.open('review'));
+  await work.calendarChanges.disconnect();
+  for (const negativeStatus of ['not_found', 'cancelled']) {
+    nextStatus = negativeStatus;
+    assert(await work.calendarChanges.open('status'));
+    assert(await work.calendarChanges.receive(requestId));
+    assert.equal(work.calendarChanges.state.status, 'waiting');
+    assert.equal(work.calendarChanges.canOpen('review'), false);
+    await work.calendarChanges.clear();
+    assert.equal(work.calendarChanges.state.draft.proposalId, retry.draft.proposalId);
+  }
 });
 
 
@@ -135,7 +151,9 @@ test('changing Calendar proposal mode clears the visible data preview and invali
   const work = new AiWorkspace({
     current: () => true, configDir: '.obsidian', gate: { busy: false }, inboxHint: () => '',
     host: () => host, calendarChange: () => ({}),
-    preferences: { read: async () => ({model:'gpt-6-luna',effort:'none'}), hasKey: async () => true },
+    calendar: () => ({ requestId: 'lookup-fixture', start: async () => 'local lookup',
+      receive: async () => ({ version: 3, records: [{ title: 'Synthetic approved event' }] }) }),
+    preferences: { read: async () => ({model:'gpt-6-luna',effort:'none'}), hasKey: async () => true, vaultId: async () => vaultId },
     storage: { load: async () => ({ source: 'Original.md' }), save: async () => {}, history: async () => [] },
   });
   await work.initialize();
@@ -156,4 +174,10 @@ test('changing Calendar proposal mode clears the visible data preview and invali
   await pending;
   assert.equal(work.preview, approvedPreview);
   assert(!work.preview.includes('PRIVATE PREVIEW'));
+
+  work.calendarQuestion = 'Calendar events today';
+  assert.equal(await work.findCalendar(), 'local lookup');
+  await work.receiveCalendar('lookup-fixture');
+  assert.equal(work.delivery.records[0].title, 'Synthetic approved event');
+  assert.equal(work.preview, '');
 });

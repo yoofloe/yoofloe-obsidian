@@ -140,15 +140,20 @@ export class CalendarChangeController {
   async receive(requestId: string): Promise<boolean> {
     const state = this.state, session = this.session;
     if (!state || !session || requestId !== session.requestId || !this.options.current() || this.busy) return false;
+    const action = session.action;
     this.busy = true;
     try {
       const reply = await session.receive(requestId);
       if (this.state !== state || !this.options.current()) return false;
       this.lastReply = reply;
+      const confirmed = reply.status === "applied" || reply.status === "undone";
+      const missingInKnownDataset = reply.status === "not_found" && state.datasetId !== null && state.datasetId === reply.datasetId && !state.applied;
+      const unresolved = action === "status" && !confirmed && !missingInKnownDataset;
       const applied = reply.status === "applied" || state.applied && reply.status !== "undone";
-      this.state = { ...state, status: reply.status, applied,
-        datasetId: reply.status === "applied" || reply.status === "undone" ? reply.datasetId : state.datasetId };
-      this.message = resultMessages[reply.status];
+      this.state = { ...state, status: unresolved ? "waiting" : missingInKnownDataset ? "draft" : reply.status, applied,
+        datasetId: confirmed ? reply.datasetId : state.datasetId };
+      this.message = unresolved ? "Calendar could not confirm the saved result in this workspace. Check the workspace where you reviewed this proposal." :
+        missingInKnownDataset ? "Calendar found no saved result in this workspace. You can review the same proposal." : resultMessages[reply.status];
       try { await this.options.save(); }
       catch { this.message += " The local result could not be saved. Check status in Calendar again."; }
       return true;
