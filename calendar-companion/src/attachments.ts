@@ -9,14 +9,14 @@ const sizeLimits = {
   image: { bytes: 20 * 1024 * 1024, label: "20 MiB" },
   audio: { bytes: 25000000, label: "25 MB" },
 };
-export const ATTACHMENT_LIMIT_LABEL = `${MAX_ATTACHMENTS} files · ${MAX_ATTACHMENT_MIB} MiB total · Images ${sizeLimits.image.label} each · Audio ${sizeLimits.audio.label} each`;
+export const ATTACHMENT_LIMIT_LABEL = `${MAX_ATTACHMENTS} files 쨌 ${MAX_ATTACHMENT_MIB} MiB total 쨌 Images ${sizeLimits.image.label} each 쨌 Audio ${sizeLimits.audio.label} each`;
 // Codex Desktop 26.1106.6628 switches a plain-text paste to a file at 5,000 UTF-16 units.
 export const PASTED_TEXT_THRESHOLD = 5000;
 export const PASTED_TEXT_NAME = "Pasted text.txt";
 const images: Record<string, string> = { png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", webp:"image/webp" };
 const audio: Record<string, string> = { mp3:"audio/mpeg", mp4:"audio/mp4", mpeg:"audio/mpeg", mpga:"audio/mpeg", m4a:"audio/mp4", wav:"audio/wav", webm:"audio/webm" };
 const documents: Record<string, string> = { pdf:"application/pdf", doc:"application/msword", docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document", ppt:"application/vnd.ms-powerpoint", pptx:"application/vnd.openxmlformats-officedocument.presentationml.presentation", xls:"application/vnd.ms-excel", xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", odt:"application/vnd.oasis.opendocument.text", rtf:"application/rtf", txt:"text/plain", md:"text/markdown", csv:"text/csv", tsv:"text/tab-separated-values", json:"application/json", xml:"application/xml", html:"text/html", js:"text/javascript", ts:"text/plain", py:"text/plain", css:"text/css", sql:"text/plain", yaml:"text/plain", yml:"text/plain" };
-export interface Attachment { id: string; name: string; extension: string; kind: "image" | "document" | "audio"; mime: string; bytes: number; sha256: string; pastedText?: { providedOnly: boolean } }
+export interface Attachment { id: string; name: string; extension: string; kind: "image" | "document" | "audio"; mime: string; bytes: number; sha256: string; pastedText?: { providedOnly: boolean }; referenceId?: string }
 export interface AttachmentRun {
   readonly hasUploads: boolean;
   prepare(key: string, current: () => boolean, billable: (name: string) => void): Promise<{ parts: Record<string, unknown>[]; fileIds: string[] }>;
@@ -41,7 +41,7 @@ export function readAttachments(value: unknown): Attachment[] {
     if (!info || f.kind !== info.kind || f.mime !== info.mime || typeof f.id !== "string" || !/^[0-9a-f-]{36}$/.test(f.id) || typeof f.name !== "string" || !f.name || f.name.length>180 || (/[\\/]/.test(f.name) || [...f.name].some(c => c.charCodeAt(0) < 32)) || typeof f.bytes !== "number" || !Number.isSafeInteger(f.bytes) || f.bytes<=0 || f.bytes>sizeLimits[info.kind].bytes || typeof f.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(f.sha256)) return false;
     if (total + f.bytes > MAX_ATTACHMENT_BYTES) return false;
     total += f.bytes; return true;
-  }).map(f => ({id:f.id,name:f.name,extension:f.extension,kind:f.kind,mime:f.mime,bytes:f.bytes,sha256:f.sha256,...(f.pastedText && typeof f.pastedText.providedOnly === "boolean" && f.extension === "txt" && f.name === PASTED_TEXT_NAME ? { pastedText: { providedOnly: f.pastedText.providedOnly } } : {})}));
+  }).map(f => ({id:f.id,name:f.name,extension:f.extension,kind:f.kind,mime:f.mime,bytes:f.bytes,sha256:f.sha256,...(typeof f.referenceId === "string" && /^[0-9a-f-]{36}$/.test(f.referenceId) ? { referenceId: f.referenceId } : {}),...(f.pastedText && typeof f.pastedText.providedOnly === "boolean" && f.extension === "txt" && f.name === PASTED_TEXT_NAME ? { pastedText: { providedOnly: f.pastedText.providedOnly } } : {})}));
 }
 export function attachmentPath(configDir: string, file: Attachment): string {
   if (readAttachments([file]).length !== 1) throw Error("Invalid local attachment reference.");

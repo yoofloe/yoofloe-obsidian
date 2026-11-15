@@ -5,6 +5,12 @@ The plugin ID is `yoofloe`; historical cloud/MCP releases have different behavio
 
 ## What leaves the device
 
+Selected reference passages and their requested image pages are additional user-provided context. Reference chips do not
+change the note read/write permissions in Access. Queue retains each message's selected references and attachments.
+Local previews and image rendering do not contact OpenAI. After Send, large or multimodal requests can send their input
+to OpenAI's input-token counting endpoint before generation. The same selected material and tool definitions are included
+in that check. Removing a draft reference affects future messages; already-sent material remains in its saved conversation.
+
 **Yoofloe has no Yoofloe-operated server, relay or cloud database. Yoofloe does not receive or store your notes, prompts or answers through this plugin.**
 The plugin keeps working data on your device, and optional AI sends selected material directly to OpenAI.
 Local storage and OpenAI processing are separate from Yoofloe receiving that content.

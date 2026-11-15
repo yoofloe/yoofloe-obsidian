@@ -1,4 +1,5 @@
 import { containsCredential } from "./agent-policy";
+import { readFollowUpContext, type FollowUpContext } from "./follow-ups";
 
 export type ActivityKind = "status" | "request" | "response" | "tool" | "blocked" | "summary" | "follow-up";
 export type ActivityState = "working" | "done" | "waiting" | "blocked";
@@ -9,7 +10,7 @@ export interface WorkEvent {
   state: ActivityState;
   text: string;
 }
-export interface SteerNote { id: string; text: string }
+export interface SteerNote { id: string; text: string; context?: FollowUpContext }
 
 export const WORK_ACTIVITY_LIMIT = 100;
 
@@ -38,9 +39,9 @@ export function readSteerNotes(value: unknown): SteerNote[] {
   const notes: SteerNote[] = [];
   for (const entry of value.slice(-20) as unknown[]) {
     if (!entry || typeof entry !== "object") continue;
-    const { id, text } = entry as Record<string, unknown>;
+    const { id, text, context } = entry as Record<string, unknown>;
     if (typeof id === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(id) && typeof text === "string")
-      notes.push({ id, text: workText(text, 32000) });
+      notes.push({ id, text: workText(text, 32000), ...(context === undefined ? {} : { context: readFollowUpContext(context) }) });
   }
   return notes;
 }

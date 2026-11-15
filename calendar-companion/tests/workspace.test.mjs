@@ -239,13 +239,92 @@ test('Stop during initial draft persistence prevents the first key read, request
  const running=f.work.run();while(!entered)await new Promise(r=>setTimeout(r,1));assert.equal(f.work.canStop,true);f.work.stop();release();await running;
  assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);assert.equal(f.files.size,0);assert.equal(f.work.busy,false);assert.equal(f.work.prompt,'Do not start after Stop');assert.match(f.work.message,/Stopped/);
 });
-test('a selection edit updates its private scope for a follow-up without including the rest of the document',async()=>{
+test('a selection reference guides an edit while its scope remains governed by Access',async()=>{
  const f=fixture();await f.host.create('A.md','# Title\nOriginal\nPrivate tail');await f.work.initialize();const file=f.files.get('A.md');
  await f.work.newTask({path:'A.md',selection:{from:8,to:16},selectionVersion:await inputDigest(file.text)});let calls=0;
- f.options.transport=async req=>{calls++;const body=JSON.parse(req.body);if(calls===1){const n=JSON.parse(body.input[0].content).current_note;assert.equal(n.text,'Original');return response([{type:'function_call',call_id:'edit',name:'apply_changes',arguments:JSON.stringify({changes:[{reference:'N1',version:n.version,action:'replace_selection',markdown:'Longer revised text'}]})}]);}return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Selection updated.'}]}]);};
- f.work.setPrompt('Refine the selection');await f.work.run();assert.equal(f.work.source.selection.to,8+'Longer revised text'.length);assert.equal(f.work.source.selectionVersion,await inputDigest(file.text));
- await f.work.newTask();f.work.setPrompt('Continue');await f.work.review();assert.equal(JSON.parse(f.work.preview).current_note.text,'Longer revised text');assert(!f.work.preview.includes('Private tail'));assert.equal(calls,2);
- file.text+='\nHuman change';await f.work.review();assert.match(f.work.message,/selected note changed/);
+ f.options.transport=async req=>{calls++;const body=JSON.parse(req.body);if(calls===1){const n=JSON.parse(body.input[0].content).selected_reference;assert.equal(n.text,'Original');return response([{type:'function_call',call_id:'edit',name:'apply_changes',arguments:JSON.stringify({changes:[{reference:n.reference,version:n.version,action:'replace_selection',markdown:'Longer revised text'}]})}]);}return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Selection updated.'}]}]);};
+ f.work.setPrompt('Refine the selection');await f.work.run();assert.equal(file.text,'# Title\nLonger revised text\nPrivate tail');
+ assert.equal(f.work.reference.from,8);assert.equal(f.work.chat.at(-1).reference.id,f.work.reference.id);
+ await assert.rejects(f.work.readReference(),/reference changed/);
+ f.work.removeReference();assert.equal(f.work.reference,null);assert.equal(f.work.source.path,'A.md');
+ assert.equal(f.work.canRestoreReference,true);f.work.restoreReference();assert(f.work.reference);
+});
+test('an invalid saved selection requires reference review before it can be sent',async()=>{
+ const f=fixture();await f.host.create('A.md','Synthetic');f.options.storage.load=async()=>({source:'A.md',selection:{from:0,to:4},selectionVersion:'invalid'});
+ await f.work.initialize();assert.equal(f.work.reference.needsReview,true);
+ f.work.setPrompt('Explain');await f.work.run();assert.equal(f.calls(),0);assert.match(f.work.message,/Review this reference/);
+ f.work.removeReference();assert.equal(f.work.reference,null);assert.equal(f.work.source.path,'A.md');
+});
+test('removing a reference removes its draft images and Undo restores them without changing Access',async()=>{
+ const f=fixture(), note=await f.host.create('A.md','Reference');
+ await f.work.initialize();await f.work.newTask({path:note.path});
+ const reference={id:crypto.randomUUID(),path:note.path,version:await inputDigest(note.text),from:0,to:4,firstLine:1,lastLine:1};
+ assert(f.work.setReference(reference));f.work.readScope='vault';f.work.writeScope='vault';
+ const file={id:crypto.randomUUID(),name:'Reference.png',extension:'png',kind:'image',mime:'image/png',bytes:10,sha256:'a'.repeat(64),referenceId:reference.id};
+ f.work.attachments=[file];f.work.followUpAttachments=[{...file,id:crypto.randomUUID()}];
+ f.work.removeReference();assert.equal(f.work.reference,null);assert.equal(f.work.attachments.length,0);assert.equal(f.work.followUpAttachments.length,0);
+ assert.equal(f.work.source.path,'A.md');assert.equal(f.work.readScope,'vault');assert.equal(f.work.writeScope,'vault');
+ f.work.restoreReference();assert.equal(f.work.reference.id,reference.id);assert.equal(f.work.attachments.length,1);assert.equal(f.work.followUpAttachments.length,1);
+});
+test('removing the reference prevents stale capture and automatic note text on the next send',async()=>{
+ const f=fixture(), note=await f.host.create('A.md','Selected text with an independent edit target');
+ await f.work.initialize();await f.work.newTask({path:note.path});
+ const reference={id:crypto.randomUUID(),path:note.path,version:await inputDigest(note.text),from:0,to:13,firstLine:1,lastLine:1};
+ assert(f.work.setReference(reference)); const revision=f.work.referenceRevision;
+ f.work.removeReference(); assert.equal(f.work.setReference(reference,revision),false);
+ await f.work.persist();
+ const saved=structuredClone(f.saved()); const restored=new f.work.constructor({...f.options,storage:{...f.options.storage,load:async()=>saved}});
+ await restored.initialize();restored.setPrompt('Use note tools if needed');await restored.review();
+ const input=JSON.parse(restored.preview);
+ assert.equal(input.selected_reference,undefined);assert.equal(input.current_note.text,undefined);assert.equal(input.current_note.reference,'N1');
+ assert.equal(input.permissions.changes,'current');
+});
+test('Queue preserves each selected reference and its attachments even after the draft reference is removed',async()=>{
+ const f=fixture();await f.host.create('A.md','First Second');await f.work.initialize();await f.work.newTask({path:'A.md'});f.work.mode='ask';
+ f.work.queueHeld=true;const version=await inputDigest('First Second'), sent=[];
+ f.options.attachments={forTask:files=>({prepare:async()=>({parts:files.map(file=>({type:'input_text',text:file.name})),fileIds:[]}),cleanup:async()=>true})};
+ f.options.transport=async req=>{
+  const body=JSON.parse(req.body),parts=body.input[0].content;
+  const source=JSON.parse(Array.isArray(parts)?parts[0].text:parts);
+  sent.push({text:source.selected_reference.text,attached:source.attached_files.map(file=>file.name)});
+  return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Done'}]}]);
+ };
+ for(const [from,to,name] of [[0,5,'First.txt'],[6,12,'Second.txt']]){
+  f.work.setReference({id:crypto.randomUUID(),path:'A.md',version,from,to,firstLine:1,lastLine:1});
+  f.work.followUpAttachments=[{id:crypto.randomUUID(),name,extension:'txt',kind:'document',mime:'text/plain',bytes:6,sha256:'a'.repeat(64)}];
+  f.work.setFollowUpDraft('Explain the reference');assert(await f.work.submitFollowUp('queue'));
+ }
+ const queued=structuredClone(f.saved().followUps);assert.equal(queued[0].context.reference.from,0);assert.equal(queued[1].context.reference.from,6);
+ f.work.removeReference();await f.work.resumeQueue();
+ assert.deepEqual(sent,[{text:'First',attached:['First.txt']},{text:'Second',attached:['Second.txt']}]);
+ assert.equal(f.work.followUps.length,0);assert.equal(f.work.reference,null);
+});
+test('a queued reference that changed is held for review before any key read or model request',async()=>{
+ const f=fixture(),file=await f.host.create('A.md','Original');await f.work.initialize();await f.work.newTask({path:'A.md'});
+ f.work.queueHeld=true;
+ f.work.setReference({id:crypto.randomUUID(),path:'A.md',version:await inputDigest(file.text),from:0,to:8,firstLine:1,lastLine:1});
+ f.work.setFollowUpDraft('Explain');assert(await f.work.submitFollowUp('queue'));
+ file.text='Human revision';await f.work.resumeQueue();
+ assert.equal(f.calls(),0);assert.equal(f.keyReads(),0);assert.equal(f.work.followUps[0].status,'review');assert.match(f.work.message,/reference changed/);
+});
+test('Steer carries an explicit reference and attachment at the next safe request boundary',async()=>{
+ const f=fixture(),file=await f.host.create('A.md','Reference phrase');
+ await f.work.initialize();await f.work.newTask({path:'A.md'});f.work.mode='ask';
+ const first=deferred(),released=deferred();let sent=0,cleanups=0;
+ f.options.attachments={forTask:()=>({prepare:async()=>({parts:[{type:'input_image',file_id:'file-steer'}],fileIds:['file-steer']}),cleanup:async()=>{cleanups++;return true;}})};
+ f.options.transport=async req=>{
+  if(++sent===1){first.resolve();await released.promise;return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'First answer'}]}]);}
+  const body=JSON.parse(req.body),last=body.input.filter(item=>item.role==='user').at(-1);
+  assert.equal(JSON.parse(last.content[0].text).selected_reference.text,'Reference');
+  assert.equal(last.content[1].file_id,'file-steer');
+  return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Steered answer'}]}]);
+ };
+ f.work.setPrompt('Start');const running=f.work.run();await first.promise;
+ f.work.setReference({id:crypto.randomUUID(),path:'A.md',version:await inputDigest(file.text),from:0,to:9,firstLine:1,lastLine:1});
+ f.work.followUpAttachments=[{id:crypto.randomUUID(),name:'Reference.png',extension:'png',kind:'image',mime:'image/png',bytes:10,sha256:'a'.repeat(64)}];
+ f.work.setFollowUpDraft('Use this reference');assert(await f.work.submitFollowUp('steer'));
+ f.work.removeReference();released.resolve();await running;
+ assert.equal(sent,2);assert.equal(cleanups,1);assert.equal(f.work.followUps.length,0);assert.equal(f.work.result,'Steered answer');
 });
 test('a Trash-only task exposes immediate Undo after the separate user confirmation',async()=>{
  const f=fixture();await f.host.create('Task A.md','Original A');await f.work.initialize();await f.work.newTask({path:'Task A.md'});f.work.mode='organize';let calls=0;

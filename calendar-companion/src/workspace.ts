@@ -1,6 +1,6 @@
-import { AgentTask, type AgentExecutor, type SteerStatus } from "./agent-task";
+import { AgentTask, AGENT_INSTRUCTION, type AgentExecutor, type SteerStatus } from "./agent-task";
 import { VaultAgent, type AgentHost, type WorkJournal } from "./vault-agent";
-import { allowedPath, containsCredential, safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
+import { allowedPath, validTaskPath, containsCredential, safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
 import type { AiPreferences } from "./ai-preferences";
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport } from "./ai-session";
 import type { CalendarSession } from "./session";
@@ -13,15 +13,18 @@ import { effectiveSourceMode, readSourceMode, sourceList, type SourceMode } from
 import { readGeneratedFiles, type GeneratedStore } from "./generated-files";
 import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_MIB, PASTED_TEXT_NAME, readAttachments, type Attachment, type AttachmentStore } from "./attachments";
 
-import { FOLLOW_UP_LIMIT, FOLLOW_UP_TEXT_LIMIT, followUpMode, readFollowUps, type FollowUp, type FollowUpAccess, type FollowUpMode } from "./follow-ups";
+import { FOLLOW_UP_LIMIT, FOLLOW_UP_TEXT_LIMIT, followUpMode, readFollowUpContext, readFollowUps, type FollowUp, type FollowUpAccess, type FollowUpMode, type FollowUpContext } from "./follow-ups";
 import type { OpenLiveResponse } from "./responses-socket";
 import type { SteerNote } from "./work-activity";
 import { conversationName, newConversationRecord, readLibrary, turnConversation, MAX_CONVERSATIONS, MAX_FOLDERS, type Conversation, type ConversationLibrary } from "./conversation-library";
 import { conversationContext, readCheckpoint, validContextScope, type ConversationCheckpoint } from "./conversation-context";
 import { findOpenAiModel } from "./openai-models";
+import { captureSelectionReference, readSelectionReference, selectionText, type SelectionReference } from "./selection-reference";
+import { estimateInput, type InputBudget } from "./input-budget";
+import { agentTools } from "./agent-protocol";
 
 type WorkspaceChange = "state" | "progress";
-export interface WorkspaceSource { path: string; selection?: { from: number; to: number }; selectionVersion?: string }
+export interface WorkspaceSource { path: string; selection?: { from: number; to: number }; selectionVersion?: string; quote?: string }
 const sameSource = (a: WorkspaceSource | null, b: WorkspaceSource | null) => a === b || !!a && !!b && a.path === b.path && a.selection?.from === b.selection?.from && a.selection?.to === b.selection?.to && a.selectionVersion === b.selectionVersion;
 export interface WorkspaceStorage {
   load(): Promise<unknown>;
@@ -46,6 +49,8 @@ export class AiWorkspace {
   private sessionConversations = new Map<string, Record<string, unknown>>();
   followUpDefault: FollowUpMode = "queue";
   followUpDraft = "";
+  followUpAttachments: Attachment[] = [];
+  private beforeFollowUpEdit: FollowUpContext | null = null;
   followUps: FollowUp[] = [];
   editingFollowUpId: string | null = null;
   queueHeld = false;
@@ -56,6 +61,10 @@ export class AiWorkspace {
   private activeAccess: FollowUpAccess | null = null;
   source: WorkspaceSource | null = null;
   nextSource: WorkspaceSource | null = null;
+  reference: SelectionReference | null = null;
+  private deferNoteRead = false;
+  private removedReference: { reference: SelectionReference; attachments: Attachment[]; followUpAttachments: Attachment[]; deferNoteRead: boolean } | null = null;
+  private referenceEpoch = 0;
   autoAttachNote = true;
   mode: WorkMode = "edit";
   readScope: WorkScope = "current";
@@ -98,7 +107,7 @@ export class AiWorkspace {
   private running = false;
   private stopRequested = false;
   constructor(private readonly options: {
-    current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport; liveResponse?: OpenLiveResponse; generated?: GeneratedStore; attachments?: AttachmentStore;
+    current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; generated?: GeneratedStore; attachments?: AttachmentStore;
     gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; calendar?: () => CalendarSession; inboxHint(): string;
   }) {}
   get current() { return this.alive && this.options.current(); }
@@ -111,6 +120,9 @@ export class AiWorkspace {
   get stopping() { return this.busy && this.stopRequested; }
   get canContinue() { return this.current && !!this.task?.canResume && !!this.agent; }
   get settingsLocked() { return this.switchingConversation || !this.ready || this.restoreFailed || this.busy || this.canContinue || this.addingAttachments; }
+  get canChangeReference() { return this.current && this.ready && !this.restoreFailed && !this.switchingConversation && !this.followUpSaving; }
+  get canRestoreReference() { return this.canChangeReference && !this.reference && !!this.removedReference; }
+  get referenceRevision() { return this.referenceEpoch; }
   get activeConversation(): Conversation { return this.library.conversations.find(conversation => conversation.id === this.library.active)!; }
   get canSwitchConversation(): boolean {
     return this.current && !this.librarySaving && !this.settingsLocked && !this.followUpSaving &&
@@ -182,25 +194,29 @@ export class AiWorkspace {
     this.prompt = ""; this.lastRequest = ""; this.source = null; this.nextSource = null;
     this.outputFolder = ""; this.autoAttachNote = true; this.preview = ""; this.message = "";
     this.followUpDraft = ""; this.editingFollowUpId = null; this.queueMessage = "";
+    this.followUpAttachments = readAttachments(saved.followUpAttachments); this.beforeFollowUpEdit = null;
     this.previous = []; this.chat = []; this.task = null; this.agent = null; this.activeChatId = null;
     this.activeQueueId = null; this.activeAccess = null; this.stopRequested = false;
     this.attachments = readAttachments(saved.attachments);
+    this.reference = readSelectionReference(saved.reference);
+    this.deferNoteRead = saved.deferNoteRead === true;
+    this.removedReference = null; this.referenceEpoch++;
     this.checkpoint = readCheckpoint(saved.contextCheckpoint);
     this.followUps = readFollowUps(saved.followUps);
     this.queueHeld = this.followUps.length > 0;
     if (this.queueHeld) this.queueMessage = "Saved messages are ready for review.";
     if (typeof saved.followUpDraft === "string" && saved.followUpDraft.length <= FOLLOW_UP_TEXT_LIMIT && !containsCredential(saved.followUpDraft))
       this.followUpDraft = saved.followUpDraft;
-    if (typeof saved.editingFollowUpId === "string" && this.followUps.some(entry => entry.id === saved.editingFollowUpId))
+    if (typeof saved.editingFollowUpId === "string" && this.followUps.some(entry => entry.id === saved.editingFollowUpId)) {
       this.editingFollowUpId = saved.editingFollowUpId;
+      this.beforeFollowUpEdit = readFollowUpContext(saved.beforeFollowUpEdit) ?? null;
+    }
     if (typeof saved.prompt === "string" && saved.prompt.length <= 32000) this.prompt = saved.prompt;
     if (typeof saved.lastRequest === "string") this.lastRequest = saved.lastRequest.slice(0, 32000);
     if (typeof saved.source === "string") this.source = { path: vaultPath(saved.source) };
     if (this.source && saved.selection && typeof saved.selection === "object") {
       const selection = saved.selection as Record<string, unknown>;
-      if (typeof selection.from === "number" && typeof selection.to === "number" && Number.isSafeInteger(selection.from) && Number.isSafeInteger(selection.to) && selection.from >= 0 && selection.to >= selection.from && typeof saved.selectionVersion === "string" && /^[a-f0-9]{64}$/.test(saved.selectionVersion)) {
-        this.source.selection = { from: selection.from, to: selection.to }; this.source.selectionVersion = saved.selectionVersion;
-      }
+      this.reference ??= readSelectionReference({ path: this.source.path, from: selection.from, to: selection.to, version: saved.selectionVersion });
     }
     if (typeof saved.outputFolder === "string") this.outputFolder = saved.outputFolder.slice(0, 500);
     this.outputFolderChosen = typeof saved.outputFolderChosen === "boolean" ? saved.outputFolderChosen : typeof saved.outputFolder === "string";
@@ -242,10 +258,14 @@ export class AiWorkspace {
   private conversationState(): Record<string, unknown> {
     return {
       prompt: this.prompt, lastRequest: this.lastRequest, source: this.source?.path ?? null,
+      reference: this.reference,
+      deferNoteRead: this.deferNoteRead,
       selection: this.source?.selection, selectionVersion: this.source?.selectionVersion, nextSource: this.nextSource,
       outputFolder: this.outputFolder, outputFolderChosen: this.outputFolderChosen, autoAttachNote: this.autoAttachNote,
       calendarQuestion: this.calendarQuestion, result: this.result, previous: this.previous, attachments: [...this.attachments],
       followUpDraft: containsCredential(this.followUpDraft) ? "" : this.followUpDraft,
+      followUpAttachments: this.followUpAttachments,
+      ...(this.editingFollowUpId && this.beforeFollowUpEdit ? { beforeFollowUpEdit: this.beforeFollowUpEdit } : {}),
       followUps: [...this.followUps], editingFollowUpId: this.editingFollowUpId,
       ...(this.checkpoint ? { contextCheckpoint: this.checkpoint } : {}),
       ...(this.chat.length ? { chat: this.chat.slice(-CHAT_HISTORY_LIMIT).map(chatPreview) } : {}),
@@ -388,6 +408,7 @@ export class AiWorkspace {
     }
     const sourceChanged = source?.path !== this.source?.path;
     this.source = source; this.nextSource = null;
+    if (sourceChanged) this.deferNoteRead = false;
     if (sourceChanged && !this.outputFolder && !this.outputFolderChosen) this.outputFolder = source?.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
     this.preview = ""; this.changed();
   }
@@ -407,7 +428,9 @@ export class AiWorkspace {
       if (source && !this.availableNotes().some(file => file.path === source.path)) throw Error("This note is unavailable or outside the selected read scope. Check Access or choose another note.");
       this.runEpoch++; this.agent = null;
       if (source && !this.source && !this.outputFolder && !this.outputFolderChosen) this.outputFolder = source.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
-      this.source = source ? { ...source, ...(source.selection ? { selection: { ...source.selection } } : {}) } : null;
+      if (source?.selection) this.reference = readSelectionReference({ path: source.path, from: source.selection.from, to: source.selection.to, version: source.selectionVersion });
+      this.source = source ? { path: source.path } : null;
+      this.deferNoteRead = false;
       this.nextSource = null; this.autoAttachNote = source !== null; this.preview = "";
       this.message = source ? `Note connected: ${source.path}. Your conversation and draft are kept.` : "No note attached. Your conversation and draft are kept.";
       this.changed(); void this.persist().catch(() => { if (this.current) { this.message = "The note choice could not be saved locally. Keep this vault open."; this.changed(); } });
@@ -415,6 +438,71 @@ export class AiWorkspace {
     } catch (error) { this.message = error instanceof Error ? error.message : "The note could not be connected."; this.changed(); return false; }
   }
   private attachFirstPending(): void { if (!this.source && this.nextSource && this.autoAttachNote && !this.settingsLocked && !this.agent?.pendingTrash.length) this.attachNote(this.nextSource); }
+  setReference(reference: SelectionReference, expectedRevision = this.referenceEpoch): boolean {
+    if (!this.canChangeReference || expectedRevision !== this.referenceEpoch) return false;
+    const value = readSelectionReference(reference);
+    if (!value || !validTaskPath(this.policy(), value.path)) { this.message = "This note cannot be attached as a reference."; this.changed(); return false; }
+    if (this.reference && this.reference.id !== value.id) {
+      const previous = this.reference.id;
+      if (!this.editingFollowUpId) this.attachments = this.attachments.filter(file => file.referenceId !== previous);
+      this.followUpAttachments = this.followUpAttachments.filter(file => file.referenceId !== previous);
+    }
+    this.referenceEpoch++; this.reference = value; this.removedReference = null; this.preview = "";
+    this.changed(); this.saveReference();
+    return true;
+  }
+  removeReference(): void {
+    if (!this.canChangeReference || !this.reference) return;
+    const id = this.reference.id;
+    this.removedReference = { reference: this.reference, attachments: this.editingFollowUpId ? [] : this.attachments.filter(file => file.referenceId === id),
+      followUpAttachments: this.followUpAttachments.filter(file => file.referenceId === id), deferNoteRead: this.deferNoteRead };
+    if (!this.editingFollowUpId) this.attachments = this.attachments.filter(file => file.referenceId !== id);
+    this.followUpAttachments = this.followUpAttachments.filter(file => file.referenceId !== id);
+    this.deferNoteRead = true;
+    this.reference = null; this.referenceEpoch++; this.preview = "";
+    this.changed(); this.saveReference();
+  }
+  restoreReference(): void {
+    if (!this.canRestoreReference || !this.removedReference) return;
+    const removed = this.removedReference;
+    const files = readAttachments([...this.attachments, ...removed.attachments]);
+    const followUpFiles = readAttachments([...this.followUpAttachments, ...removed.followUpAttachments]);
+    if (files.length !== this.attachments.length + removed.attachments.length || followUpFiles.length !== this.followUpAttachments.length + removed.followUpAttachments.length) {
+      this.message = "Remove another attachment before restoring this reference."; this.changed(); return;
+    }
+    this.reference = removed.reference; this.deferNoteRead = removed.deferNoteRead; this.attachments = files; this.followUpAttachments = followUpFiles; this.removedReference = null; this.referenceEpoch++;
+    this.changed(); this.saveReference();
+  }
+  private saveReference(): void {
+    void this.persist().catch(() => { this.message = "The reference choice could not be saved locally."; this.changed(); });
+  }
+  async readReference(reference = this.reference): Promise<string> {
+    if (!reference || !this.current) throw Error("Choose a reference first.");
+    if (!validTaskPath(this.policy(), reference.path)) throw Error("The reference is outside the permitted note paths.");
+    const host = this.options.host(() => this.current);
+    const file = host.files().find(item => item.path === reference.path);
+    const text = file ? await host.read(file) : null;
+    if (text === null) throw Error("The reference note is unavailable.");
+    return selectionText(reference, text);
+  }
+  async useWholeNoteReference(reference = this.reference): Promise<boolean> {
+    if (!reference || !this.canChangeReference) return false;
+    const epoch = this.referenceEpoch;
+    const host = this.options.host(() => this.current), file = host.files().find(item => item.path === reference.path);
+    const document = file ? await host.read(file) : null;
+    if (document === null) throw Error("The reference note is unavailable.");
+    if (!document.length) throw Error("The reference note is empty.");
+    const captured = await captureSelectionReference(reference.path, document, 0, document.length);
+    if (epoch !== this.referenceEpoch || !this.current) return false;
+    return this.setReference({ ...captured, wholeNote: true });
+  }
+  private async captureSourceReference(source: WorkspaceSource): Promise<void> {
+    if (!source.selection) return;
+    const host = this.options.host(() => this.current), file = host.files().find(item => item.path === source.path);
+    const text = file ? await host.read(file) : null;
+    if (text === null || await inputDigest(text) !== source.selectionVersion) throw Error("The selected note changed. Select the passage again.");
+    this.setReference(await captureSelectionReference(source.path, text, source.selection.from, source.selection.to));
+  }
   setOutputFolder(folder: string): void { if (!this.settingsLocked) { this.outputFolder = folder; this.outputFolderChosen = true; this.preview = ""; } }
   setPrompt(value: string): void { if (!this.settingsLocked || this.addingAttachments && this.current) { this.prompt = value; this.preview = ""; } }
   async setModel(model: AiModelOptions): Promise<void> { if (this.settingsLocked) return; try { await this.options.preferences.save(model, "openai"); this.model = model; } catch { this.message = "Model settings could not be saved. No request was sent."; } this.changed(); }
@@ -422,11 +510,12 @@ export class AiWorkspace {
     const folder = this.outputFolder.trim().replace(/\/$/, ""), excluded = this.excluded.split("\n").map(s => s.trim()).filter(Boolean);
     if (folder) vaultPath(folder, true); for (const path of excluded) vaultPath(path, true);
     return { sourcePath: this.source?.path ?? null, folder: this.outputFolder.trim().replace(/\/$/, ""), readScope: this.readScope, writeScope: this.writeScope, mode: this.mode,
-      configDir: this.options.configDir, excluded, ...(this.source?.selection && this.readScope === "current" ? { selection: { ...this.source.selection }, selectionVersion: this.source.selectionVersion } : {}) };
+      configDir: this.options.configDir, excluded };
   }
   private createTask(executor: AgentExecutor, current = () => this.current, writeScope = this.writeScope, attachments: Attachment[] = [], pastedTextIsRequest = false): AgentTask {
     return new AgentTask({ current, preserve: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate, generated: this.options.generated, writeScope,
       liveResponse: this.options.liveResponse, steerStatus: (note, status) => this.updateSteer(note, status),
+      attachmentStore: this.options.attachments, countTokens: this.options.countTokens,
       ...(attachments.length && this.options.attachments ? { attachments: this.options.attachments.forTask(attachments, pastedTextIsRequest) } : {}) });
   }
   private rememberJournal(journal: WorkJournal): void { if (journal.operations.length) this.history = [journal, ...this.history.filter(j => j.id !== journal.id)].slice(0, 30); }
@@ -436,19 +525,21 @@ export class AiWorkspace {
     const turn: PreviousTurn = { request: this.lastRequest, answer: this.result, sourceMode: this.task?.sourceMode ?? "provided", contextScope };
     if (this.previous.at(-1)?.request !== turn.request || this.previous.at(-1)?.answer !== turn.answer) this.previous = [...this.previous, turn].slice(-2);
   }
-  private async prepare(agent: VaultAgent, request = this.prompt, attachments = this.attachments): Promise<{ input: string; sourceMode: SourceMode; scope: string | null; context: Record<string, unknown>[] }> {
-    const note = await agent.initialContext(); if (!this.current) throw Error("Vault changed.");
+  private async prepare(agent: VaultAgent, request = this.prompt, attachments = this.attachments, reference = this.reference, deferNoteRead = this.deferNoteRead): Promise<{ input: string; sourceMode: SourceMode; scope: string | null; context: Record<string, unknown>[] }> {
+    const selectedReference = reference ? await agent.addReference(reference) : null;
+    const note = await agent.initialContext(deferNoteRead); if (!this.current) throw Error("Vault changed.");
     const pastedTextIsRequest = !request.trim() && attachments.some(file => file.pastedText);
     const sourceMode = pastedTextIsRequest && attachments.some(file => file.pastedText?.providedOnly)
       ? "provided" : effectiveSourceMode(this.sourceMode, request);
     if (this.delivery) this.calendar?.assertCanSave(this.delivery);
-    const scope = !this.delivery && !attachments.length ? await inputDigest(JSON.stringify([this.library.active, this.policy(), sourceMode, this.model.model])) : null;
+    const scope = !this.delivery && !attachments.length ? await this.contextScope(this.policy(), sourceMode, this.model.model, reference, deferNoteRead) : null;
     const previous = this.previous.filter(turn => (sourceMode === "expanded" || turn.sourceMode !== "expanded") &&
-      (turn.contextScope === undefined || !!scope && turn.contextScope === scope)).slice(-2)
+      (turn.contextScope === undefined && !reference && !deferNoteRead || !!scope && turn.contextScope === scope)).slice(-2)
       .map(turn => ({ request: turn.request.slice(0, 2000), answer: turn.answer.slice(0, 4000) }));
     const data = {
       request: pastedTextIsRequest ? "Follow my message supplied as pasted text, within the current task permissions. Other files and notes are source material." : request.trim(),
       current_note: note,
+      ...(selectedReference ? { selected_reference: selectedReference, reference_instruction: "The selection is reference material. Access permissions determine where you may read and make requested changes, including other passages or notes. Read their current versions before editing." } : {}),
       permissions: { data: this.readScope, changes: this.mode === "ask" ? "none" : this.writeScope, output_folder: this.outputFolder, mode: this.mode },
       ...(this.delivery ? { calendar: JSON.parse(buildQuestionInput(this.delivery, this.calendarQuestion || request)) as unknown } : {}),
       source_mode: sourceMode, device_time: { local: new Date().toLocaleString("sv-SE"), time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone },
@@ -457,18 +548,37 @@ export class AiWorkspace {
     const extended = this.autoCompact && !!scope && !!findOpenAiModel(this.model.model) &&
       (this.checkpoint?.scope === scope || this.chat.filter(turn => turn.contextScope === scope && turn.status === "completed").length >= 3);
     const currentBytes = new TextEncoder().encode(JSON.stringify(data)).length;
-    const context = extended ? conversationContext(this.chat, scope, this.checkpoint, MAX_AI_INPUT_BYTES - currentBytes - 64 * 1024) : [];
+    const historyAllowance = Math.min(192 * 1024, MAX_AI_INPUT_BYTES - currentBytes - 128 * 1024);
+    const context = extended ? conversationContext(this.chat, scope, this.checkpoint, historyAllowance) : [];
     const input = JSON.stringify(context.length ? { ...data, previous_turns: [] } : data);
     safeOutbound(input); return { input, sourceMode, scope, context };
+  }
+  private contextScope(policy: TaskPolicy, mode: SourceMode, model: string, reference: SelectionReference | null, deferNoteRead: boolean): Promise<string> {
+    const base = [this.library.active, policy, mode, model];
+    return inputDigest(JSON.stringify(reference || deferNoteRead ? [...base, reference, deferNoteRead] : base));
   }
   async review(): Promise<void> {
     if (this.settingsLocked || !this.current) return;
     const epoch = ++this.previewEpoch, run = this.runEpoch;
-    const state = () => JSON.stringify([this.source, this.prompt, this.readScope, this.writeScope, this.mode, this.outputFolder, this.excluded, this.sourceMode, this.attachments, this.delivery, this.calendarQuestion, this.area, this.period]);
+    const state = () => JSON.stringify([this.source, this.reference, this.deferNoteRead, this.prompt, this.readScope, this.writeScope, this.mode, this.outputFolder, this.excluded, this.sourceMode, this.attachments, this.delivery, this.calendarQuestion, this.area, this.period]);
     const before = state(), current = () => this.current && !this.settingsLocked && epoch === this.previewEpoch && run === this.runEpoch && before === state();
     try { const agent = new VaultAgent(this.options.host(current), this.policy(), current); const { input, context } = await this.prepare(agent); if (!current()) return; this.preview = context.length ? JSON.stringify({ context_items: context.length, current_request: JSON.parse(input) as unknown }, null, 2) : input; this.message = "Initial data below. During this task, relevant excerpts within the data scope may also be sent to OpenAI. Settings and excluded folders cannot be read."; }
     catch (error) { if (!current()) return; this.preview = ""; this.message = error instanceof Error ? error.message : "The data preview could not be prepared."; }
     this.changed();
+  }
+  async estimateRequest(followUp = false): Promise<InputBudget> {
+    const reference = this.reference ? { ...this.reference } : null;
+    const attachments = [...(followUp ? this.followUpAttachments : this.attachments)];
+    const request = followUp ? this.followUpDraft : this.prompt;
+    const policy = this.policy(), agent = new VaultAgent(this.options.host(() => this.current), policy, () => this.current);
+    const { input, context } = await this.prepare(agent, request, attachments, reference);
+    const budget = estimateInput({
+      model: this.model.model, instructions: AGENT_INSTRUCTION,
+      input: [...context, { role: "user", content: input }], tools: agentTools(this.mode, this.writeScope),
+    });
+    // Local file references do not reveal the provider's extracted text/image size.
+    budget.hasFiles = attachments.length > 0;
+    return budget;
   }
   private followUpAccess(): FollowUpAccess {
     const policy = this.policy();
@@ -506,16 +616,28 @@ export class AiWorkspace {
     if (this.followUpSaving || !entry || entry.status !== "queued" && entry.status !== "review" ||
       this.followUpDraft && this.editingFollowUpId !== id) return false;
     this.holdQueue("Review the message and choose Queue or Steer.");
+    this.beforeFollowUpEdit ??= { reference: this.reference ? { ...this.reference } : null, attachments: [...this.followUpAttachments], deferNoteRead: this.deferNoteRead };
     this.editingFollowUpId = id;
     this.followUpDraft = entry.text;
+    this.reference = entry.context?.reference ? { ...entry.context.reference } : null;
+    this.deferNoteRead = entry.context?.deferNoteRead === true;
+    this.followUpAttachments = [...entry.context?.attachments ?? []];
+    this.referenceEpoch++; this.removedReference = null;
     this.saveFollowUps();
     return true;
   }
   closeFollowUpEdit(): void {
     this.editingFollowUpId = null;
     this.followUpDraft = "";
+    this.restoreBeforeFollowUpEdit();
     this.saveFollowUps();
     this.changed();
+  }
+  private restoreBeforeFollowUpEdit(): void {
+    if (!this.beforeFollowUpEdit) return;
+    this.reference = this.beforeFollowUpEdit.reference; this.followUpAttachments = this.beforeFollowUpEdit.attachments;
+    this.deferNoteRead = this.beforeFollowUpEdit.deferNoteRead === true;
+    this.beforeFollowUpEdit = null; this.removedReference = null; this.referenceEpoch++;
   }
   async removeFollowUp(id: string): Promise<void> {
     const index = this.followUps.findIndex(item => item.id === id);
@@ -523,17 +645,24 @@ export class AiWorkspace {
     if (this.followUpSaving || !entry || entry.status !== "queued" && entry.status !== "review") return;
     this.followUpSaving = true;
     this.followUps = this.followUps.filter(item => item.id !== id);
-    if (this.editingFollowUpId === id) this.editingFollowUpId = null;
+    const wasEditing = this.editingFollowUpId === id;
+    if (wasEditing) this.editingFollowUpId = null;
     if (!this.followUps.length) this.queueMessage = "";
-    try { await this.persist(); }
+    try {
+      await this.persist();
+      if (wasEditing) {
+        this.followUpDraft = ""; this.restoreBeforeFollowUpEdit(); this.saveFollowUps();
+      }
+    }
     catch {
       this.followUps = [...this.followUps.slice(0, index), entry, ...this.followUps.slice(index)];
+      if (wasEditing) this.editingFollowUpId = id;
       this.holdQueue("Removal could not be saved. The message is kept.");
     } finally { this.followUpSaving = false; this.changed(); }
     await this.drainQueue();
   }
   async submitFollowUp(mode: FollowUpMode): Promise<boolean> {
-    if (!this.current || !this.ready || this.restoreFailed || this.followUpSaving || this.stopRequested && this.busy) return false;
+    if (!this.current || !this.ready || this.restoreFailed || this.followUpSaving || this.addingAttachments || this.stopRequested && this.busy) return false;
     const text = this.followUpDraft.trim();
     const existing = this.followUps.find(entry => entry.id === this.editingFollowUpId);
     if (existing && existing.status !== "review" && existing.status !== "queued") return false;
@@ -549,11 +678,16 @@ export class AiWorkspace {
       this.changed();
       return false;
     }
-    const entry: FollowUp = { id: existing?.id ?? crypto.randomUUID(), text, access, status: mode === "steer" ? "steer-pending" : "queued" };
+    const context: FollowUpContext = { reference: this.reference ? { ...this.reference } : null, attachments: [...this.followUpAttachments], deferNoteRead: this.deferNoteRead };
+    if (context.reference?.needsReview) { this.queueMessage = "Review or remove the selected reference before sending."; this.changed(); return false; }
+    const entry: FollowUp = { id: existing?.id ?? crypto.randomUUID(), text, access, context, status: mode === "steer" ? "steer-pending" : "queued" };
     const draft = this.followUpDraft;
     const task = this.task;
     this.followUpSaving = true;
     this.followUpDraft = "";
+    this.followUpAttachments = [];
+    const beforeEdit = this.beforeFollowUpEdit;
+    this.restoreBeforeFollowUpEdit();
     this.editingFollowUpId = null;
     this.followUps = existing ? this.followUps.map(item => item.id === entry.id ? entry : item) : [...this.followUps, entry];
     this.changed("progress");
@@ -563,7 +697,10 @@ export class AiWorkspace {
       if (mode === "queue") this.queueMessage = this.queueHeld ? "Resume the queue when you are ready." : "";
     } catch {
       this.followUps = existing ? this.followUps.map(item => item.id === entry.id ? existing : item) : this.followUps.filter(item => item.id !== entry.id);
-      if (!this.followUpDraft) { this.followUpDraft = draft; this.editingFollowUpId = existing?.id ?? null; }
+      if (!this.followUpDraft) {
+        this.followUpDraft = draft; this.followUpAttachments = context.attachments; this.editingFollowUpId = existing?.id ?? null;
+        this.reference = context.reference; this.deferNoteRead = context.deferNoteRead === true; this.beforeFollowUpEdit = beforeEdit; this.referenceEpoch++;
+      }
       this.holdQueue("The message could not be saved. Your draft is kept.");
       return false;
     } finally { this.followUpSaving = false; this.changed(); }
@@ -620,12 +757,12 @@ export class AiWorkspace {
         !this.queueHeld && !this.editingFollowUpId && !this.options.gate.busy && !this.agent?.pendingTrash.length) {
         const next = this.followUps[0];
         if (!next) break;
-        if (next.status !== "queued" || !this.matchesAccess(next, this.followUpAccess())) {
+        if (next.status !== "queued" || next.context?.needsReview || !this.matchesAccess(next, this.followUpAccess())) {
           this.holdQueue("Review the first message to confirm its note, model and access.");
           this.changed();
           break;
         }
-        if (!await this.runRequest(next.text, [], next)) break;
+        if (!await this.runRequest(next.text, next.context?.attachments ?? [], next)) break;
       }
     } catch {
       this.holdQueue("The queued message needs a review of the workspace settings.");
@@ -637,6 +774,9 @@ export class AiWorkspace {
     if (await this.runRequest(this.prompt, this.attachments)) await this.drainQueue();
   }
   private async runRequest(request: string, attachments: Attachment[], queued?: FollowUp): Promise<boolean> {
+    const selectedReference = queued ? queued.context?.reference : this.reference;
+    const reference = selectedReference ? { ...selectedReference } : null;
+    const deferNoteRead = queued ? queued.context?.deferNoteRead === true : this.deferNoteRead;
     const pastedTextIsRequest = !request.trim() && attachments.some(file => file.pastedText);
     if (this.restoreFailed || !this.current || this.switchingConversation || this.busy || this.addingAttachments || !request.trim() && !pastedTextIsRequest) return false;
     if (attachments.length && !this.options.attachments) { this.message = "Attachment processing is unavailable. Existing files are kept."; this.changed(); return false; }
@@ -652,7 +792,7 @@ export class AiWorkspace {
       this.rememberLast();
       const access = this.followUpAccess();
       const agent = new VaultAgent(this.options.host(current), this.policy(), current);
-      const { input, sourceMode, scope, context } = await this.prepare(agent, request, attachments);
+      const { input, sourceMode, scope, context } = await this.prepare(agent, request, attachments, reference, deferNoteRead);
       if (current()) {
         await this.persist(); // Preserve the draft and a queue claim before a billable request.
         if (current()) {
@@ -663,6 +803,7 @@ export class AiWorkspace {
           this.activeChatId = crypto.randomUUID();
           this.touchConversation(conversationName(request) || this.title);
           const turn: ChatTurn = { id: this.activeChatId, conversationId: this.library.active, contextScope: scope, request: request.trim(), answer: "", startedAt: Date.now(), model: this.model.model, status: "running", requests: 0, inputTokens: 0, outputTokens: 0, actions: [], attachments: [...attachments], sourceMode };
+          if (reference) turn.reference = reference;
           this.chat = [...this.chat, turn].slice(-CHAT_HISTORY_LIMIT);
           const unsubscribe = this.watchTask(task);
           try { await task.run(input, { ...this.model }, this.mode, this.maximum, { mode: sourceMode, maximum: this.onlineMaximum }, this.source?.path, { autoCompact: this.autoCompact, items: context }); }
@@ -726,8 +867,7 @@ export class AiWorkspace {
     const turn = this.chat.find(item => item.id === this.activeChatId);
     if (turn) {
       if (turn.status === "completed" && turn.contextScope && task.compaction) {
-        const scope = await inputDigest(JSON.stringify([this.library.active, this.policy(), task.sourceMode, task.modelId]));
-        if (scope === turn.contextScope) this.checkpoint = { scope, item: task.compaction, turnId: turn.id, at: Date.now() };
+        this.checkpoint = { scope: turn.contextScope, item: task.compaction, turnId: turn.id, at: Date.now() };
       }
       await this.archiveChat(turn);
     }
@@ -737,11 +877,13 @@ export class AiWorkspace {
     turn.answer = task.text; turn.status = task.state === "idle" ? "running" : task.state;
     turn.actionsKnown = true; turn.sourcePath = agent.policy.sourcePath ?? "";
     turn.requests = task.requests; turn.inputTokens = task.usage.input; turn.outputTokens = task.usage.output;
-    if (task.state !== "idle" && turn.sourceMode !== task.sourceMode) turn.contextScope = null;
+    if (task.state !== "idle" && (turn.sourceMode !== task.sourceMode ||
+      task.steerNotes.some(steer => steer.context?.reference || steer.context?.attachments.length))) turn.contextScope = null;
     turn.sourceMode = task.state === "idle" ? turn.sourceMode : task.sourceMode; turn.sources = task.citedSources.length ? task.citedSources : task.sources; turn.online = { ...task.online }; turn.generated = task.generated;
     turn.transcriptions = task.transcriptions; turn.fileWarnings = [...task.fileWarnings];
     turn.uploadCleanupWarning = task.uploadCleanupWarning || undefined;
     turn.durationMs = task.durationMs;
+    turn.readCoverage = agent.readCoverage;
     turn.activity = [...task.events];
     turn.steers = [...task.steerNotes];
     const actions = agent.operations.filter(op => op.status === "done"); turn.actionTotal = actions.length;
@@ -827,8 +969,13 @@ export class AiWorkspace {
     if (this.restoreFailed || this.addingAttachments) return;
     if (this.busy) return;
     if (source?.selection && !/^[a-f0-9]{64}$/.test(source.selectionVersion ?? "")) { this.message = "The selection is not ready. Select it again before starting a new task."; this.changed(); return; }
-    if (source && !sameSource(source, this.source) && !this.availableNotes().some(file => file.path === source.path)) { this.message = "This note is outside the selected read scope. Choose an allowed note before starting a new task."; this.changed(); return; }
+    const sourcePath = source?.path;
+    if (source && !sameSource(source, this.source) && !this.availableNotes().some(file => file.path === sourcePath)) { this.message = "This note is outside the selected read scope. Choose an allowed note before starting a new task."; this.changed(); return; }
     if (this.canContinue && !await this.finishHere()) return;
+    if (source?.selection) {
+      try { await this.captureSourceReference(source); source = { path: source.path }; }
+      catch (error) { this.message = error instanceof Error ? error.message : "The reference could not be captured."; this.changed(); return; }
+    }
     this.rememberLast();
     const pending = this.nextSource;
     this.prompt = ""; this.task = null; this.agent = null; this.activeChatId = null; this.attachments = []; this.message = "Ready. No data is sent until you start."; this.bind(source, true); if (pending?.path !== source?.path) this.nextSource = pending; await this.persist(); this.changed();
@@ -842,16 +989,20 @@ export class AiWorkspace {
     }
     await this.addAttachments([new File([text], PASTED_TEXT_NAME, { type: "text/plain" })], { providedOnly: effectiveSourceMode("expanded", text) === "provided" });
   }
-  async addAttachments(files: readonly File[], pastedText?: Attachment["pastedText"]): Promise<void> {
-    if (this.settingsLocked || !this.current || !files.length) return;
+  async addAttachments(files: readonly File[], pastedText?: Attachment["pastedText"], referenceId?: string, followUp = this.busy || this.canContinue): Promise<void> {
+    if (!this.canChangeReference || this.addingAttachments || !files.length || !followUp && this.settingsLocked) return;
     if (!this.options.attachments) { this.message = "Attachment storage is unavailable."; this.changed(); return; }
+    const epoch = this.referenceEpoch;
+    const current = () => this.current && (!referenceId || epoch === this.referenceEpoch && this.reference?.id === referenceId);
     this.addingAttachments = true; this.message = "Adding attachments on this device…"; this.changed();
     try {
       for (const file of files) {
-        if (this.attachments.length >= MAX_ATTACHMENTS || this.attachments.reduce((sum,a) => sum+a.bytes,0)+file.size > MAX_ATTACHMENT_BYTES) throw Error(`Attach up to ${MAX_ATTACHMENTS} files with a combined size of ${MAX_ATTACHMENT_MIB} MiB. Earlier selections are kept.`);
-        const item = await this.options.attachments.add(file, () => this.current); if (!this.current) return;
+        const selected = followUp ? this.followUpAttachments : this.attachments;
+        if (selected.length >= MAX_ATTACHMENTS || selected.reduce((sum,a) => sum+a.bytes,0)+file.size > MAX_ATTACHMENT_BYTES) throw Error(`Attach up to ${MAX_ATTACHMENTS} files with a combined size of ${MAX_ATTACHMENT_MIB} MiB. Earlier selections are kept.`);
+        const item = await this.options.attachments.add(file, current); if (!current()) return;
         if (pastedText) item.pastedText = pastedText;
-        if (!this.attachments.some(existing => existing.sha256 === item.sha256 && existing.name === item.name && !!existing.pastedText === !!item.pastedText)) this.attachments.push(item);
+        if (referenceId) item.referenceId = referenceId;
+        if (!selected.some(existing => existing.sha256 === item.sha256 && existing.name === item.name && existing.referenceId === item.referenceId && !!existing.pastedText === !!item.pastedText)) selected.push(item);
       }
       this.message = pastedText ? "Pasted text is attached." : "Attachments are ready on this device. Send shares them with OpenAI; audio transcription has an additional charge."; await this.persist();
     } catch (error) { this.message = error instanceof Error ? error.message : "An attachment could not be added."; }
@@ -863,7 +1014,12 @@ export class AiWorkspace {
     if (merged.length > MAX_ATTACHMENTS || merged.reduce((sum, file) => sum + file.bytes, 0) > MAX_ATTACHMENT_BYTES) { this.message = "Remove some selected files before attaching these again."; this.changed(); return; }
     this.attachments = merged; this.message = "Attachments selected for your next request. They are sent only when you choose Send."; this.changed(); void this.persist().catch(() => { this.message = "The attachment selection could not be saved."; this.changed(); });
   }
-  removeAttachment(id: string): void { if (this.settingsLocked) return; this.attachments = this.attachments.filter(file => file.id !== id); this.preview = ""; this.changed(); void this.persist().catch(() => { this.message = "The attachment selection could not be saved."; this.changed(); }); }
+  removeAttachment(id: string, followUp = false): void {
+    if (!this.canChangeReference || this.addingAttachments || !followUp && this.settingsLocked) return;
+    if (followUp) this.followUpAttachments = this.followUpAttachments.filter(file => file.id !== id);
+    else this.attachments = this.attachments.filter(file => file.id !== id);
+    this.preview = ""; this.changed(); this.saveReference();
+  }
   async searchChats(query: string, offset = 0, conversationId?: string) {
     if (this.options.storage.searchChats) return this.options.storage.searchChats(query, offset, conversationId);
     return { turns: this.chat.filter(turn => (!conversationId || turnConversation(turn.conversationId) === conversationId) && chatMatches(turn, query)), nextOffset: null };

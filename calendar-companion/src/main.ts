@@ -11,7 +11,7 @@ import { AiWorkspace, type WorkspaceSource } from "./workspace";
 import { AI_VIEW, LegacyYoofloeView, YoofloeAiView } from "./workspace-view";
 import { loadWorkRecords, obsidianAgentHost } from "./obsidian-agent-host";
 import { CompanionModal } from "./manual-import";
-import { inputDigest } from "./question-input";
+import { captureSelectionReference, type SelectionReference } from "./selection-reference";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, PRIVACY_URL } from "./privacy-copy";
 import { readChat, validChatId, chatMatches, searchChatPreview, type ChatTurn } from "./chat-history";
 import { generatedStore } from "./generated-files";
@@ -68,11 +68,18 @@ export default class YoofloeAiPlugin extends Plugin {
     if (!view.file) return null;
     const source: WorkspaceSource = { path: view.file.path };
     if (view.getMode() === "source") {
-      const selections = view.editor.listSelections();
-      if (selections.length === 1) {
-        const positions = [view.editor.posToOffset(selections[0].anchor), view.editor.posToOffset(selections[0].head)].sort((a, b) => a - b);
-        if (positions[1] > positions[0]) source.selection = { from: positions[0], to: positions[1] };
-      }
+      const ranges = view.editor.listSelections().map(({ anchor, head }) => {
+        const start = view.editor.posToOffset(anchor), end = view.editor.posToOffset(head);
+        return { from: Math.min(start, end), to: Math.max(start, end) };
+      }).filter(range => range.from < range.to);
+      if (ranges.length > 1)
+        throw Error("Choose one continuous passage for the reference.");
+      if (ranges.length === 1) source.selection = ranges[0];
+    } else {
+      const selection = view.contentEl.ownerDocument.getSelection();
+      if (selection && !selection.isCollapsed && selection.anchorNode && selection.focusNode &&
+          view.contentEl.contains(selection.anchorNode) && view.contentEl.contains(selection.focusNode))
+        source.quote = selection.toString();
     }
     return source;
   }
@@ -93,21 +100,30 @@ export default class YoofloeAiPlugin extends Plugin {
   private async showWorkspace(sourceView?: MarkdownView): Promise<void> {
     if (!this.live) return;
     const epoch = ++this.sourceEpoch;
+    const referenceRevision = this.work?.referenceRevision;
     const file = this.app.workspace.getActiveFile();
     const focused = this.app.workspace.getActiveViewOfType(MarkdownView);
     const active = sourceView ?? focused ?? this.app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view).find((view): view is MarkdownView => view instanceof MarkdownView && view.file === file);
     let selected: WorkspaceSource | null = null;
+    let reference: SelectionReference | null = null;
     if (active) {
       const source = this.capture(active);
       const sourceFile = active.file; this.capturingSource = epoch; this.capturingPath = source?.path ?? null;
-      try { if (source?.selection) source.selectionVersion = await inputDigest(active.editor.getValue()); }
+      try {
+        if (source && sourceFile && (source.selection || source.quote)) {
+          const document = active.getMode() === "source" ? active.editor.getValue() : await this.app.vault.cachedRead(sourceFile);
+          reference = await captureSelectionReference(source.path, document, source.selection?.from ?? 0,
+            source.selection?.to ?? document.length, source.quote);
+        }
+      }
       finally { if (this.capturingSource === epoch) { this.capturingSource = null; this.capturingPath = null; } }
       if (!this.live) return;
-      if (this.sourceEpoch === epoch && active.file === sourceFile && sourceFile?.path === source?.path) { selected = source; this.lastSource = source; }
+      if (this.sourceEpoch === epoch && active.file === sourceFile && sourceFile?.path === source?.path) { selected = source ? { path: source.path } : null; this.lastSource = selected; }
     }
     const work = this.workspace(); await work.initialize(); if (!this.live) return;
     if (this.sourceEpoch === epoch && this.capturingSource === null) {
       work.bind(selected ?? this.lastSource, false, true);
+      if (reference) work.setReference(reference, referenceRevision ?? work.referenceRevision);
     }
     let leaf = this.app.workspace.getLeavesOfType(AI_VIEW)[0];
     if (Platform.isPhone && leaf && leaf.getRoot() !== this.app.workspace.rootSplit) {
@@ -186,6 +202,11 @@ export default class YoofloeAiPlugin extends Plugin {
       }),
       host: current => obsidianAgentHost(this.app, owner, current), inboxHint: () => adapter.getResourcePath(`${INBOX}/`),
       transport: async request => {
+        if (!ai.current()) throw Error("Vault changed");
+        const { status, text, headers } = await requestUrl(request);
+        return { status, text, headers };
+      },
+      countTokens: async request => {
         if (!ai.current()) throw Error("Vault changed");
         const { status, text, headers } = await requestUrl(request);
         return { status, text, headers };
