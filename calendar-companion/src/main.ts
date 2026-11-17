@@ -300,6 +300,7 @@ export default class YoofloeAiPlugin extends Plugin {
     });
     this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
       ...(Platform.isDesktopApp ? { liveResponse: openDesktopResponse } : {}),
+      streamResponses: Platform.isAndroidApp,
       generated: generatedStore({ ...localFiles, download: provider.download }),
       attachments: attachmentStore({ ...localFiles, upload: provider.upload, transcribe: provider.transcribe, removeUpload: provider.removeUpload,
         transcript: async path => { if (!await adapter.exists(path)) return null; const stat = await adapter.stat(path); if (!stat || stat.size > 512 * 1024) throw Error("The saved transcript exceeds its limit."); return adapter.read(path); },

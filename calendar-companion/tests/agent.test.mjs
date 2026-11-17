@@ -8,6 +8,57 @@ const policy={sourcePath:'Work/A.md',folder:'Work',readScope:'vault',writeScope:
 const reply=output=>({status:200,text:JSON.stringify({status:'completed',output,usage:{input_tokens:10,output_tokens:5,output_tokens_details:{reasoning_tokens:2}}})});
 const call=(id='c1')=>({type:'function_call',call_id:id,name:'read_notes',arguments:'{"notes":[]}'});
 const text=message=>({type:'message',role:'assistant',content:[{type:'output_text',text:message}]});
+const stream = (...events) => ({
+ status:200,
+ text:events.map(event=>['event: '+event.type,'data: '+JSON.stringify(event),'',''].join('\r\n')).join(''),
+ headers:{'x-request-id':'req_0123456789abcdef0123456789abcdef'},
+});
+test('Android waits for each final stream event and retains confirmed tools, reasoning and usage', async () => {
+ const attempts = [], operations = [];
+ const task = new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},streamResponses:true,
+  executor:{execute:async name=>{operations.push(name);return {text:'Overview received'};}},
+  transport:async req=>{
+   const body=JSON.parse(req.body);
+   attempts.push(body);
+   assert.equal(body.stream,true);
+   assert.equal(body.store,false);
+   if(attempts.length===1) return stream(
+    {type:'response.output_item.done',item:{...call('ignored'),name:'create_note'}},
+    {type:'response.completed',response:JSON.parse(reply([{type:'reasoning',id:'r',encrypted_content:'opaque'},call()]).text)},
+   );
+   return stream({type:'response.completed',response:JSON.parse(reply([text('Polish · dziewięć')]).text)});
+  }});
+ await task.run('Read',{model:'gpt-6.1-sol',effort:'xhigh'},'edit',3);
+ assert.equal(task.state,'completed');
+ assert.equal(task.text,'Polish · dziewięć');
+ assert.deepEqual(operations,['read_notes']);
+ assert.deepEqual(task.usage,{input:20,output:10,reasoning:4});
+ assert(attempts[1].input.some(item=>item.encrypted_content==='opaque'));
+ assert(attempts[1].input.some(item=>item.type==='function_call_output'&&item.call_id==='c1'));
+});
+test('Android keeps a confirmed incomplete answer and never executes a partial or cut-off tool', async () => {
+ for(const completeStream of [false,true]) {
+  let sent=0,writes=0;
+  const tool={...call(),name:'create_note'};
+  const task=new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},streamResponses:true,
+   executor:{execute:async()=>{writes++;}},
+   transport:async()=>{
+    sent++;
+    const item={type:'response.output_item.done',item:tool};
+    return completeStream ? stream(item,{type:'response.incomplete',response:{status:'incomplete',output:[text('Partial answer'),tool]}}) :
+     stream(item,{type:'response.in_progress',response:{status:'in_progress',output:[tool]}});
+   }});
+  await task.run('Write',{model:'gpt-6.1-sol'},'edit',3);
+  assert.equal(sent,1);
+  assert.equal(writes,0);
+  assert.equal(task.state,'failed');
+  if(completeStream) assert.equal(task.text,'Partial answer');
+  else {
+   assert.match(task.message,/stream ended before the result was confirmed/i);
+   assert.match(task.message,/Obsidian HTTP stream.*HTTP 200.*OpenAI ID req_/);
+  }
+ }
+});
 test('data scope and write scope are independent, paths/secrets/configuration never bypass local guards',()=>{
  assert(allowedPath(policy,'Other/B.md','read'));assert(!allowedPath(policy,'Other/B.md','edit'));assert(!allowedPath(policy,'Work/New.md','create'));
  for(const path of ['../A.md','/A.md','C:/A.md','Work/../A.md','.obsidian/settings.md','Private/A.md','Yoofloe AI/Backups/a.md'])assert(!allowedPath(policy,path,'read'));

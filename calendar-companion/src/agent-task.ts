@@ -1,6 +1,7 @@
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport } from "./ai-session";
 import { validateOpenAiKey, validateOpenAiOptions } from "./openai";
 import { OpenAiDnsLookupError, openAiTransportFailure, requestOpenAiRound } from "./openai-request";
+import { openAiStreamResult } from "./openai-stream";
 import { resolveEffort } from "./effort";
 import { safeOutbound, type WorkMode, type WriteScope } from "./agent-policy";
 import { agentTools, parseAgentReply, type AgentReply } from "./agent-protocol";
@@ -76,7 +77,7 @@ export class AgentTask {
   private listeners = new Set<() => void>();
   private stagedCalendarProposal = false;
   constructor(private readonly options: {
-    current(): boolean; preserve?(): boolean; key(): Promise<string | null>; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse;
+    current(): boolean; preserve?(): boolean; key(): Promise<string | null>; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; streamResponses?: boolean;
     steerStatus?(note: SteerNote, status: SteerStatus): void;
     executor: AgentExecutor; gate: { busy: boolean }; generated?: GeneratedStore; attachments?: AttachmentRun; attachmentStore?: AttachmentStore; writeScope?: WriteScope; calendarDraft?: CalendarDraftTool;
   }) {}
@@ -290,7 +291,7 @@ export class AgentTask {
         const payload: Record<string, unknown> = { model: model.model, instructions: this.draftingCalendar ? "Prepare only a proposal for the changes the user explicitly requests. Use only the Calendar records approved for this request as source material. Use the device time zone unless the user provides another. If times, targets or actions are ambiguous, ask before staging a proposal. Never claim the app applied anything. After drafting, tell the user to review the proposal in Calendar." : AGENT_INSTRUCTION.replace("Do not run code, call external URLs, request keys, access configuration/backup folders, or expand permissions.", "Never request keys, access configuration/backup folders, execute local code, or expand permissions.") + " " + sourceInstructions(this.sourceMode, supportsHostedTools(model.model)) + " Earlier conversation and compacted history provide background. Only the current task and its later user directions authorize current file actions. When asked to change a document or note title, use rename_note to change its filename/tab title; adding a Markdown heading alone is not a document rename. If the user explicitly requests only a body heading, edit that heading. Report only file operations confirmed by the tools. The write target is authoritative even in All actions. Current note forbids creating notes or files and moving to another folder. New documents permits creating notes in the output folder and revising only notes created by this task; existing notes are context, not writable targets. The selected folder is also the access boundary when Note folder is selected; it does not grant creation under Current note." + (remaining === 0 ? " The online tool budget is exhausted. Finish with verified evidence already obtained; disclose missing coverage without claiming further research." : ""), input: [...this.items, ...messages], tools: [...localTools, ...hosted], parallel_tool_calls: false,
           ...(hosted.length && remaining !== "none" && remaining > 0 ? { max_tool_calls: remaining } : {}),
           ...(this.autoCompact ? { context_management: [{ type: "compaction", compact_threshold: AUTO_COMPACT_TOKENS }] } : {}),
-          store: false, stream: false, include: ["reasoning.encrypted_content", ...(this.sourceMode === "expanded" && hosted.length ? ["web_search_call.action.sources"] : [])], ...(effort || summarize ? { reasoning: {
+          store: false, stream: this.options.streamResponses === true, include: ["reasoning.encrypted_content", ...(this.sourceMode === "expanded" && hosted.length ? ["web_search_call.action.sources"] : [])], ...(effort || summarize ? { reasoning: {
             ...(effort ? { effort } : {}), ...(summarize ? { summary: "auto" } : {}),
           } } : {}) };
         let body = JSON.stringify(payload);
@@ -431,10 +432,12 @@ export class AgentTask {
         this.nativeApplied = null;
       }
     } else {
-      const result = await requestOpenAiRound(this.options.transport, body, key, this.requests, bytes);
-      trace = result.trace;
+      const streamed = this.options.streamResponses === true;
+      const { response, trace: httpTrace } = await requestOpenAiRound(this.options.transport, body, key, this.requests, bytes, streamed);
+      trace = httpTrace;
       try {
-        reply = parseAgentReply(result.response.status, result.response.text);
+        const responseText = streamed && response.status >= 200 && response.status < 300 ? openAiStreamResult(response.text) : response.text;
+        reply = parseAgentReply(response.status, responseText);
       } catch (error) {
         const detail = error instanceof Error ? error.message : "OpenAI returned an unreadable response.";
         throw Error(`OpenAI request ${this.requests} · ${detail} (${trace})`);
