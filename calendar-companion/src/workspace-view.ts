@@ -686,6 +686,7 @@ export class YoofloeAiView extends ItemView {
       submit.disabled = w.calendarDraftActive || w.modelSaving || w.followUpSaving || w.addingAttachments || !w.followUpDraft.trim() || w.stopping ||
         w.followUps.length >= FOLLOW_UP_LIMIT && !w.editingFollowUpId || mode === "steer" && !w.canSteer;
     });
+    this.composerOptions.fitLabels();
   }
   private followUpEditor(compose: HTMLElement, controls: HTMLElement): void {
     const w = this.work, wrap = compose.createDiv({ cls: "y-ai-follow-up" });
@@ -1178,6 +1179,7 @@ export class YoofloeAiView extends ItemView {
       root.classList.toggle("y-ai-short", available < 340 && !(keyboard > 50 || visual));
       root.classList.toggle("y-ai-tiny", available < 190 && (keyboard > 50 || visual));
       this.sizeComposerInputs();
+      this.composerOptions.fitLabels();
       this.chatSplit?.refresh();
       if (root.classList.contains("y-ai-tiny")) root.scrollTop = 0;
       win.clearTimeout(timer); timer = win.setTimeout(() => { const active = doc.activeElement; if (active !== null && active.instanceOf(HTMLElement) && root.contains(active) && active.matches("textarea,input,select")) active.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }); }, 350);

@@ -2,7 +2,6 @@ import { Menu, Platform, setIcon, setTooltip } from "obsidian";
 import { modelCatalog } from "./ai-models";
 import type { AiModelOptions } from "./ai-session";
 import { EFFORT_LABELS, resolveEffort, supportedEfforts, type EffortSetting } from "./effort";
-import { HIGHER_API_COST } from "./openai-models";
 import { SOURCE_MODES, supportsHostedTools, type SourceMode } from "./research";
 import type { AiWorkspace } from "./workspace";
 
@@ -16,15 +15,9 @@ function selectedEffort(model: Readonly<AiModelOptions>): EffortSetting {
   return model.effort ?? resolveEffort(model.model) ?? "default";
 }
 
-function addCostWarning(parent: Node): HTMLSpanElement {
-  const warning = parent.createSpan({ cls: "yoofloe-cost-warning", attr: { role: "img", "aria-label": HIGHER_API_COST } });
-  setIcon(warning, "triangle-alert");
-  setTooltip(warning, HIGHER_API_COST);
-  return warning;
-}
-
 export class ComposerOptions {
   private openMenu: { menu: Menu; button: HTMLButtonElement } | null = null;
+  private fitted: { group: HTMLElement; inputs: string } | null = null;
 
   constructor(private readonly root: HTMLElement, private readonly getWork: () => AiWorkspace,
     private readonly openSettings: () => void, private readonly saveSourceMode: () => void) {}
@@ -36,11 +29,6 @@ export class ComposerOptions {
         type: "button", "data-composer-picker": kind, "aria-haspopup": "menu", "aria-expanded": "false",
       } });
       button.createSpan({ cls: "y-ai-picker-value" });
-      if (kind === "model") {
-        const warning = addCostWarning(button);
-        warning.hidden = true;
-        warning.setAttribute("aria-hidden", "true");
-      }
       setIcon(button.createSpan({ cls: "y-ai-picker-chevron", attr: { "aria-hidden": "true" } }), "chevron-down");
       let caret: Caret | undefined;
       button.addEventListener("pointerdown", event => {
@@ -71,16 +59,47 @@ export class ComposerOptions {
       const kind = button.dataset.composerPicker as Picker;
       const value = values[kind];
       const label = button.querySelector(".y-ai-picker-value");
-      if (label && label.textContent !== value) {
-        label.setText(value);
+      const text = kind === "model" && !known && model.model ? "Custom model" : value;
+      if (label && label.textContent !== text) label.setText(text);
+      const accessibleLabel = `${PICKER_LABEL[kind]}: ${value}`;
+      if (button.getAttribute("aria-label") !== accessibleLabel) {
+        button.setAttribute("aria-label", accessibleLabel);
         if (kind === "source") setTooltip(button, SOURCE_MODES[work.sourceMode]);
+        if (kind === "model") setTooltip(button, value);
       }
-      const warning = button.querySelector<HTMLElement>(".yoofloe-cost-warning");
-      if (warning) warning.hidden = !known?.higherCost;
-      button.setAttribute("aria-label", `${PICKER_LABEL[kind]}: ${value}${warning && !warning.hidden ? " · " + HIGHER_API_COST : ""}`);
       button.disabled = disabled;
     });
     if (disabled) this.close();
+  }
+
+  fitLabels(): void {
+    const win = this.root.ownerDocument.defaultView;
+    const group = this.root.querySelector<HTMLElement>(".y-ai-composer-options");
+    const row = group?.parentElement;
+    if (!win || !group || !row?.clientWidth) return;
+    const width = row.clientWidth;
+    const rowGap = parseFloat(win.getComputedStyle(row).columnGap) || 0;
+    const otherControls = Array.from(row.children).filter(control => control !== group && control.getClientRects().length);
+    const inlineWidth = otherControls.reduce((room, control) => room - control.getBoundingClientRect().width - rowGap, width);
+    const followUp = row.classList.contains("y-ai-follow-up-controls");
+    const style = win.getComputedStyle(group);
+    const inputs = [width, inlineWidth, followUp, style.font, style.getPropertyValue("--font-ui-small"), group.textContent].join("|");
+    if (this.fitted?.group === group && this.fitted.inputs === inputs) return;
+    this.fitted = { group, inputs };
+
+    // Measure unwrapped labels at the theme size and keep all three at the same size.
+    group.style.removeProperty("--y-ai-picker-font-size");
+    const buttons = Array.from(group.children);
+    const baseSize = parseFloat(win.getComputedStyle(buttons[0]).fontSize);
+    const sumWidths = (items: ArrayLike<Element>) => Array.from(items).reduce((sum, item) => sum + item.getBoundingClientRect().width, 0);
+    const scalableWidth = sumWidths(group.querySelectorAll(".y-ai-picker-value, .y-ai-picker-chevron"));
+    const gapWidth = (parseFloat(style.columnGap) || 0) * (buttons.length - 1);
+    const fixedWidth = sumWidths(buttons) + gapWidth - scalableWidth;
+    const fit = (room: number) => Math.min(baseSize, Math.floor(4 * baseSize * (room - fixedWidth - 1) / scalableWidth) / 4);
+    const fullRow = followUp || fit(inlineWidth) < Math.min(10.5, baseSize);
+    group.classList.toggle("is-full-row", fullRow);
+    const size = Math.max(Math.min(10, baseSize), fit(fullRow ? width : inlineWidth));
+    group.style.setProperty("--y-ai-picker-font-size", `${size}px`);
   }
 
   close(): void {
@@ -109,7 +128,7 @@ export class ComposerOptions {
         input.setSelectionRange(caret.from, caret.to);
       } else if (picker && !picker.disabled) picker.focus({ preventScroll: true });
     };
-    const select = (label: string | DocumentFragment, current: boolean, apply: () => void | Promise<void>) => {
+    const select = (label: string, current: boolean, apply: () => void | Promise<void>) => {
       menu.addItem(item => item.setTitle(label).setChecked(current).onClick(() => {
         chosen = true;
         this.close();
@@ -119,16 +138,7 @@ export class ComposerOptions {
     };
     if (kind === "model") {
       const models = modelCatalog("openai").models;
-      for (const model of models) {
-        let label: string | DocumentFragment = model.label;
-        if (model.higherCost) {
-          const title = this.root.ownerDocument.createDocumentFragment();
-          const text = title.createSpan({ cls: "yoofloe-cost-menu-title", text: model.label });
-          addCostWarning(text);
-          label = title;
-        }
-        select(label, work.model.model === model.id, () => work.setModel({ model: model.id }));
-      }
+      for (const model of models) select(model.label, work.model.model === model.id, () => work.setModel({ model: model.id }));
       if (work.model.model && !models.some(model => model.id === work.model.model))
         select(`Custom · ${work.model.model}`, true, () => {});
       if (work.model.model && !supportsHostedTools(work.model.model))
