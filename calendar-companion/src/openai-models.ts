@@ -2,20 +2,15 @@
 export const MODEL_CATALOG_CHECKED = "2026-11-17";
 export const MODEL_CATALOG_URL = "https://developers.openai.com/api/docs/models";
 export const MODEL_PRICING_URL = "https://developers.openai.com/api/docs/pricing";
+export const HIGHER_API_COST = "Higher API cost";
 export const CUSTOM_MODEL_CHOICE = "__custom__";
 export const OPENAI_MODELS = [
-  { id: "gpt-6-luna", label: "GPT-6 Luna · Economy (recommended)",
-    description: "Start here for summaries, checklists and simple rewrites. Lowest-cost option in this list.", effort: "none" },
-  { id: "gpt-6.1-terra", label: "GPT-6.1 Terra · Writing",
-    description: "For drafting and revising everyday text. Costs more than Luna.", effort: "none" },
-  { id: "gpt-6.1-sol", label: "GPT-6.1 Sol · Complex work",
-    description: "For more demanding drafts. Higher cost; thinking can use the token budget before text appears.", effort: "low" },
-  { id: "gpt-6.2-sol", label: "GPT-6.2 Sol · Agent workflows",
-    description: "For everyday work that combines text, images and tools.", effort: "low" },
-  { id: "gpt-6-astra", label: "GPT-6 Astra · Higher cost",
-    description: "For the most demanding tasks. Highest-cost option here; choose Luna for short, economical drafts.", effort: "low" },
-  { id: "gpt-6.2-astra", label: "GPT-6.2 Astra · Complex reasoning",
-    description: "For demanding reasoning, coding and document work.", effort: "low" },
+  { id: "gpt-6-luna", label: "GPT-6 Luna", effort: "none", higherCost: false },
+  { id: "gpt-6.1-terra", label: "GPT-6.1 Terra", effort: "none", higherCost: false },
+  { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", effort: "low", higherCost: false },
+  { id: "gpt-6.2-sol", label: "GPT-6.2 Sol", effort: "low", higherCost: false },
+  { id: "gpt-6-astra", label: "GPT-6 Astra", effort: "low", higherCost: true },
+  { id: "gpt-6.2-astra", label: "GPT-6.2 Astra", effort: "low", higherCost: true },
 ] as const;
 export const DEFAULT_OPENAI_MODEL = OPENAI_MODELS[0].id;
 
