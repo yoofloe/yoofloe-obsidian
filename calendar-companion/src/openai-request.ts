@@ -1,6 +1,11 @@
 import type { AiHttpResponse, AiTransport } from "./ai-session";
 import { OPENAI_ENDPOINT } from "./openai";
 
+const OPENAI_HOST = new URL(OPENAI_ENDPOINT).hostname;
+const DNS_FAILURE = "could not resolve the OpenAI host";
+
+export class OpenAiDnsLookupError extends Error {}
+
 interface RequestTrace {
   clientId: string;
   bytes: number;
@@ -26,7 +31,7 @@ export function openAiTransportFailure(error: unknown): string {
   if (/\b(?:ETIMEDOUT|ESOCKETTIMEDOUT|ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|SocketTimeoutException|TimeoutError|timed out|timeout)\b/i.test(hint))
     return "timed out before an HTTP response was available";
   if (/\b(?:UnknownHostException|Unable to resolve host|ENOTFOUND|EAI_AGAIN|ERR_NAME_NOT_RESOLVED)\b/i.test(hint))
-    return "could not resolve the OpenAI host";
+    return DNS_FAILURE;
   if (/\b(?:SSLHandshakeException|SSLPeerUnverifiedException|ERR_CERT_[A-Z_]+|ERR_SSL_[A-Z_]+|certificate verify failed)\b/i.test(hint))
     return "could not establish a secure connection";
   if (/\b(?:ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ERR_(?:CONNECTION_REFUSED|ADDRESS_UNREACHABLE|INTERNET_DISCONNECTED)|connection refused|network is unreachable)\b/i.test(hint))
@@ -36,6 +41,17 @@ export function openAiTransportFailure(error: unknown): string {
   if (/\b(?:AbortError|ERR_ABORTED|ECANCELED|cancelled|canceled)\b/i.test(hint))
     return "was interrupted before the response could be confirmed";
   return "ended before Obsidian returned an HTTP response";
+}
+
+function confirmedOpenAiLookupFailure(error: unknown): boolean {
+  const fields = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const status = fields.status ?? fields.statusCode;
+  if (fields.response || (typeof status === "number" || typeof status === "string") && /^[1-5]\d{2}$/.test(String(status))) return false;
+  const message = typeof error === "string" ? error.slice(0, 512) : stringField(fields, "message");
+  const android = /\bUnable to resolve host\s+["']?([a-z0-9.-]+)["']?(?=\s|:|$)/i.exec(message);
+  const system = /\bgetaddrinfo\s+(?:ENOTFOUND|EAI_AGAIN)\s+([a-z0-9.-]+)(?=\s|$)/i.exec(message);
+  const hostname = stringField(fields, "hostname") || android?.[1] || system?.[1];
+  return hostname?.toLowerCase() === OPENAI_HOST;
 }
 
 function header(headers: AiHttpResponse["headers"], name: string): string | undefined {
@@ -66,7 +82,11 @@ export async function requestOpenAiRound(
     response = await transport({ url: OPENAI_ENDPOINT, method: "POST", contentType: "application/json", body, throw: false,
       headers: { Authorization: "Bearer " + key, "X-Client-Request-Id": trace.clientId } });
   } catch (error) {
-    throw Error(`OpenAI request ${number} ${openAiTransportFailure(error)}. No retry was made. The request may still incur charges. (${traceText(trace)})`);
+    const failure = openAiTransportFailure(error);
+    const message = `OpenAI request ${number} ${failure}.`;
+    if (failure === DNS_FAILURE && confirmedOpenAiLookupFailure(error))
+      throw new OpenAiDnsLookupError(`${message} (${traceText(trace)})`);
+    throw Error(`${message} No retry was made. The request may still incur charges. (${traceText(trace)})`);
   }
   return { response, trace: traceText(trace, response) };
 }

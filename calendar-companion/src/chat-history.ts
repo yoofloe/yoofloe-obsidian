@@ -19,6 +19,7 @@ export interface ChatTurn {
   reference?: SelectionReference;
   referenceSnapshot?: ReferenceSnapshot;
   pausedForInput?: boolean;
+  pausedForConnection?: boolean;
   readCoverage?: ReadCoverage[];
   uploadCleanupWarning?: string;
   generatedTruncated?: boolean;
@@ -88,7 +89,8 @@ export function readChat(value: unknown): ChatTurn | null {
     ...(typeof v.sourcePath === "string" ? { sourcePath: v.sourcePath.slice(0, 500) } : {}), actionsKnown: v.actionsKnown === true, actionTotal: Math.max(count(v.actionTotal), actions.length),
     sourceMode: v.sourceMode === "expanded" ? "expanded" : "provided", sources: sourceList(v.sources), generated: readGeneratedFiles(v.generated), generatedTruncated: v.generatedTruncated === true,
     attachments: readAttachments(v.attachments), ...(reference ? { reference } : {}), ...(referenceSnapshot ? { referenceSnapshot } : {}),
-    ...(v.pausedForInput === true ? { pausedForInput: true } : {}), ...(readCoverage ? { readCoverage } : {}),
+    ...(v.pausedForInput === true ? { pausedForInput: true } : {}), ...(v.pausedForConnection === true ? { pausedForConnection: true } : {}),
+    ...(readCoverage ? { readCoverage } : {}),
     transcriptions: count(v.transcriptions), fileWarnings: Array.isArray(v.fileWarnings) ? v.fileWarnings.filter((value): value is string => typeof value === "string").slice(0, 32).map(value => value.slice(0, 500)) : [],
     ...(typeof v.uploadCleanupWarning === "string" ? { uploadCleanupWarning: workText(v.uploadCleanupWarning, 500) } : {}),
     online: v.online && typeof v.online === "object" ? { search: count((v.online as OnlineUsage).search), analysis: count((v.online as OnlineUsage).analysis), image: count((v.online as OnlineUsage).image) } : undefined };

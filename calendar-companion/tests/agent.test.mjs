@@ -84,6 +84,8 @@ test('returned HTTP, host-reported HTTP and unreadable responses retain safe dia
     [async () => ({ status: 429, text: '{"error":{"code":"insufficient_quota","param":"input[123].content[456].file_id"}}', headers: { 'x-request-id': 'req_private_note_title' } }), /rate or quota limit.*HTTP 429.*insufficient_quota.*client ID/],
     [async () => { throw 'Request failed, status 504'; }, /HTTP 504 reported by Obsidian/],
     [async () => { throw { code: 'ERR_NAME_NOT_RESOLVED', message: 'private transport detail' }; }, /could not resolve the OpenAI host/],
+    [async () => { throw new Error('Unable to resolve host "proxy.example.org": private transport detail'); }, /could not resolve the OpenAI host/],
+    [async () => { throw { status: 502, code: 'ENOTFOUND', hostname: 'api.openai.com' }; }, /HTTP 502 reported by Obsidian/],
     [async () => ({ status: 200, text: '{"status":"failed","error":{"code":"server_error","message":"private provider error"}}' }), /failed response \(server_error\).*HTTP 200/],
     [async () => ({ status: 200, text: 'private malformed response body' }), /unreadable response.*HTTP 200/],
   ];
@@ -97,6 +99,34 @@ test('returned HTTP, host-reported HTTP and unreadable responses retain safe dia
     assert.match(task.message, expected);
     assert.doesNotMatch(task.message, /private|content\[456\]/);
   }
+});
+
+test('a steer held by an OpenAI host lookup failure is included once when the user continues', async () => {
+  const inputs = [], statuses = [];
+  const steer = { id: 'additional', text: 'Keep this extra instruction.', at: Date.now() };
+  const task = new AgentTask({
+    current: () => true,
+    key: async () => 'sk-synthetic-agent-key',
+    gate: { busy: false },
+    executor: { execute: async () => assert.fail('No tool may run') },
+    steerStatus: (_note, status) => statuses.push(status),
+    transport: async request => {
+      const number = inputs.push(JSON.parse(request.body).input);
+      if (number === 1) { assert(task.addSteer(steer)); return reply([text('Initial answer.')]); }
+      if (number === 2) throw { code: 'EAI_AGAIN', hostname: 'api.openai.com' };
+      return reply([text('Continued.')]);
+    },
+  });
+
+  await task.run('Read', { model: 'gpt-6-luna' }, 'ask', 'none');
+  assert.equal(task.canResume, true);
+  assert.equal(task.pausedForConnection, true);
+  assert.equal(inputs.length, 2);
+  assert.deepEqual(statuses, ['sending', 'steer-pending']);
+  await task.resume('none');
+  assert.equal(task.state, 'completed');
+  assert.equal(inputs[2].filter(item => item.role === 'user' && item.content === steer.text).length, 1);
+  assert.deepEqual(statuses, ['sending', 'steer-pending', 'sending', 'applied']);
 });
 
 test('a steer acknowledged by a policy-rejected reply is preserved without being offered for dispatch again', async () => {

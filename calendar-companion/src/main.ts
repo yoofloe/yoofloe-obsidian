@@ -343,15 +343,25 @@ export default class YoofloeAiPlugin extends Plugin {
           if (!stat || stat.size > 6 * 1024 * 1024) throw Error("This full chat record cannot be read safely.");
           const turn = readChat(JSON.parse(await adapter.read(path)) as unknown); if (!ai.current() || turn?.id !== id) throw Error("The local chat record could not be confirmed."); return turn;
         },
-        searchChats: async (query, offset, conversationId) => {
+        searchChats: async (query, offset, conversationId, strict = false) => {
           if (!ai.current() || !query.trim() && !conversationId || conversationId && !validChatId(conversationId) || query.length > 200 || !Number.isSafeInteger(offset) || offset < 0) return { turns: [], nextOffset: null };
           const folder = `${root}/chats`; if (!await adapter.exists(folder)) return { turns: [], nextOffset: null };
           const listing = await adapter.list(folder), paths = listing.files.filter(path => { const name = path.slice(folder.length + 1); return path.startsWith(folder + "/") && name.endsWith(".json") && validChatId(name.slice(0, -5)); }).sort().reverse();
           const turns: ChatTurn[] = []; let index = offset, bytes = 0;
           for (; index < Math.min(paths.length, offset + 20); index++) {
-            if (!ai.current()) break; const stat = await adapter.stat(paths[index]); if (!stat || stat.size > 6 * 1024 * 1024) continue;
+            if (!ai.current()) break; const stat = await adapter.stat(paths[index]);
+            if (!stat || stat.size > 6 * 1024 * 1024) {
+              if (strict) throw Error("A saved message could not be read. Check the local chat archive and try again.");
+              continue;
+            }
             if (bytes && bytes + stat.size > 8 * 1024 * 1024) break; bytes += stat.size;
-            try { const turn = readChat(JSON.parse(await adapter.read(paths[index])) as unknown); if (turn && (!conversationId || turnConversation(turn.conversationId) === conversationId) && (!query || chatMatches(turn, query))) turns.push(query ? searchChatPreview(turn, query) : turn); } catch { /* An unreadable archive stays untouched. */ }
+            try {
+              const turn = readChat(JSON.parse(await adapter.read(paths[index])) as unknown);
+              if (!turn && strict) throw Error("Invalid saved message.");
+              if (turn && (!conversationId || turnConversation(turn.conversationId) === conversationId) && (!query || chatMatches(turn, query))) turns.push(query ? searchChatPreview(turn, query) : turn);
+            } catch {
+              if (strict) throw Error("A saved message could not be read. Check the local chat archive and try again.");
+            }
           }
           return { turns, nextOffset: index < paths.length ? index : null };
         },
