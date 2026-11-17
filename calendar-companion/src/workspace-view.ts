@@ -8,7 +8,6 @@ import { availableViewHeight } from "./view-bounds";
 import { WorkspaceChatSplit } from "./workspace-chat-split";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, CONTROL_NOTICE, PRIVACY_URL, OPENAI_DATA_URL } from "./privacy-copy";
 import { customRequestLimit, requestLimitLabel } from "./request-limit";
-import { SOURCE_MODES } from "./research";
 import { generatedCachePath } from "./generated-files";
 import { ATTACHMENT_LIMIT_LABEL, PASTED_TEXT_THRESHOLD } from "./attachments";
 import { FOLLOW_UP_LIMIT, FOLLOW_UP_TEXT_LIMIT, type FollowUpMode } from "./follow-ups";
@@ -24,7 +23,7 @@ import { calendarChangeCard, calendarChangeToggle, workspaceCalendarChangeToggle
 import { renderCalendarWorkspacePanel } from "./calendar-workspace-panel";
 import { renderChronoHudPanel } from "./chronohud-panel";
 import { ChatCopyControls } from "./chat-copy-view";
-import { ComposerModelControls } from "./composer-model-controls";
+import { ComposerOptions } from "./composer-options";
 
 export const AI_VIEW = "yoofloe-ai";
 const CALENDAR_STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -60,7 +59,7 @@ export class YoofloeAiView extends ItemView {
   private selectingText = false;
   private stopSelectionWatch: (() => void) | null = null;
   private readonly chatCopy: ChatCopyControls;
-  private readonly modelControls: ComposerModelControls;
+  private readonly composerOptions: ComposerOptions;
   private libraryOpen = false;
   private libraryEdit: { kind: "conversation" | "folder"; id: string | null; name: string } | null = null;
   private libraryError = "";
@@ -90,7 +89,7 @@ export class YoofloeAiView extends ItemView {
     super(leaf);
     this.chatCopy = new ChatCopyControls(() => this.work, this.contentEl,
       () => [...this.olderChats, ...this.searchResults, ...this.work.chat], () => this.render());
-    this.modelControls = new ComposerModelControls(this.contentEl, () => this.work, () => this.options.settings());
+    this.composerOptions = new ComposerOptions(this.contentEl, () => this.work, () => this.options.settings(), () => this.saveSoon());
   }
   getViewType(): string { return AI_VIEW; }
   getDisplayText(): string { return "Yoofloe"; }
@@ -132,7 +131,7 @@ export class YoofloeAiView extends ItemView {
     this.stopViewport = this.watchViewport(); this.render(); await this.work.initialize();
   }
   async onClose(): Promise<void> {
-    this.modelControls.close();
+    this.composerOptions.close();
     this.stopSelectionWatch?.(); this.stopSelectionWatch = null; this.selectingText = false; this.chatCopy.reset();
     this.budgetEpoch++;
     this.contentEl.ownerDocument.defaultView?.clearTimeout(this.budgetTimer);
@@ -656,7 +655,7 @@ export class YoofloeAiView extends ItemView {
   private apiLimit(): string { return this.work.maximum === "none" ? "No request limit" : requestLimitLabel(this.work.maximum); }
   private refreshComposer(): void {
     const el = this.contentEl, w = this.work;
-    this.modelControls.refresh();
+    this.composerOptions.refresh();
     const followUp = el.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input");
     if (followUp) followUp.readOnly = w.followUpSaving;
     const run = el.querySelector<HTMLButtonElement>(".y-ai-send");
@@ -940,7 +939,7 @@ export class YoofloeAiView extends ItemView {
     el.classList.toggle("y-ai-chat-expanded", this.layout === "chat");
     const oldSearch = el.querySelector<HTMLInputElement>(".y-ai-chat-search"), searchFocused = el.ownerDocument.activeElement === oldSearch, searchCursor = oldSearch?.selectionStart ?? this.chatQuery.length;
     const follow = this.settingsExpanded || wasExpanded ? this.savedFollowChat : !previousScroll && w.chat.length > 0 || w.busy && w.chat.length > this.lastChatCount || !!previousScroll && previousScroll.scrollTop + previousScroll.clientHeight >= previousScroll.scrollHeight - 32; this.lastChatCount = w.chat.length; this.followChat = follow;
-    this.modelControls.close();
+    this.composerOptions.close();
     this.rendering?.unload(); this.rendering = new Component(); this.rendering.load(); el.empty();
     const header = el.createDiv({ cls: "y-ai-header" }), title = header.createDiv({ cls: "y-ai-heading" });
     title.createEl("h2", { text: "Yoofloe" }); const noteContext = title.createEl("p", { text: `${w.source?.selection && w.readScope === "current" ? "Selected text · " : ""}${w.title}`, attr: { "aria-live": "polite" } });
@@ -1107,11 +1106,10 @@ export class YoofloeAiView extends ItemView {
     const prompt = compose.createEl("textarea", { text: w.prompt, cls: "y-ai-primary-prompt", attr: { rows: "1", "aria-label": "Ask", placeholder: "Ask…" } });
     prompt.disabled = w.settingsLocked && !w.addingAttachments; prompt.maxLength = 32000;
     const controls = dock.createDiv({ cls: `y-ai-row y-ai-composer-controls${followUp ? " y-ai-follow-up-controls" : ""}${w.busy ? " y-ai-running-controls" : ""}` });
-    this.modelControls.render(controls);
     const picker = controls.createEl("input", { attr: { type: "file", multiple: "", "aria-label": "Choose attachments" } }); picker.hidden = true;
     picker.addEventListener("change", () => { const files = Array.from(picker.files ?? []); picker.value = ""; void w.addAttachments(files, undefined, undefined, followUp); });
     const attach = this.button(controls, "", () => picker.click(), !w.canChangeReference || w.addingAttachments, "y-ai-attach clickable-icon"); attach.setAttribute("aria-label", "Attach images, files or audio"); setTooltip(attach, ATTACHMENT_LIMIT_LABEL); setIcon(attach, "plus");
-    const mode = this.select(controls, "AI mode", { expanded: "Expanded", provided: "Provided only" }, w.sourceMode, value => w.setSourceMode(value)); setTooltip(mode, SOURCE_MODES[w.sourceMode]);
+    this.composerOptions.render(controls);
     if (followUp) {
       this.followUpEditor(compose, controls);
       dock.addEventListener("focusout", () => {

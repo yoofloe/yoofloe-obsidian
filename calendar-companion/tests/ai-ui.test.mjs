@@ -100,16 +100,22 @@ test('returning from review preserves the prompt and selected records without an
   assert.equal(field(modal, 'Your request').inputEl.value, 'Keep my draft request'); assert.equal(field(modal, 'Fixture').value, true); assert.equal(f.calls.length, 0); modal.close();
 });
 
-test('model dropdown offers current presets with an economical default and Custom without any API call', async () => {
+test('model dropdown lists plain names and marks both Astra presets without an API call', async () => {
   const f = fixture('gpt-6-luna'), { OpenAiSettingsModal } = modals();
   const modal = new OpenAiSettingsModal({}, f.ai, () => {}); modal.open(); await settle();
   const selector = field(modal, 'Model');
   assert.equal(selector.value, 'gpt-6-luna'); assert.equal(selector.choices.size, 7);
-  assert(selector.choices.get('gpt-6-luna').includes('recommended')); assert(selector.choices.get('gpt-6-astra').includes('Higher cost'));
-  assert.match(selector.choices.get('gpt-6.2-sol'), /GPT-6\.2 Sol/);
-  assert.match(selector.choices.get('gpt-6.2-astra'), /GPT-6\.2 Astra/);
+  assert.equal(selector.choices.get('gpt-6-luna'), 'GPT-6 Luna');
+  assert.equal(selector.choices.get('gpt-6.1-terra'), 'GPT-6.1 Terra');
+  assert.equal(selector.choices.get('gpt-6.1-sol'), 'GPT-6.1 Sol');
+  assert.equal(selector.choices.get('gpt-6.2-sol'), 'GPT-6.2 Sol');
+  assert.equal(selector.choices.get('gpt-6-astra'), 'GPT-6 Astra ⚠');
+  assert.equal(selector.choices.get('gpt-6.2-astra'), 'GPT-6.2 Astra ⚠');
   assert(modal.contentEl.allText().includes('2026-11-17')); assert.equal(f.calls.length, 0);
   assert(modal.contentEl.allText().includes('No plugin output-token cap')); assert(!modal.contentEl.allSettings().some(row => row.name === 'Maximum output tokens'));
+  selector.fire('gpt-6.2-astra');
+  assert(modal.contentEl.allText().includes('Higher API cost'));
+  assert(!modal.contentEl.allText().includes('For demanding reasoning, coding and document work.'));
   selector.fire('gpt-6.1-terra'); button(modal, 'Save').fire(); await settle();
   assert.equal((await f.ai.preferences.read()).model, 'gpt-6.1-terra'); assert.equal(f.ai.session.enabled, false); assert.equal(f.calls.length, 0); modal.close();
 });
