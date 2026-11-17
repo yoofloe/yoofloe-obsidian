@@ -3,6 +3,7 @@ import { VaultAgent, type AgentHost, type WorkJournal } from "./vault-agent";
 import { allowedPath, validTaskPath, containsCredential, safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
 import type { AiPreferences } from "./ai-preferences";
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport } from "./ai-session";
+import { resolveEffort, supportedEfforts } from "./effort";
 import type { CalendarSession } from "./session";
 import type { DeliveryV3 } from "./protocol";
 import { planQuestion, QUERY_AREAS, type QueryArea, type QueryPeriod } from "./question-query";
@@ -94,6 +95,7 @@ export class AiWorkspace {
   attachments: Attachment[] = [];
   addingAttachments = false;
   model: AiModelOptions = { model: "" };
+  modelSaving = false;
   configured = false;
   busy = false;
   ready = false;
@@ -220,7 +222,7 @@ export class AiWorkspace {
       (!!this.task?.busy && this.task.state === "running" || this.canContinue);
   }
   get canResumeQueue(): boolean {
-    return this.ready && !this.calendarDraftActive && !this.settingsLocked && !this.followUpSaving && this.configured && !this.limitProblem &&
+    return this.ready && !this.calendarDraftActive && !this.settingsLocked && !this.modelSaving && !this.followUpSaving && this.configured && !this.limitProblem &&
       !this.agent?.pendingTrash.length && this.queueHeld && this.followUps[0]?.status === "queued" && !this.editingFollowUpId;
   }
   subscribe(listener: (change: WorkspaceChange) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -594,7 +596,26 @@ export class AiWorkspace {
   }
   setOutputFolder(folder: string): void { if (!this.settingsLocked) { this.outputFolder = folder; this.outputFolderChosen = true; this.preview = ""; } }
   setPrompt(value: string): void { if (!this.settingsLocked || this.addingAttachments && this.current) { this.prompt = value; this.preview = ""; } }
-  async setModel(model: AiModelOptions): Promise<void> { if (this.settingsLocked) return; try { await this.options.preferences.save(model, "openai"); this.model = model; } catch { this.message = "Model settings could not be saved. No request was sent."; } this.changed(); }
+  async setModel(options: AiModelOptions): Promise<void> {
+    if (!this.current || this.settingsLocked || this.modelSaving) return;
+    const next = { ...options };
+    if (next.effort === undefined && next.model !== this.model.model) {
+      const effort = this.model.effort ?? resolveEffort(this.model.model);
+      next.effort = effort && effort !== "default" && supportedEfforts(next.model).includes(effort) ? effort : "default";
+    }
+    if (next.model === this.model.model && next.effort === this.model.effort) return;
+    const saveError = "Model settings could not be saved. No request was sent.";
+    this.modelSaving = true;
+    this.changed("progress");
+    try {
+      await this.options.preferences.save(next, "openai");
+      if (!this.current) return;
+      this.model = next;
+      this.preview = "";
+      if (this.message === saveError) this.message = "";
+    } catch { this.message = saveError; }
+    finally { this.modelSaving = false; this.changed(); }
+  }
   private policy(): TaskPolicy {
     const folder = this.outputFolder.trim().replace(/\/$/, ""), excluded = this.excluded.split("\n").map(s => s.trim()).filter(Boolean);
     if (folder) vaultPath(folder, true); for (const path of excluded) vaultPath(path, true);
@@ -834,7 +855,7 @@ export class AiWorkspace {
     await this.drainQueue();
   }
   async submitFollowUp(mode: FollowUpMode): Promise<boolean> {
-    if (this.calendarDraftActive || !this.current || !this.ready || this.restoreFailed || this.followUpSaving || this.addingAttachments || this.stopRequested && this.busy) return false;
+    if (this.calendarDraftActive || !this.current || !this.ready || this.restoreFailed || this.modelSaving || this.followUpSaving || this.addingAttachments || this.stopRequested && this.busy) return false;
     const text = this.followUpDraft.trim();
     const existing = this.followUps.find(entry => entry.id === this.editingFollowUpId);
     if (existing && existing.status !== "review" && existing.status !== "queued") return false;
@@ -925,7 +946,7 @@ export class AiWorkspace {
     if (this.draining) return;
     this.draining = true;
     try {
-      while (this.current && !this.calendarDraftActive && !this.settingsLocked && !this.followUpSaving && this.configured && !this.limitProblem &&
+      while (this.current && !this.calendarDraftActive && !this.settingsLocked && !this.modelSaving && !this.followUpSaving && this.configured && !this.limitProblem &&
         !this.queueHeld && !this.editingFollowUpId && !this.options.gate.busy && !this.agent?.pendingTrash.length) {
         const next = this.followUps[0];
         if (!next) break;
@@ -956,7 +977,7 @@ export class AiWorkspace {
     const reference = selectedReference && !calendarDraft ? { ...selectedReference } : null;
     const deferNoteRead = queued ? queued.context?.deferNoteRead === true : this.deferNoteRead;
     const pastedTextIsRequest = !request.trim() && attachments.some(file => file.pastedText);
-    if (this.restoreFailed || !this.current || this.switchingConversation || this.busy || this.addingAttachments || this.calendarChanges.busy || !request.trim() && !pastedTextIsRequest) return false;
+    if (this.restoreFailed || !this.current || this.switchingConversation || this.busy || this.modelSaving || this.addingAttachments || this.calendarChanges.busy || !request.trim() && !pastedTextIsRequest) return false;
     if (attachments.length && !this.options.attachments) { this.message = "Attachment processing is unavailable. Existing files are kept."; this.changed(); return false; }
     if (this.limitProblem) { this.message = this.limitProblem; this.changed(); return false; }
     const epoch = ++this.runEpoch;
