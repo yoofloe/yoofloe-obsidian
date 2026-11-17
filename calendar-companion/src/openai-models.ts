@@ -1,5 +1,5 @@
 /** Curated text models, checked against official OpenAI docs. Never fetched with an API key. */
-export const MODEL_CATALOG_CHECKED = "2026-11-11";
+export const MODEL_CATALOG_CHECKED = "2026-11-17";
 export const MODEL_CATALOG_URL = "https://developers.openai.com/api/docs/models";
 export const MODEL_PRICING_URL = "https://developers.openai.com/api/docs/pricing";
 export const CUSTOM_MODEL_CHOICE = "__custom__";
@@ -10,8 +10,12 @@ export const OPENAI_MODELS = [
     description: "For drafting and revising everyday text. Costs more than Luna.", effort: "none" },
   { id: "gpt-6.1-sol", label: "GPT-6.1 Sol · Complex work",
     description: "For more demanding drafts. Higher cost; thinking can use the token budget before text appears.", effort: "low" },
+  { id: "gpt-6.2-sol", label: "GPT-6.2 Sol · Agent workflows",
+    description: "For everyday work that combines text, images and tools.", effort: "low" },
   { id: "gpt-6-astra", label: "GPT-6 Astra · Higher cost",
     description: "For the most demanding tasks. Highest-cost option here; choose Luna for short, economical drafts.", effort: "low" },
+  { id: "gpt-6.2-astra", label: "GPT-6.2 Astra · Complex reasoning",
+    description: "For demanding reasoning, coding and document work.", effort: "low" },
 ] as const;
 export const DEFAULT_OPENAI_MODEL = OPENAI_MODELS[0].id;
 

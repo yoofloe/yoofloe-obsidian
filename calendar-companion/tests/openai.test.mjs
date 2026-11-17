@@ -46,7 +46,10 @@ test('one POST sends only reviewed records with storage off and no plugin output
   assert(!('tools' in body)); assert.deepEqual(draft, { text: 'A synthetic draft', incomplete: false, inputTokens: 12, outputTokens: 8 });
 });
 test('preset requests use a bounded short-draft profile; unknown custom models keep provider defaults', async () => {
-  for (const [model, effort] of [['gpt-6-luna','none'],['gpt-6.1-terra','none'],['gpt-6.1-sol','low'],['gpt-6-astra','low'],['custom-fixture',undefined]]) {
+  for (const [model, effort] of [
+    ['gpt-6-luna', 'none'], ['gpt-6.1-terra', 'none'], ['gpt-6.1-sol', 'low'], ['gpt-6-astra', 'low'],
+    ['gpt-6.2-sol', 'low'], ['gpt-6.2-astra', 'low'], ['custom-fixture', undefined],
+  ]) {
     const f = setup(); f.session.enableForSession(true);
     const r = f.session.prepare([record], 'Short draft', { model, maxOutputTokens: 512 }); // A legacy cap is intentionally ignored.
     assert.equal(r.reasoningEffort, effort); await f.session.generate(r, true);
