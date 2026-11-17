@@ -1,4 +1,4 @@
-import { Menu, setIcon } from "obsidian";
+import { Menu, Platform, setIcon } from "obsidian";
 import { modelCatalog } from "./ai-models";
 import type { AiModelOptions } from "./ai-session";
 import { EFFORT_LABELS, resolveEffort, supportedEfforts, type EffortSetting } from "./effort";
@@ -124,6 +124,11 @@ export class ComposerModelControls {
       button.setAttribute("aria-expanded", "false");
       this.root.ownerDocument.defaultView?.requestAnimationFrame(() => { if (!chosen) restoreFocus(); });
     });
+    if (Platform.isAndroidApp && caret) {
+      // Obsidian's mobile menu can extend beneath an open keyboard.
+      this.root.querySelector<HTMLTextAreaElement>(caret.field)?.blur();
+      button.focus({ preventScroll: true });
+    }
     const anchor = button.getBoundingClientRect();
     menu.showAtPosition({ x: anchor.left, y: anchor.bottom });
   }
