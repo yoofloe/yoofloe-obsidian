@@ -2,7 +2,6 @@ import { App, Modal, Notice, Setting, type ButtonComponent } from "obsidian";
 import { AiPreferences, DEFAULT_OPENAI_OPTIONS } from "./ai-preferences";
 import { AiSession, type AiDraft, type AiModelOptions, type AiOptions, type AiProvider, type AiReview } from "./ai-session";
 import { CUSTOM_MODEL_CHOICE, findAiModel, isAiModelId, isAiProviderEnabled, modelCatalog, providerLabel, PUBLIC_AI_PROVIDERS } from "./ai-models";
-import { HIGHER_API_COST } from "./openai-models";
 import { type RecordSnapshot } from "./protocol";
 import { saveAiDraft, type NoteStore } from "./notes";
 import { keepModalInputsVisible } from "./modal-inputs";
@@ -100,8 +99,7 @@ export class AiSettingsModal extends Modal {
         });
       });
     } else if (preset) {
-      const warning = preset.higherCost ? ` · ${HIGHER_API_COST}` : "";
-      el.createEl("p", { text: `Model ID: ${preset.id}${warning}`, cls: "calendar-companion-hint" });
+      el.createEl("p", { text: `Model ID: ${preset.id}`, cls: "calendar-companion-hint" });
     }
     if (this.provider === "openai") new Setting(el).setName("Thinking depth").setDesc("Higher depth may improve difficult reasoning and cost more. This does not change file permissions or output length.").addDropdown(dropdown => {
       dropdown.addOption("default", EFFORT_LABELS.default);
@@ -133,7 +131,7 @@ export class AiSettingsModal extends Modal {
     const modelSetting = new Setting(el).setName("Model").setDesc("Not sure? Start with economy (recommended). Selecting a model sends no API request.");
     const details = el.createDiv({ cls: "calendar-companion-model-details" });
     modelSetting.addDropdown(dropdown => {
-      for (const model of catalog.models) dropdown.addOption(model.id, model.higherCost ? `${model.label} ⚠` : model.label);
+      for (const model of catalog.models) dropdown.addOption(model.id, model.label);
       dropdown.addOption(CUSTOM_MODEL_CHOICE, "Custom · enter a model ID").setValue(this.modelChoice).setDisabled(this.busy);
       dropdown.selectEl.setAttribute("aria-label", `${name} model`);
       dropdown.onChange(value => {
