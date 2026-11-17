@@ -121,6 +121,73 @@ test('when the DNS failure prevents the write, the partial reply leaves the draf
   assert.match(f.work.message, /OpenAI request 2 could not resolve the OpenAI host/);
 });
 
+test('an OpenAI host lookup failure on request seven preserves the edit and attachment for an explicit continuation', async () => {
+  const f = fixture();
+  const note = await f.host.create('Current.md', '# Original\nBody\n');
+  const edited = '# Updated\nBody';
+  const attachment = { id: crypto.randomUUID(), name: 'fixture.jpg', extension: 'jpg', kind: 'image', mime: 'image/jpeg', bytes: 6, sha256: 'a'.repeat(64) };
+  const requests = [];
+  let preparations = 0, cleanups = 0, edits = 0;
+  const replace = f.host.replace;
+  f.host.replace = async (...args) => { await replace(...args); edits++; };
+  f.options.attachments = { forTask: () => ({
+    prepare: async () => {
+      preparations++;
+      return { parts: [{ type: 'input_image', file_id: 'file-test' }], fileIds: ['file-test'] };
+    },
+    cleanup: async () => { cleanups++; return true; },
+  }) };
+  f.options.transport = async request => {
+    const body = JSON.parse(request.body);
+    const number = requests.push(body);
+    if (number === 1) {
+      const source = JSON.parse(body.input[0].content[0].text).current_note;
+      return response([{ type: 'function_call', call_id: 'edit-current', name: 'apply_changes', arguments: JSON.stringify({
+        changes: [{ reference: 'N1', version: source.version, action: 'replace', markdown: edited }],
+      }) }]);
+    }
+    if (number < 7) return response([{ type: 'function_call', call_id: `lookup-${number}`, name: 'search_notes',
+      arguments: JSON.stringify({ query: `fixture-${number}`, offset: 0, limit: 5 }) }]);
+    if (number === 7) throw new Error('Request Failed. UnknownHostException Unable to resolve host "api.openai.com": No address associated with hostname');
+    assert.deepEqual(body.input, requests[6].input, 'Continue should keep the original image and all completed tool results');
+    return response([{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Updated the note.' }] }]);
+  };
+
+  await f.work.initialize();
+  await f.work.newTask({ path: note.path });
+  f.work.maximum = 7;
+  f.work.attachments = [attachment];
+  f.work.setPrompt('Update the heading on the current note.');
+  await f.work.run();
+  const paused = f.work.chat.at(-1);
+  assert.equal(paused.status, 'paused');
+  assert.equal(paused.pausedForConnection, true);
+  assert.equal(paused.actionTotal, 1);
+  assert.equal(f.work.canContinue, true);
+  assert.equal(f.work.canResumeWithLimit, false);
+  assert.equal(edits, 1);
+  assert.equal(cleanups, 0);
+  assert.equal(note.text, edited + '\n');
+  assert.deepEqual(f.work.attachments, [attachment]);
+  assert.match(f.work.message, /OpenAI request 7 could not resolve the OpenAI host.*increase the total request limit/s);
+  assert.doesNotMatch(JSON.stringify(paused), /UnknownHostException|No address associated with hostname/);
+  await f.work.run();
+  assert.equal(requests.length, 7, 'An exhausted limit still blocks Continue');
+
+  f.work.maximum = 8;
+  await f.work.run();
+  const completed = f.work.chat.at(-1);
+  assert.equal(requests.length, 8);
+  assert.equal(f.work.chat.length, 1);
+  assert.equal(completed.id, paused.id);
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.pausedForConnection, undefined);
+  assert.equal(completed.actionTotal, 1);
+  assert.equal(edits, 1);
+  assert.equal(preparations, 1);
+  assert.equal(cleanups, 1);
+});
+
 test('Finish here persists the stopped task before network cleanup and then saves the result', async () => {
   const f = fixture();
   await f.work.initialize();
@@ -848,6 +915,57 @@ test('a saved compaction is reused only in the same conversation with matching a
   assert.equal(bodies[3].context_management, undefined);
   assert(!JSON.stringify(bodies[3].input).includes('opaque-session-context'));
   assert.equal(f.saved().autoCompact, false);
+});
+
+test('changing the attached document carries user directions into the next task and through a saved conversation', async () => {
+  const f = fixture();
+  const a = await f.host.create('Studies/First.md', 'First document');
+  const b = await f.host.create('Studies/Second.md', '8');
+  const c = await f.host.create('Studies/Third.md', '10');
+  const instruction = '폴란드어 숫자는 어떻게 읽는지도 폴란드어로 괄호 치고 적어줘';
+  const followUp = '지금 선택된 문서에서도 해';
+  let first = true;
+  f.options.transport = async request => {
+    const body = JSON.parse(request.body), input = JSON.parse(body.input[0].content);
+    if (first) { first = false; return fixtureAnswer('PRIVATE_FIRST_DOCUMENT_ANSWER'); }
+    assert.equal(input.permissions.data, 'current');
+    assert.equal(input.permissions.changes, 'current');
+    assert(input.recent_user_requests.some(row => row.request === instruction));
+    assert.equal(input.current_note.path, b.path);
+    assert(!request.body.includes('PRIVATE_FIRST_DOCUMENT_ANSWER'));
+    if (!body.input.some(item => item.type === 'function_call_output')) {
+      return response([{ type: 'function_call', call_id: 'edit-new-note', name: 'apply_changes', arguments: JSON.stringify({
+        changes: [{ reference: 'N1', version: input.current_note.version, action: 'replace', markdown: '8 (osiem)' }],
+      }) }]);
+    }
+    return fixtureAnswer('Updated the selected document.');
+  };
+  await f.work.initialize();
+  await f.work.newTask({ path: a.path });
+  f.work.readScope = 'current'; f.work.writeScope = 'current';
+  f.work.setPrompt(instruction); await f.work.run();
+  assert(f.work.attachNote({ path: b.path }));
+  f.work.setPrompt(followUp); await f.work.run();
+  assert.equal(b.text, '8 (osiem)');
+  assert.equal(a.text, 'First document');
+
+  const saved = structuredClone(f.saved());
+  const reopened = new AiWorkspace({ ...f.options, storage: { ...f.options.storage, load: async () => saved } });
+  await reopened.initialize();
+  assert(reopened.attachNote({ path: c.path }));
+  reopened.model = { model: 'gpt-6.1-sol', effort: 'low' };
+  reopened.setSourceMode('provided');
+  reopened.setPrompt('이 문서에도 적용해');
+  await reopened.review();
+  const data = JSON.parse(reopened.preview);
+  assert(data.recent_user_requests.some(row => row.request === instruction));
+  assert(data.recent_user_requests.some(row => row.request === followUp));
+  assert.equal(data.current_note.path, c.path);
+  assert(!JSON.stringify(data).includes('PRIVATE_FIRST_DOCUMENT_ANSWER'));
+  assert(await reopened.createConversation());
+  reopened.setPrompt('A new task');
+  await reopened.review();
+  assert(!reopened.preview.includes(instruction));
 });
 
 for (const scope of ["folder", "vault"]) {

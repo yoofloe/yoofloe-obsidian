@@ -25,6 +25,7 @@ import { InputBudgetModal } from "./input-budget-modal";
 import { calendarChangeCard, calendarChangeToggle, workspaceCalendarChangeToggle } from "./calendar-change-view";
 import { renderCalendarWorkspacePanel } from "./calendar-workspace-panel";
 import { renderChronoHudPanel } from "./chronohud-panel";
+import { ChatCopyControls } from "./chat-copy-view";
 
 export const AI_VIEW = "yoofloe-ai";
 const CALENDAR_STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -56,6 +57,9 @@ export class YoofloeAiView extends ItemView {
   private followUpClosed = false;
   private composing = false;
   private pendingRender = false;
+  private selectingText = false;
+  private stopSelectionWatch: (() => void) | null = null;
+  private readonly chatCopy: ChatCopyControls;
   private libraryOpen = false;
   private libraryEdit: { kind: "conversation" | "folder"; id: string | null; name: string } | null = null;
   private libraryError = "";
@@ -81,12 +85,17 @@ export class YoofloeAiView extends ItemView {
   private savedFollowChat = false;
   private lastSettingsMessage = "";
   private readonly settingsId = `yoofloe-settings-${crypto.randomUUID()}`;
-  constructor(leaf: WorkspaceLeaf, readonly work: AiWorkspace, private readonly options: ViewOptions) { super(leaf); }
+  constructor(leaf: WorkspaceLeaf, readonly work: AiWorkspace, private readonly options: ViewOptions) {
+    super(leaf);
+    this.chatCopy = new ChatCopyControls(() => this.work, this.contentEl,
+      () => [...this.olderChats, ...this.searchResults, ...this.work.chat], () => this.render());
+  }
   getViewType(): string { return AI_VIEW; }
   getDisplayText(): string { return "Yoofloe"; }
   getIcon(): string { return "sparkles"; }
   async onOpen(): Promise<void> {
     this.contentEl.classList.add("yoofloe-ai"); this.unsubscribe = this.work.subscribe(change => {
+      if (this.selectingText || this.chatCopy.selection()) { this.pendingRender = true; this.refreshComposer(); return; }
       if (change === "progress" || this.composing || this.followUpFocused()) {
         if (change === "state") this.pendingRender = true;
         this.refreshProgress();
@@ -94,6 +103,21 @@ export class YoofloeAiView extends ItemView {
     });
     const win = this.contentEl.ownerDocument.defaultView;
     if (win) {
+      const doc = this.contentEl.ownerDocument;
+      const restoreUpdates = () => {
+        if (this.pendingRender && !this.selectingText && !this.chatCopy.selection() && !this.composing && !this.followUpFocused()) {
+          this.pendingRender = false; this.render();
+        }
+      };
+      const endSelection = () => { this.selectingText = false; restoreUpdates(); };
+      doc.addEventListener("selectionchange", restoreUpdates);
+      doc.addEventListener("pointerup", endSelection);
+      doc.addEventListener("pointercancel", endSelection);
+      this.stopSelectionWatch = () => {
+        doc.removeEventListener("selectionchange", restoreUpdates);
+        doc.removeEventListener("pointerup", endSelection);
+        doc.removeEventListener("pointercancel", endSelection);
+      };
       let saved: unknown;
       try { saved = this.app.loadLocalStorage(CHAT_SPLIT_KEY); } catch { /* Use the default split. */ }
       this.durationTimer = win.setInterval(() => this.updateElapsed(), 1000);
@@ -106,6 +130,7 @@ export class YoofloeAiView extends ItemView {
     this.stopViewport = this.watchViewport(); this.render(); await this.work.initialize();
   }
   async onClose(): Promise<void> {
+    this.stopSelectionWatch?.(); this.stopSelectionWatch = null; this.selectingText = false; this.chatCopy.reset();
     this.budgetEpoch++;
     this.contentEl.ownerDocument.defaultView?.clearTimeout(this.budgetTimer);
     this.searchEpoch++; if (this.searchTimer !== undefined) this.contentEl.ownerDocument.defaultView?.clearTimeout(this.searchTimer);
@@ -228,7 +253,17 @@ export class YoofloeAiView extends ItemView {
       const ids = new Set(this.searchResults.map(turn => turn.id)); for (const turn of found.turns) if (!ids.has(turn.id)) { this.searchResults.push(turn); ids.add(turn.id); }
       this.searchNext = found.nextOffset;
     } catch { if (epoch === this.searchEpoch) this.work.message = "Some local conversations could not be searched. Existing files are kept."; }
-    finally { if (epoch === this.searchEpoch && this.work.current) { this.searching = false; this.render(); if (focused) { const input = this.contentEl.querySelector<HTMLInputElement>(".y-ai-chat-search"); input?.focus({ preventScroll: true }); input?.setSelectionRange(input.value.length, input.value.length); } } }
+    finally {
+      if (epoch === this.searchEpoch && this.work.current) {
+        this.searching = false;
+        if (this.selectingText || this.chatCopy.selection()) this.pendingRender = true;
+        else { this.render(); if (focused) { const input = this.contentEl.querySelector<HTMLInputElement>(".y-ai-chat-search"); input?.focus({ preventScroll: true }); input?.setSelectionRange(input.value.length, input.value.length); } }
+      }
+    }
+  }
+  private refreshConversationView(): void {
+    if (this.selectingText || this.chatCopy.selection()) { this.pendingRender = true; this.refreshComposer(); }
+    else this.render();
   }
   private highlight(el: HTMLElement): void {
     const query = this.chatQuery.trim().toLocaleLowerCase(); if (!query) return;
@@ -277,6 +312,7 @@ export class YoofloeAiView extends ItemView {
         const source = this.button(user, selectionLabel(reference), () => new ReferenceModal(this.app, w, reference, this.showFollowUp, turn.referenceSnapshot).open(), false, "y-ai-sent-reference");
         setTooltip(source, "View the reference used for this message");
       }
+      this.chatCopy.decorate(user, turn, "user");
     }
     const assistant = exchange.createDiv({ cls: "y-ai-message y-ai-assistant", attr: { "aria-label": "Assistant response" } });
     const metadata = this.details(assistant, "turn-" + turn.id, "");
@@ -304,10 +340,11 @@ export class YoofloeAiView extends ItemView {
     for (const file of (turn.generated ?? []).slice(0, visibleFiles)) {
       const card = assistant.createDiv({ cls: "y-ai-generated" }); card.createSpan({ text: file.name });
       if (["png", "jpg", "jpeg", "webp"].includes(file.extension)) { const picture = card.createEl("img", { attr: { src: this.app.vault.adapter.getResourcePath(generatedCachePath(this.app.vault.configDir, file)), alt: file.name, loading: "lazy" } }); picture.addEventListener("error", () => { picture.hidden = true; }); picture.addEventListener("load", () => { const scroll = this.contentEl.querySelector(".y-ai-messages"); if (this.followChat && !this.chatQuery && scroll) scroll.scrollTop = scroll.scrollHeight; }); }
-      this.button(card, "Save attachment", () => { void w.saveGeneratedFile(turn.id, file.id).then(saved => { if (saved && this.chatQuery) { const index = this.searchResults.findIndex(item => item.id === saved.id); if (index >= 0) this.searchResults[index] = saved; this.render(); } }); }, w.settingsLocked);
+      this.button(card, "Save attachment", () => { void w.saveGeneratedFile(turn.id, file.id).then(saved => { if (saved && this.chatQuery) { const index = this.searchResults.findIndex(item => item.id === saved.id); if (index >= 0) this.searchResults[index] = saved; this.refreshConversationView(); } }); }, w.settingsLocked);
     }
     if ((turn.generated?.length ?? 0) > visibleFiles) this.button(assistant, "Show more generated files", () => { this.generatedVisible.set(turn.id, visibleFiles + 4); this.render(); });
-    if (turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated || turn.workDetailsTruncated) this.button(assistant, "Load full local conversation", () => { if (!this.chatQuery) void w.loadFullChat(turn.id); else void w.fullChat(turn.id).then(full => { if (full && this.chatQuery) { const index = this.searchResults.findIndex(item => item.id === turn.id); if (index >= 0) this.searchResults[index] = full; this.render(); } }).catch(() => new Notice("The full local conversation could not be loaded.")); });
+    if (turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated || turn.workDetailsTruncated) this.button(assistant, "Load full local conversation", () => { if (!this.chatQuery) void w.loadFullChat(turn.id); else void w.fullChat(turn.id).then(full => { if (full && this.chatQuery) { const index = this.searchResults.findIndex(item => item.id === turn.id); if (index >= 0) this.searchResults[index] = full; this.refreshConversationView(); } }).catch(() => new Notice("The full local conversation could not be loaded.")); });
+    this.chatCopy.decorate(assistant, turn, "assistant");
     this.highlight(exchange.querySelector<HTMLElement>(".y-ai-user") ?? exchange);
     return exchange;
   }
@@ -323,7 +360,10 @@ export class YoofloeAiView extends ItemView {
       this.olderOffset = page.nextOffset;
       this.chatVisible += page.turns.length;
     } catch { new Notice("Earlier messages could not be loaded."); }
-    finally { this.loadingOlder = false; this.render(); }
+    finally {
+      this.loadingOlder = false;
+      this.refreshConversationView();
+    }
   }
   private async chooseConversation(conversation: Conversation): Promise<void> {
     if (conversation.archived && !await this.work.changeConversation(conversation.id, { archived: false })) return;
@@ -451,6 +491,7 @@ export class YoofloeAiView extends ItemView {
   }
   private updateWorkHeading(metadata: HTMLElement, turn: ChatTurn): void {
     const label = turn.status === "running" && this.work.stopping ? "Stopping…" :
+      turn.status === "paused" && turn.pausedForConnection ? "Paused for connection" :
       turn.status === "paused" && turn.pausedForInput ? "Paused at input verification" :
       turn.status === "failed" && confirmedChangeCount(turn) > 0 ? "Changes saved · Could not finish" : WORK_STATUS[turn.status];
     metadata.querySelector(".y-ai-work-label")?.setText(label);
@@ -859,6 +900,7 @@ export class YoofloeAiView extends ItemView {
     this.pendingRender = false; this.queueSignature = "";
     const w = this.work, el = this.contentEl;
     if (this.lastConversationId !== w.library.active) {
+      this.chatCopy.reset();
       this.lastConversationId = w.library.active; this.olderChats = []; this.olderOffset = 0; this.chatVisible = 10;
       this.followUpClosed = false;
     }
@@ -902,7 +944,17 @@ export class YoofloeAiView extends ItemView {
     search.addEventListener("input", () => { this.chatQuery = search.value; this.searchEpoch++; const win = el.ownerDocument.defaultView; win?.clearTimeout(this.searchTimer); this.searchTimer = win?.setTimeout(() => { void this.searchConversation(); }, 250); });
     search.addEventListener("keydown", event => { if (event.key === "Escape") { this.chatQuery = ""; void this.searchConversation(); } });
     if (this.chatQuery) { const clear = this.button(searchBar, "", () => { this.chatQuery = ""; void this.searchConversation(); }, false, "clickable-icon"); clear.setAttribute("aria-label", "Clear conversation search"); setIcon(clear, "x"); }
+    const conversationActions = searchBar.createEl("button", { cls: "clickable-icon", attr: { type: "button", "aria-label": "Conversation actions" } });
+    setIcon(conversationActions, "ellipsis"); setTooltip(conversationActions, "Conversation actions");
+    conversationActions.addEventListener("click", event => this.chatCopy.menu(event));
+    this.chatCopy.renderToolbar(chatPanel);
     const messages = chatPanel.createDiv({ cls: "y-ai-messages", attr: { "aria-label": "Scrollable conversation", tabindex: "0" } });
+    messages.addEventListener("pointerdown", event => {
+      const target = event.target as HTMLElement;
+      if (event.button === 0 && target.closest(".y-ai-chat") && !target.closest("button,input,summary,a")) {
+        this.selectingText = true; this.followChat = false;
+      }
+    });
     messages.addEventListener("wheel", () => { this.followChat = false; }, { passive: true }); messages.addEventListener("touchstart", () => { this.followChat = false; }, { passive: true });
     const divider = el.createDiv({ cls: "y-ai-split-handle", attr: { hidden: "", role: "separator", tabindex: "0", "aria-orientation": "horizontal", "aria-controls": chatId, "aria-label": "Conversation height" } });
     setTooltip(divider, "Drag to resize or use the arrow keys. Double-click to reset.");
@@ -1001,10 +1053,6 @@ export class YoofloeAiView extends ItemView {
     if (w.busy || feedback && (!w.task || w.task.state !== "completed" || w.message !== w.task.message)) {
       const status = (this.settingsExpanded ? scroll : messages).createEl("p", { text: feedback, cls: this.settingsExpanded ? "y-ai-status y-ai-settings-status" : "y-ai-status", attr: { role: "status", "aria-live": "polite" } });
       if (this.settingsExpanded) scroll.prepend(status);
-    }
-    if (w.result) {
-      const resultActions = messages.createDiv({ cls: "y-ai-result-actions" });
-      this.button(resultActions, "Copy Markdown", () => { void navigator.clipboard.writeText(w.result).then(() => new Notice("Markdown copied"), () => new Notice("Copy was unavailable; the result is kept.")); });
     }
     if (w.agent?.pendingTrash.length) {
       const trash = scroll.createDiv({ cls: "y-ai-card" }); trash.createEl("strong", { text: "Review before moving to trash" });

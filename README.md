@@ -28,6 +28,7 @@ At a finite boundary the task pauses. Increase the **total** limit or choose no 
 the same model, original scopes, tool results and cumulative usage. Completed writes are not replayed. **Finish here**
 ends continuation without sending another request. Continuation is available while the current vault session stays open;
 closing/restarting the app keeps saved answers and completed changes but does not automatically resume requests.
+If an OpenAI host lookup failure pauses the task, restore the connection and choose **Continue** in that vault session.
 
 Opening the first note connects it to a conversation that has no note, even when an earlier answer or unsent draft is present.
 Once a note is connected, browsing another note offers **Use opened note** above the conversation; it never silently switches the active task.
@@ -42,6 +43,14 @@ Choose **Expand settings** to give the settings the full available panel height,
 Model and permission cards sit below it; Calendar, activity, privacy and recovery remain compact.
 Conversation search is local: it searches saved requests, answers and attachment names, highlights matches,
 and pages through older archived conversations without an AI request. Previews remain bounded for mobile performance.
+Follow-ups in the same conversation retain recent user directions when you connect another document or change models.
+For example, after asking for Polish readings in parentheses, choose another note and ask to do the same there.
+The current note and Access settings govern the new task. Recent directions use a bounded local context budget.
+
+Open the conversation’s **Conversation actions** menu to **Copy conversation** or **Select messages**.
+Choose individual requests and responses, then **Copy selected**. The copy button on a response copies its Markdown.
+Drag across conversation text and right-click **Copy** for a partial selection. Touch devices support text selection
+and the message selection controls. Full and selected message copies load their saved original text, including older messages.
 The conversation shows user requests, assistant answers, actual confirmed operations, sources and returned files.
 
 The task reads relevant excerpts as needed within your chosen data scope; it does not upload the whole vault upfront.
