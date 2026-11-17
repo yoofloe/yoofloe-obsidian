@@ -9,7 +9,7 @@
     "build": "node esbuild.config.mjs production",
     "check": "tsc --noEmit",
     "lint": "eslint calendar-companion/src src/main.ts manifest.json calendar-companion/manifest.json package.json --max-warnings 0",
-    "security:audit": "npm audit --audit-level=high"
+    "security:audit": "node scripts/audit-dependencies.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.14.1",

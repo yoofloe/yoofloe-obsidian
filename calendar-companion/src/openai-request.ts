@@ -87,7 +87,7 @@ export async function requestOpenAiRound(
     const message = `OpenAI request ${number} ${failure}.`;
     if (failure === DNS_FAILURE && confirmedOpenAiLookupFailure(error))
       throw new OpenAiDnsLookupError(`${message} (${traceText(trace)})`);
-    throw Error(`${message} No retry was made. The request may still incur charges. (${traceText(trace)})`);
+    throw Error(`${message} No retry was made by the plugin. The request may still incur charges. (${traceText(trace)})`);
   }
   return { response, trace: traceText(trace, response) };
 }

@@ -4,7 +4,7 @@ const terminalStatus = new Map([
 ]);
 
 function unconfirmed(): Error {
-  return Error("The OpenAI stream ended before the result was confirmed. No retry was made. The request may still incur charges.");
+  return Error("The OpenAI stream ended before the result was confirmed. No retry was made by the plugin. The request may still incur charges.");
 }
 
 function finalEvent(name: string, lines: string[]): string | undefined {
