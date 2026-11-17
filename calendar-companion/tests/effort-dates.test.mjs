@@ -9,6 +9,11 @@ test('thinking depth is model-aware, retains economical defaults and never probe
  assert.equal(resolveEffort('gpt-6-luna'),'none');assert.equal(resolveEffort('gpt-6-astra'),'low');assert.equal(resolveEffort('custom-model'),undefined);
  assert.equal(supportedEfforts('gpt-6-luna').at(-1),'max');assert(!supportedEfforts('gpt-6.1-sol').includes('none'));
  assert.throws(()=>resolveEffort('gpt-6-astra','none'));assert.throws(()=>resolveEffort('custom-model','high'));
+ for (const model of ['gpt-6.2-sol', 'gpt-6.2-astra']) {
+   assert.deepEqual(supportedEfforts(model), ['low', 'medium', 'high', 'xhigh', 'max']);
+   assert.equal(resolveEffort(model, 'xhigh'), 'xhigh');
+   assert.throws(() => resolveEffort(model, 'none'));
+ }
  let keyReads=0,calls=0;
  const s=new AiSession({current:()=>true,key:async()=>{keyReads++;return 'sk-synthetic-effort-test';},adapters:[OPENAI_ADAPTER],transport:async()=>{calls++;throw Error('not called');}});s.enableForSession(true);
  const record={kind:'note',title:'a',text:'Text',date:null};

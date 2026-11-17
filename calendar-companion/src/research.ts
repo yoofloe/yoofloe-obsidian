@@ -8,7 +8,9 @@ export interface OnlineUsage { search: number; analysis: number; image: number }
 export const emptyOnlineUsage = (): OnlineUsage => ({ search: 0, analysis: 0, image: 0 });
 export function readSourceMode(value: unknown): SourceMode { return value === "provided" ? "provided" : "expanded"; }
 /** Unknown Custom models keep ordinary function tools; hosted capabilities are never guessed. */
-export function supportsHostedTools(model: string): boolean { return ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra"].includes(model); }
+export function supportsHostedTools(model: string): boolean {
+  return ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6.2-sol", "gpt-6.2-astra"].includes(model);
+}
 export function requestText(input: string): string { try { const value: unknown = JSON.parse(input); return value && typeof value === "object" && typeof (value as Record<string, unknown>).request === "string" ? (value as { request: string }).request : ""; } catch { return input; } }
 export function effectiveSourceMode(mode: SourceMode, request: string): SourceMode {
   if (mode === "provided") return mode;

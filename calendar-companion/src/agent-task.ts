@@ -188,6 +188,7 @@ export class AgentTask {
   }
   get canResume(): boolean { return this.state === "paused" && !this.stopped && !this.busy && this.options.current(); }
   get modelId(): string { return this.model.model; }
+  get modelOptions(): Readonly<AiModelOptions> { return { ...this.model }; }
   get onlineCalls(): number { return this.online.search + this.online.analysis + this.online.image; }
   restoreSummary(summary: { requests: number; model?: unknown; usage?: unknown }): void {
     if (this.busy || this.state !== "idle") throw Error("Only a saved display summary can be restored.");

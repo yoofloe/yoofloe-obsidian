@@ -25,6 +25,56 @@ function fixture() {
   };
   return { work: new AiWorkspace(options), options, host, files, journals, saved: () => saved, calls: () => calls, keyReads: () => keyReads };
 }
+test('a model change retains a supported depth and saves Model default for an incompatible depth', async () => {
+  const f = fixture();
+  await f.work.initialize();
+  await f.work.setModel({ model: 'gpt-6-luna', effort: 'none' });
+  await f.work.setModel({ model: 'gpt-6.1-terra' });
+  assert.deepEqual(f.work.model, { model: 'gpt-6.1-terra', effort: 'none' });
+  await f.work.setModel({ model: 'gpt-6.1-sol' });
+  assert.deepEqual(f.work.model, { model: 'gpt-6.1-sol', effort: 'default' });
+  const reopened = new AiWorkspace(f.options);
+  await reopened.initialize();
+  assert.deepEqual(reopened.model, f.work.model);
+  assert.equal(f.calls(), 0);
+  assert.equal(f.keyReads(), 0);
+});
+test('a pending model save protects the next request and a failed save preserves the last selection', async () => {
+  const f = fixture(), pending = deferred(), requests = [];
+  let saves = 0;
+  f.options.preferences.save = async () => { saves++; await pending.promise; };
+  f.options.transport = async request => {
+    requests.push(JSON.parse(request.body));
+    return response([{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Verified.' }] }]);
+  };
+  await f.work.initialize();
+  f.work.mode = 'ask';
+  f.work.setPrompt('Keep this draft');
+  const saving = f.work.setModel({ model: 'gpt-6.1-sol', effort: 'xhigh' });
+  assert.equal(f.work.modelSaving, true);
+  await f.work.setModel({ model: 'gpt-6-astra' });
+  await f.work.run();
+  assert.equal(saves, 1);
+  assert.equal(requests.length, 0);
+  assert.equal(f.work.model.model, 'gpt-6-luna');
+  f.work.setPrompt('Keep this updated draft');
+  pending.resolve();
+  await saving;
+  assert.equal(f.work.prompt, 'Keep this updated draft');
+  assert.equal(f.work.modelSaving, false);
+  await f.work.run();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].model, 'gpt-6.1-sol');
+  assert.equal(requests[0].reasoning.effort, 'xhigh');
+  f.work.setPrompt('Keep the next draft too');
+  f.options.preferences.save = () => Promise.reject(Error('synthetic save failure'));
+  await f.work.setModel({ model: 'gpt-6-luna' });
+  assert.deepEqual(f.work.model, { model: 'gpt-6.1-sol', effort: 'xhigh' });
+  assert.equal(f.work.prompt, 'Keep the next draft too');
+  assert.match(f.work.message, /Model settings could not be saved/);
+  assert.equal(f.work.modelSaving, false);
+  assert.equal(requests.length, 1);
+});
 test('saving a generated attachment updates the full archive and also works for older search-only turns',async()=>{
  const f=fixture(),assets=new Map();f.host.assetHash=async path=>assets.get(path)??null;f.host.createAsset=async(file,path)=>assets.set(path,file.sha256);
  const generated=Array.from({length:40},(_,i)=>({id:crypto.randomUUID(),name:`file${i}.png`,extension:'png',bytes:10,sha256:'a'.repeat(64)}));

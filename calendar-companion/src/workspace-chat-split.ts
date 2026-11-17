@@ -70,7 +70,7 @@ export class WorkspaceChatSplit {
     if (!p) return;
     const previous = this.bounds;
     this.bounds = null;
-    const singlePane = ["y-ai-keyboard", "y-ai-compact", "y-ai-settings-expanded"].some(cls => this.root.classList.contains(cls));
+    const singlePane = ["y-ai-keyboard", "y-ai-compact", "y-ai-settings-expanded", "y-ai-chat-expanded"].some(cls => this.root.classList.contains(cls));
     if (!singlePane && this.root.clientWidth > 0) {
       const dock = this.win.getComputedStyle(p.dock);
       const dividerHeight = parseFloat(this.win.getComputedStyle(p.divider).getPropertyValue("--y-ai-divider-size"));

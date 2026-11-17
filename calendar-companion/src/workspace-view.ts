@@ -1,8 +1,6 @@
 import { Component, ItemView, MarkdownRenderer, Notice, Platform, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
 import { AiWorkspace } from "./workspace";
 import { MODE_LABELS, SCOPE_LABELS, WRITE_SCOPE_LABELS } from "./agent-policy";
-import { EFFORT_LABELS, resolveEffort, supportedEfforts } from "./effort";
-import { modelCatalog } from "./ai-models";
 import { AREA_LABELS, PERIOD_LABELS } from "./question-query";
 import { safeNoteMarkdown } from "./note-context";
 import { VaultFolderPicker } from "./folder-picker";
@@ -10,7 +8,7 @@ import { availableViewHeight } from "./view-bounds";
 import { WorkspaceChatSplit } from "./workspace-chat-split";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, CONTROL_NOTICE, PRIVACY_URL, OPENAI_DATA_URL } from "./privacy-copy";
 import { customRequestLimit, requestLimitLabel } from "./request-limit";
-import { SOURCE_MODES, supportsHostedTools } from "./research";
+import { SOURCE_MODES } from "./research";
 import { generatedCachePath } from "./generated-files";
 import { ATTACHMENT_LIMIT_LABEL, PASTED_TEXT_THRESHOLD } from "./attachments";
 import { FOLLOW_UP_LIMIT, FOLLOW_UP_TEXT_LIMIT, type FollowUpMode } from "./follow-ups";
@@ -26,6 +24,7 @@ import { calendarChangeCard, calendarChangeToggle, workspaceCalendarChangeToggle
 import { renderCalendarWorkspacePanel } from "./calendar-workspace-panel";
 import { renderChronoHudPanel } from "./chronohud-panel";
 import { ChatCopyControls } from "./chat-copy-view";
+import { ComposerModelControls } from "./composer-model-controls";
 
 export const AI_VIEW = "yoofloe-ai";
 const CALENDAR_STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -44,6 +43,7 @@ const ACTIVITY_LABEL = { working: "In progress", done: "Done", waiting: "Waiting
 const QUEUE_STATUS = { queued: "Queued", "steer-pending": "Waiting to steer", sending: "Sending", review: "Review before sending" };
 const CHAT_SPLIT_KEY = "yoofloe-ai-chat-split";
 type ViewOptions = { settings(): void; chooseNote(): void; hide(): void };
+type ViewLayout = "split" | "chat" | "settings";
 /** One compact, theme-native surface shared by desktop and mobile. No data is read on view construction. */
 export class YoofloeAiView extends ItemView {
   private unsubscribe: (() => void) | null = null;
@@ -60,6 +60,7 @@ export class YoofloeAiView extends ItemView {
   private selectingText = false;
   private stopSelectionWatch: (() => void) | null = null;
   private readonly chatCopy: ChatCopyControls;
+  private readonly modelControls: ComposerModelControls;
   private libraryOpen = false;
   private libraryEdit: { kind: "conversation" | "folder"; id: string | null; name: string } | null = null;
   private libraryError = "";
@@ -80,7 +81,7 @@ export class YoofloeAiView extends ItemView {
   private searchEpoch = 0;
   private searchTimer: number | undefined;
   private generatedVisible = new Map<string, number>();
-  private settingsExpanded = false;
+  private layout: ViewLayout = "split";
   private savedChatScroll = 0;
   private savedFollowChat = false;
   private lastSettingsMessage = "";
@@ -89,6 +90,7 @@ export class YoofloeAiView extends ItemView {
     super(leaf);
     this.chatCopy = new ChatCopyControls(() => this.work, this.contentEl,
       () => [...this.olderChats, ...this.searchResults, ...this.work.chat], () => this.render());
+    this.modelControls = new ComposerModelControls(this.contentEl, () => this.work, () => this.options.settings());
   }
   getViewType(): string { return AI_VIEW; }
   getDisplayText(): string { return "Yoofloe"; }
@@ -130,6 +132,7 @@ export class YoofloeAiView extends ItemView {
     this.stopViewport = this.watchViewport(); this.render(); await this.work.initialize();
   }
   async onClose(): Promise<void> {
+    this.modelControls.close();
     this.stopSelectionWatch?.(); this.stopSelectionWatch = null; this.selectingText = false; this.chatCopy.reset();
     this.budgetEpoch++;
     this.contentEl.ownerDocument.defaultView?.clearTimeout(this.budgetTimer);
@@ -187,17 +190,34 @@ export class YoofloeAiView extends ItemView {
     select.addEventListener("change", () => { change(select.value as T); this.work.preview = ""; this.saveSoon(); }); return select;
   }
   private actionReady(): boolean {
-    const w = this.work; return !w.busy && !w.addingAttachments && w.ready && w.configured && !w.limitProblem && (w.canContinue ? w.canResumeWithLimit : w.hasDraft);
+    const w = this.work; return !w.busy && !w.modelSaving && !w.addingAttachments && w.ready && w.configured && !w.limitProblem && (w.canContinue ? w.canResumeWithLimit : w.hasDraft);
   }
-  private toggleSettings(): void {
-    if (!this.settingsExpanded) {
+  private get settingsExpanded(): boolean { return this.layout === "settings"; }
+  private toggleLayout(section: Exclude<ViewLayout, "split">): void {
+    const next = this.layout === section && !this.libraryOpen ? "split" : section;
+    if (next === "settings" && !this.settingsExpanded && !this.libraryOpen) {
       const messages = this.contentEl.querySelector<HTMLElement>(".y-ai-messages");
       this.savedChatScroll = messages?.scrollTop ?? 0;
       this.savedFollowChat = !!messages && messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 32;
     }
-    this.settingsExpanded = !this.settingsExpanded; this.render();
-    const toggle = !this.settingsExpanded && this.contentEl.classList.contains("y-ai-compact") ? ".y-ai-header-expand" : ".y-ai-settings-toggle";
-    this.contentEl.querySelector<HTMLButtonElement>(toggle)?.focus({ preventScroll: true });
+    this.layout = next;
+    this.libraryOpen = false;
+    this.render();
+    this.contentEl.querySelector<HTMLButtonElement>(`[data-view-layout="${section}"]`)?.focus({ preventScroll: true });
+  }
+  private viewControls(header: HTMLElement, chatId: string): void {
+    const group = header.createDiv({ cls: "y-ai-view-controls", attr: { role: "group", "aria-label": "Workspace view" } });
+    for (const section of ["chat", "settings"] as const) {
+      const active = this.layout === section && !this.libraryOpen;
+      const label = active ? "Show conversation and settings" : section === "chat" ? "Expand conversation" : "Expand settings";
+      const button = this.button(group, "", () => this.toggleLayout(section), false, "clickable-icon");
+      button.dataset.viewLayout = section;
+      button.setAttribute("aria-label", label);
+      button.setAttribute("aria-controls", section === "chat" ? chatId : this.settingsId);
+      button.setAttribute("aria-pressed", String(active));
+      setTooltip(button, label);
+      setIcon(button, section === "chat" ? "message-square" : "settings");
+    }
   }
   private refreshLimitDisclosure(): void {
     const w = this.work, label = requestLimitLabel(w.maximum);
@@ -636,6 +656,7 @@ export class YoofloeAiView extends ItemView {
   private apiLimit(): string { return this.work.maximum === "none" ? "No request limit" : requestLimitLabel(this.work.maximum); }
   private refreshComposer(): void {
     const el = this.contentEl, w = this.work;
+    this.modelControls.refresh();
     const followUp = el.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input");
     if (followUp) followUp.readOnly = w.followUpSaving;
     const run = el.querySelector<HTMLButtonElement>(".y-ai-send");
@@ -663,7 +684,7 @@ export class YoofloeAiView extends ItemView {
     el.querySelectorAll<HTMLButtonElement>(".y-ai-submit-follow-up").forEach(submit => {
       const mode = submit.dataset.followUp;
       submit.classList.toggle("mod-cta", mode === w.followUpDefault);
-      submit.disabled = w.calendarDraftActive || w.followUpSaving || w.addingAttachments || !w.followUpDraft.trim() || w.stopping ||
+      submit.disabled = w.calendarDraftActive || w.modelSaving || w.followUpSaving || w.addingAttachments || !w.followUpDraft.trim() || w.stopping ||
         w.followUps.length >= FOLLOW_UP_LIMIT && !w.editingFollowUpId || mode === "steer" && !w.canSteer;
     });
   }
@@ -788,7 +809,7 @@ export class YoofloeAiView extends ItemView {
     this.openDetails.add(app);
     this.libraryOpen = false;
     if (this.settingsExpanded) this.render();
-    else this.toggleSettings();
+    else this.toggleLayout("settings");
     this.contentEl.querySelector(".y-ai-app-context-title")?.scrollIntoView({ block: "start" });
   }
   private appContext(parent: HTMLElement): void {
@@ -916,8 +937,10 @@ export class YoofloeAiView extends ItemView {
     const selectionStart = settingsFocus && "selectionStart" in activeField! ? (activeField as HTMLInputElement).selectionStart : null;
     const selectionEnd = settingsFocus && "selectionEnd" in activeField! ? (activeField as HTMLInputElement).selectionEnd : null;
     el.classList.toggle("y-ai-settings-expanded", this.settingsExpanded);
+    el.classList.toggle("y-ai-chat-expanded", this.layout === "chat");
     const oldSearch = el.querySelector<HTMLInputElement>(".y-ai-chat-search"), searchFocused = el.ownerDocument.activeElement === oldSearch, searchCursor = oldSearch?.selectionStart ?? this.chatQuery.length;
     const follow = this.settingsExpanded || wasExpanded ? this.savedFollowChat : !previousScroll && w.chat.length > 0 || w.busy && w.chat.length > this.lastChatCount || !!previousScroll && previousScroll.scrollTop + previousScroll.clientHeight >= previousScroll.scrollHeight - 32; this.lastChatCount = w.chat.length; this.followChat = follow;
+    this.modelControls.close();
     this.rendering?.unload(); this.rendering = new Component(); this.rendering.load(); el.empty();
     const header = el.createDiv({ cls: "y-ai-header" }), title = header.createDiv({ cls: "y-ai-heading" });
     title.createEl("h2", { text: "Yoofloe" }); const noteContext = title.createEl("p", { text: `${w.source?.selection && w.readScope === "current" ? "Selected text · " : ""}${w.title}`, attr: { "aria-live": "polite" } });
@@ -927,8 +950,9 @@ export class YoofloeAiView extends ItemView {
     library.setAttribute("aria-label", "Manage conversations"); setTooltip(library, "Manage conversations"); library.setAttribute("aria-expanded", String(this.libraryOpen)); setIcon(library, "messages-square");
     const fresh = this.button(header, "", () => void this.createConversation(), !w.canSwitchConversation || w.library.conversations.length >= MAX_CONVERSATIONS, "clickable-icon");
     fresh.setAttribute("aria-label", "New conversation"); setTooltip(fresh, "New conversation"); setIcon(fresh, "square-pen");
-    const settings = this.button(header, "", () => this.options.settings(), w.settingsLocked, "clickable-icon"); settings.setAttribute("aria-label", "Yoofloe settings"); setTooltip(settings, "Yoofloe settings"); setIcon(settings, "settings-2");
-    const compactExpand = this.button(header, "", () => this.toggleSettings(), false, "clickable-icon y-ai-header-expand"); compactExpand.setAttribute("aria-label", "Expand settings"); compactExpand.setAttribute("aria-controls", this.settingsId); compactExpand.setAttribute("aria-expanded", String(this.settingsExpanded)); setTooltip(compactExpand, "Expand settings"); setIcon(compactExpand, "maximize-2");
+    const settings = this.button(header, "", () => this.options.settings(), w.settingsLocked || w.modelSaving, "clickable-icon"); settings.setAttribute("aria-label", "Yoofloe settings"); setTooltip(settings, "Yoofloe settings"); setIcon(settings, "settings-2");
+    const chatId = `${this.settingsId}-chat`;
+    this.viewControls(header, chatId);
     const hide = this.button(header, "", () => this.options.hide(), false, "clickable-icon"); hide.setAttribute("aria-label", "Hide Yoofloe"); setTooltip(hide, "Hide Yoofloe"); setIcon(hide, "panel-right-close");
     if (this.libraryOpen) this.renderLibrary(el);
     if (w.nextSource) {
@@ -937,7 +961,6 @@ export class YoofloeAiView extends ItemView {
       const attach = this.button(context, candidate.selection ? "Use selection" : "Use opened note", () => w.attachNote(candidate), w.settingsLocked, "mod-cta");
       setTooltip(attach, w.settingsLocked ? "Finish or stop the current task before changing its note" : "Connect this note without clearing the conversation or draft");
     }
-    const chatId = `${this.settingsId}-chat`;
     const chatPanel = el.createEl("section", { cls: "y-ai-chat-panel", attr: { id: chatId, "aria-label": "Yoofloe conversation" } });
     const searchBar = chatPanel.createDiv({ cls: "y-ai-search-bar" }), searchIcon = searchBar.createSpan({ cls: "y-ai-search-icon" }); setIcon(searchIcon, "search");
     const search = searchBar.createEl("input", { value: this.chatQuery, cls: "y-ai-chat-search", attr: { type: "search", placeholder: "Search conversations", "aria-label": "Search conversations", autocomplete: "off" } }); search.maxLength = 200;
@@ -960,8 +983,6 @@ export class YoofloeAiView extends ItemView {
     setTooltip(divider, "Drag to resize or use the arrow keys. Double-click to reset.");
     const settingsBar = el.createDiv({ cls: "y-ai-settings-bar" }); settingsBar.createEl("strong", { text: "Workspace settings" });
     if (this.settingsExpanded && (w.canStop || w.stopping)) this.button(settingsBar, w.stopping ? "Stopping…" : "Stop", () => w.stop(), !w.canStop, "y-ai-settings-stop mod-warning");
-    const expand = this.button(settingsBar, this.settingsExpanded ? "Back to chat" : "Expand settings", () => this.toggleSettings(), false, "y-ai-settings-toggle");
-    expand.setAttribute("aria-expanded", String(this.settingsExpanded)); expand.setAttribute("aria-controls", this.settingsId);
     const scroll = el.createDiv({ cls: "y-ai-scroll", attr: { id: this.settingsId, "aria-label": "Workspace settings" } });
     if (!w.configured && w.ready) {
       const intro = scroll.createDiv({ cls: "y-ai-setup" }), copy = intro.createDiv({ cls: "y-ai-setup-copy" });
@@ -969,20 +990,6 @@ export class YoofloeAiView extends ItemView {
       this.button(intro, "Set up", () => this.options.settings(), false, "mod-cta");
     }
     const primarySettings = scroll.createDiv({ cls: "y-ai-settings-grid" }), secondarySettings = scroll.createDiv({ cls: "y-ai-settings-secondary" });
-    const modelSettings = this.details(primarySettings, "model-settings", "Model");
-    const selectedModel = modelCatalog("openai").models.find(item => item.id === w.model.model);
-    this.settingSummary(modelSettings, "Model", selectedModel?.label.split(" · ")[0] ?? w.model.model ?? "Choose a model", "sparkles");
-    const models = modelSettings.createDiv({ cls: "y-ai-models" }), choices: Record<string, string> = {};
-    for (const model of modelCatalog("openai").models) choices[model.id] = model.label;
-    if (w.model.model && !choices[w.model.model]) choices[w.model.model] = `Custom · ${w.model.model}`;
-    choices.__custom__ = "Custom model…";
-    const model = this.select(models, "Model", choices, w.model.model, value => { if (value === "__custom__") this.options.settings(); else void w.setModel({ model: value }); });
-    setTooltip(model, choices[w.model.model] ?? w.model.model);
-    if (w.model.model && !supportsHostedTools(w.model.model)) modelSettings.createEl("p", { text: "Hosted web, analysis and image tools are not enabled for this custom model because support is unconfirmed. Choose a listed model for those tools. Text and permitted note actions remain available.", cls: "y-ai-hint" });
-    const efforts: Record<string, string> = { default: EFFORT_LABELS.default };
-    for (const effort of supportedEfforts(w.model.model)) efforts[effort] = EFFORT_LABELS[effort];
-    this.select(models, "Thinking depth", efforts, w.model.effort ?? resolveEffort(w.model.model) ?? "default", value => { void w.setModel({ ...w.model, effort: value }); });
-    models.createEl("p", { text: w.model.model, cls: "y-ai-model-id", attr: { "aria-label": "Selected model ID" } });
     if (w.canContinue) {
       const pause = scroll.createDiv({ cls: "y-ai-card" }); pause.createEl("strong", { text: `Paused · ${w.task?.requests ?? 0} request(s) used` });
       pause.createEl("p", { text: `Continue with the original model (${w.task?.modelId ?? w.model.model}) and original data/change scopes. Earlier tool results and completed changes are reused, not replayed. Continuation is available while this vault session stays open.`, cls: "y-ai-hint" });
@@ -1099,7 +1106,8 @@ export class YoofloeAiView extends ItemView {
     const compose = dock.createDiv({ cls: "y-ai-compose" });
     const prompt = compose.createEl("textarea", { text: w.prompt, cls: "y-ai-primary-prompt", attr: { rows: "1", "aria-label": "Ask", placeholder: "Ask…" } });
     prompt.disabled = w.settingsLocked && !w.addingAttachments; prompt.maxLength = 32000;
-    const controls = dock.createDiv({ cls: `y-ai-row${w.busy ? " y-ai-running-controls" : ""}` });
+    const controls = dock.createDiv({ cls: `y-ai-row y-ai-composer-controls${followUp ? " y-ai-follow-up-controls" : ""}${w.busy ? " y-ai-running-controls" : ""}` });
+    this.modelControls.render(controls);
     const picker = controls.createEl("input", { attr: { type: "file", multiple: "", "aria-label": "Choose attachments" } }); picker.hidden = true;
     picker.addEventListener("change", () => { const files = Array.from(picker.files ?? []); picker.value = ""; void w.addAttachments(files, undefined, undefined, followUp); });
     const attach = this.button(controls, "", () => picker.click(), !w.canChangeReference || w.addingAttachments, "y-ai-attach clickable-icon"); attach.setAttribute("aria-label", "Attach images, files or audio"); setTooltip(attach, ATTACHMENT_LIMIT_LABEL); setIcon(attach, "plus");
