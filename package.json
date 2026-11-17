@@ -1,6 +1,6 @@
 {
   "name": "obsidian-yoofloe",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Research, write and organize Markdown with your own OpenAI key. Optional Calendar and ChronoHUD context on Android. Visit www.yoofloe.com.",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "build": "node esbuild.config.mjs production",
     "check": "tsc --noEmit",
     "lint": "eslint calendar-companion/src src/main.ts manifest.json calendar-companion/manifest.json package.json --max-warnings 0",
-    "security:audit": "npm audit --audit-level=high"
+    "security:audit": "node scripts/audit-dependencies.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.14.1",

@@ -10,6 +10,7 @@ interface RequestTrace {
   clientId: string;
   bytes: number;
   started: number;
+  streamed: boolean;
 }
 
 function stringField(error: Record<string, unknown>, name: string): string {
@@ -63,7 +64,7 @@ function traceText(trace: RequestTrace, response?: AiHttpResponse): string {
   const requestId = header(response?.headers, "x-request-id");
   const processing = header(response?.headers, "openai-processing-ms");
   const elapsed = Math.max(0, Math.round(performance.now() - trace.started));
-  const parts = ["Obsidian HTTP", `${elapsed} ms`, `${trace.bytes} B`];
+  const parts = [trace.streamed ? "Obsidian HTTP stream" : "Obsidian HTTP", `${elapsed} ms`, `${trace.bytes} B`];
   if (response) parts.push(`HTTP ${response.status}`);
   parts.push(`client ID ${trace.clientId}`);
   // Keep the local ID when a proxy or the provider supplies an unexpected header.
@@ -74,9 +75,9 @@ function traceText(trace: RequestTrace, response?: AiHttpResponse): string {
 
 /** Only the outbound request carries the key and input. Activity records use bounded metadata. */
 export async function requestOpenAiRound(
-  transport: AiTransport, body: string, key: string, number: number, bytes: number,
+  transport: AiTransport, body: string, key: string, number: number, bytes: number, streamed = false,
 ): Promise<{ response: AiHttpResponse; trace: string }> {
-  const trace = { clientId: crypto.randomUUID(), bytes, started: performance.now() };
+  const trace = { clientId: crypto.randomUUID(), bytes, started: performance.now(), streamed };
   let response: AiHttpResponse;
   try {
     response = await transport({ url: OPENAI_ENDPOINT, method: "POST", contentType: "application/json", body, throw: false,
@@ -86,7 +87,7 @@ export async function requestOpenAiRound(
     const message = `OpenAI request ${number} ${failure}.`;
     if (failure === DNS_FAILURE && confirmedOpenAiLookupFailure(error))
       throw new OpenAiDnsLookupError(`${message} (${traceText(trace)})`);
-    throw Error(`${message} No retry was made. The request may still incur charges. (${traceText(trace)})`);
+    throw Error(`${message} No retry was made by the plugin. The request may still incur charges. (${traceText(trace)})`);
   }
   return { response, trace: traceText(trace, response) };
 }
