@@ -38,7 +38,7 @@ export class WorkspaceChatSplit {
 
   constructor(
     private readonly root: HTMLElement,
-    private readonly win: Window & typeof globalThis,
+    private readonly win: NonNullable<Document["defaultView"]>,
     saved: unknown,
     private readonly save: (ratio: number | null) => void,
     private readonly followConversation: () => boolean,

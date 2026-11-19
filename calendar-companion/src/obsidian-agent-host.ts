@@ -15,7 +15,26 @@ export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean
   };
   const read = async (file: AgentFile) => { const item = fileFor(file), editor = editorFor(item); const value = editor ? editor.getValue() : await vault.read(item); fileFor(file); return editorFor(item)?.getValue() ?? value; };
   return {
-    files: () => { guard(); return vault.getMarkdownFiles().map(record); },
+    file: path => {
+      guard();
+      const item = vault.getFileByPath(path);
+      return item?.path === path && item.extension.toLowerCase() === "md" ? record(item) : undefined;
+    },
+    files: folder => {
+      guard();
+      if (folder === undefined) return vault.getMarkdownFiles().map(record);
+      const root = folder ? vault.getFolderByPath(folder) : vault.getRoot();
+      if (!root || folder && root.path !== folder) return [];
+      const notes: AgentFile[] = [];
+      const visit = (directory: TFolder) => {
+        for (const item of directory.children) {
+          if (item instanceof TFolder) visit(item);
+          else if (item instanceof TFile && item.extension.toLowerCase() === "md") notes.push(record(item));
+        }
+      };
+      visit(root);
+      return notes;
+    },
     isCurrentNote: file => { try { fileFor(file); return true; } catch { return false; } },
     read: async file => { try { return await read(file); } catch { return null; } },
     async replace(file, expected, text) {

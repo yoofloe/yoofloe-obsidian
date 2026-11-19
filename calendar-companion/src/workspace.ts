@@ -1,5 +1,5 @@
 import { AgentTask, AGENT_INSTRUCTION, type AgentExecutor, type CalendarDraftTool, type SteerStatus } from "./agent-task";
-import { VaultAgent, type AgentHost, type WorkJournal } from "./vault-agent";
+import { agentFileAt, VaultAgent, type AgentHost, type WorkJournal } from "./vault-agent";
 import { allowedPath, validTaskPath, containsCredential, safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
 import type { AiPreferences } from "./ai-preferences";
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport } from "./ai-session";
@@ -502,10 +502,14 @@ export class AiWorkspace {
     if (sourceChanged && !this.outputFolder && !this.outputFolderChosen) this.outputFolder = source?.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
     this.preview = ""; this.changed();
   }
+  private canConnectNote(path: string): boolean {
+    const policy = { ...this.policy(), sourcePath: path };
+    return allowedPath(policy, path, "read") && !!agentFileAt(this.options.host(() => this.current), path);
+  }
   availableNotes(): { path: string; title: string }[] {
     if (!this.current || !this.ready) return [];
     const policy = this.policy();
-    return this.options.host(() => this.current).files().filter(file => allowedPath({ ...policy, sourcePath: file.path }, file.path, "read")).map(file => ({ path: file.path, title: file.title }));
+    return this.options.host(() => this.current).files(policy.readScope === "folder" ? policy.folder : undefined).filter(file => allowedPath({ ...policy, sourcePath: file.path }, file.path, "read")).map(file => ({ path: file.path, title: file.title }));
   }
   /** A source choice affects the next request, never an in-flight or paused task. */
   attachNote(source: WorkspaceSource | null): boolean {
@@ -515,7 +519,7 @@ export class AiWorkspace {
     if (this.agent?.pendingTrash.length) { this.message = "Review the pending Trash proposal, or choose New task to leave it, before connecting another note."; this.changed(); return false; }
     try {
       if (source?.selection && !/^[a-f0-9]{64}$/.test(source.selectionVersion ?? "")) throw Error("The selection is not ready. Select it again before connecting the note.");
-      if (source && !this.availableNotes().some(file => file.path === source.path)) throw Error("This note is unavailable or outside the selected read scope. Check Access or choose another note.");
+      if (source && !this.canConnectNote(source.path)) throw Error("This note is unavailable or outside the selected read scope. Check Access or choose another note.");
       this.runEpoch++; this.agent = null;
       if (source && !this.source && !this.outputFolder && !this.outputFolderChosen) this.outputFolder = source.path.includes("/") ? source.path.slice(0, source.path.lastIndexOf("/")) : "";
       if (source?.selection) this.reference = readSelectionReference({ path: source.path, from: source.selection.from, to: source.selection.to, version: source.selectionVersion });
@@ -571,7 +575,7 @@ export class AiWorkspace {
     if (!reference || !this.current) throw Error("Choose a reference first.");
     if (!validTaskPath(this.policy(), reference.path)) throw Error("The reference is outside the permitted note paths.");
     const host = this.options.host(() => this.current);
-    const file = host.files().find(item => item.path === reference.path);
+    const file = agentFileAt(host, reference.path);
     const text = file ? await host.read(file) : null;
     if (text === null) throw Error("The reference note is unavailable.");
     return selectionText(reference, text);
@@ -579,7 +583,7 @@ export class AiWorkspace {
   async useWholeNoteReference(reference = this.reference): Promise<boolean> {
     if (!reference || !this.canChangeReference) return false;
     const epoch = this.referenceEpoch;
-    const host = this.options.host(() => this.current), file = host.files().find(item => item.path === reference.path);
+    const host = this.options.host(() => this.current), file = agentFileAt(host, reference.path);
     const document = file ? await host.read(file) : null;
     if (document === null) throw Error("The reference note is unavailable.");
     if (!document.length) throw Error("The reference note is empty.");
@@ -589,7 +593,7 @@ export class AiWorkspace {
   }
   private async captureSourceReference(source: WorkspaceSource): Promise<void> {
     if (!source.selection) return;
-    const host = this.options.host(() => this.current), file = host.files().find(item => item.path === source.path);
+    const host = this.options.host(() => this.current), file = agentFileAt(host, source.path);
     const text = file ? await host.read(file) : null;
     if (text === null || await inputDigest(text) !== source.selectionVersion) throw Error("The selected note changed. Select the passage again.");
     this.setReference(await captureSelectionReference(source.path, text, source.selection.from, source.selection.to));
@@ -1198,8 +1202,7 @@ export class AiWorkspace {
     if (this.restoreFailed || this.addingAttachments) return;
     if (this.busy) return;
     if (source?.selection && !/^[a-f0-9]{64}$/.test(source.selectionVersion ?? "")) { this.message = "The selection is not ready. Select it again before starting a new task."; this.changed(); return; }
-    const sourcePath = source?.path;
-    if (source && !sameSource(source, this.source) && !this.availableNotes().some(file => file.path === sourcePath)) { this.message = "This note is outside the selected read scope. Choose an allowed note before starting a new task."; this.changed(); return; }
+    if (source && !sameSource(source, this.source) && !this.canConnectNote(source.path)) { this.message = "This note is outside the selected read scope. Choose an allowed note before starting a new task."; this.changed(); return; }
     if (this.canContinue && !await this.finishHere()) return;
     if (source?.selection) {
       try { await this.captureSourceReference(source); source = { path: source.path }; }

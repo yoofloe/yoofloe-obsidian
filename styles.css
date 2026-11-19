@@ -374,7 +374,7 @@
 
 .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock { display:grid; grid-template-columns:minmax(0,1fr) max-content; align-items:end; gap:6px; }
 .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-api, .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-attachments, .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-row .y-ai-field, .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-row .y-ai-attach { display:none; }
-.yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock:has(.y-ai-add-message:not([hidden])),
+.yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock.y-ai-add-message-visible,
 .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock.y-ai-follow-up-open { grid-template-columns:minmax(0,1fr); }
 
 

@@ -674,7 +674,10 @@ export class YoofloeAiView extends ItemView {
       run.classList.toggle("mod-cta", !w.busy);
     }
     const add = el.querySelector<HTMLButtonElement>(".y-ai-add-message");
-    if (add) add.hidden = w.calendarDraftActive || !!followUp || !w.followUpDraft;
+    if (add) {
+      add.hidden = w.calendarDraftActive || !!followUp || !w.followUpDraft;
+      add.closest(".y-ai-dock")?.classList.toggle("y-ai-add-message-visible", !add.hidden);
+    }
     const close = el.querySelector<HTMLButtonElement>(".y-ai-close-follow-up");
     if (close) {
       close.hidden = (w.busy || w.canContinue) && !w.editingFollowUpId;
