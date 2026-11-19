@@ -36,6 +36,13 @@ There are no background AI jobs, automatic retries, paid search planners, embedd
 Yoofloe operates no relay or database for this plugin. Expanded mode can invoke OpenAI web search when you send a task. Store/help links open only when you choose them;
 Obsidian's own updates and other plugins have their own network behavior.
 
+Desktop tasks can use an OpenAI Responses WebSocket. The plugin's HTTP requests handle Responses, input-token
+counting, uploads, generated-file downloads, transcription and upload cleanup. Base64 represents bytes in
+generated images and Android app transfers.
+
+The copy actions write the selected conversation or draft to the clipboard. The composer accepts clipboard text
+when you paste into it.
+
 ## Expanded mode and selected files
 
 Expanded mode is the default. OpenAI can use hosted web search, analysis and image tools when useful for your task.

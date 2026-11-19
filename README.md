@@ -177,6 +177,7 @@ Open **Workspace settings → App context** in Obsidian on the Android phone or 
 Use the same Android profile and a vault in shared device storage. The plugin shows the next step as you start a lookup,
 approve it in the app, and return to review excerpts. **Check reply** is available while a request is pending.
 Local lookups make **no AI call**. Choose the excerpts to include before sending a message to OpenAI.
+Calendar changes take effect after you review and apply a proposal in the Calendar app.
 
 ### Yoofloe Calendar
 

@@ -59,7 +59,7 @@ export async function prepareCalendarChangeDraft(value: unknown, delivery: Deliv
     }
     if (action === "delete" && Object.keys(values).length) throw Error("Review deletion as a separate action without changed fields.");
     if (typeof values.title === "string" && action === "create") titles[opId] = values.title;
-    return { opId, kind, action, target, values: action === "delete" ? null : values } as CalendarChangeOperation;
+    return { opId, kind, action, target, values: action === "delete" ? null : values };
   });
   safeOutbound(JSON.stringify(operations));
   return { draft: await createCalendarChangeDraft(operations, delivery?.datasetId ?? null), titles };

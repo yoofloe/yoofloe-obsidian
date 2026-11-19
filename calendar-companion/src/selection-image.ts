@@ -27,7 +27,7 @@ function copyRenderedNode(element: Element, win: Window, root = false): Element 
   }
   for (const child of Array.from(element.childNodes)) {
     if (child.nodeType === 3) clone.appendChild(child.cloneNode());
-    else if (child instanceof element.ownerDocument.defaultView!.Element &&
+    else if (child.instanceOf(Element) &&
       !["script", "style", "iframe", "object", "embed", "img", "image", "video", "audio", "link", "input", "button"].includes(child.tagName.toLowerCase()))
       clone.appendChild(copyRenderedNode(child, win));
   }
@@ -63,11 +63,13 @@ export async function selectionImages(
       if (!current()) throw Error("Image preparation was cancelled.");
       const pageHeight = Math.min(PAGE_HEIGHT, height - page * PAGE_HEIGHT);
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${pageHeight}"><foreignObject x="0" y="-${page * PAGE_HEIGHT}" width="${width}" height="${height}">${html}</foreignObject></svg>`;
-      const image = container.ownerDocument.createElement("img");
+      const drawing = surface.createDiv();
+      drawing.remove();
+      const image = drawing.createEl("img");
       // A data URL keeps the SVG self-contained and the canvas readable in Chromium/WebView.
       image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
       await image.decode();
-      const canvas = container.ownerDocument.createElement("canvas");
+      const canvas = drawing.createEl("canvas");
       canvas.width = width; canvas.height = pageHeight;
       const context = canvas.getContext("2d");
       if (!context) throw Error("Image rendering is unavailable on this device.");

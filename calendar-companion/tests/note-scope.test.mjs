@@ -18,6 +18,28 @@ function fixture(overrides={}) {
 const read = async (agent,reference) => (await agent.execute('read_notes',{notes:[{reference,from_line:1,through_line:0}]})).notes[0];
 const append = (agent,reference,version,markdown) => agent.execute('apply_changes',{changes:[{reference,version,action:'append',markdown}]});
 
+test('tasks resolve the current note by path and enumerate only the requested folder for searches', async () => {
+ const f=fixture();
+ await f.host.create('Output/Sub/Match.md','Match in scope');
+ await f.host.create('Output/Private/Match.md','Match in an excluded folder');
+ await f.host.create('Outside/Match.md','Match outside the folder');
+ const roots=[];
+ f.host.file=path=>f.files.get(path);
+ f.host.files=folder=>{
+  roots.push(folder);
+  return [...f.files.values()].filter(file=>folder===undefined || file.path.startsWith(folder+'/'));
+ };
+ const current=new VaultAgent(f.host,base,()=>true);
+ assert.equal((await current.initialContext()).path,base.sourcePath);
+ assert.equal((await current.execute('search_notes',{query:'Original',limit:5,offset:0})).permitted_total,1);
+ assert.deepEqual(roots,[]);
+
+ const folder=new VaultAgent(f.host,{...base,readScope:'folder',excluded:['Output/Private']},()=>true);
+ const matches=await folder.execute('search_notes',{query:'Match',limit:5,offset:0});
+ assert.deepEqual(roots,['Output']);
+ assert.deepEqual(matches.notes.map(note=>note.path),['Output/Sub/Match.md']);
+});
+
 test('Current note never gains creation authority, including All actions and an empty output folder',()=>{
  for(const mode of ['edit','organize','all'])for(const folder of ['','Output'])for(const sourcePath of ['Notes/Current.md',null]){
   const policy={...base,mode,folder,sourcePath};

@@ -140,7 +140,7 @@ function validateValues(value: unknown, kind: CalendarChangeKind, action: Calend
     if (has("status") && status !== "pending" && status !== "completed") throw Error("Only pending and completed tasks are supported.");
   }
   // Keep stable JSON field order so a saved proposal retains the exact digest.
-  return Object.freeze(Object.fromEntries(allowed.filter(has).map(field => [field, fields[field]]))) as CalendarChangeValues;
+  return Object.freeze(Object.fromEntries<unknown>(allowed.filter(has).map(field => [field, fields[field]])));
 }
 
 export function validateCalendarChangeOperations(operations: unknown, datasetId: string | null): readonly CalendarChangeOperation[] {

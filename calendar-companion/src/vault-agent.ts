@@ -28,7 +28,7 @@ export function validateJournal(value: unknown): asserts value is WorkJournal {
   }
 }
 export interface AgentHost {
-  files(): AgentFile[]; read(file: AgentFile): Promise<string | null>; replace(file: AgentFile, expected: string, text: string): Promise<void>;
+  files(folder?: string): AgentFile[]; file?(path: string): AgentFile | undefined; read(file: AgentFile): Promise<string | null>; replace(file: AgentFile, expected: string, text: string): Promise<void>;
   isCurrentNote?(file: AgentFile): boolean;
   create(path: string, text: string): Promise<AgentFile>; rename(file: AgentFile, path: string): Promise<void>; folder(path: string): Promise<boolean>;
   properties(file: AgentFile, expected: string, values: Record<string, unknown>): Promise<void>; affected(path: string): string[];
@@ -36,6 +36,10 @@ export interface AgentHost {
   persist(journal: WorkJournal): Promise<void>;
   createAsset?(file: GeneratedFile, path: string): Promise<void>; assetHash?(path: string): Promise<string | null>; trashAsset?(path: string, hash: string): Promise<void>;
 }
+export function agentFileAt(host: AgentHost, path: string): AgentFile | undefined {
+  return host.file ? host.file(path) : host.files().find(file => file.path === path);
+}
+
 interface Ref {
   file: AgentFile;
   version?: string;
@@ -89,7 +93,7 @@ export class VaultAgent {
     return safeNoteMarkdown(withSources(value, sources), images);
   }
   constructor(readonly host: AgentHost, readonly policy: TaskPolicy, private readonly current: () => boolean) {
-    const source = policy.sourcePath ? host.files().find(file => file.path === policy.sourcePath) : undefined;
+    const source = policy.sourcePath ? agentFileAt(host, policy.sourcePath) : undefined;
     // Folder and vault access work independently of the conversation's optional attachment.
     if (policy.readScope !== "current" && policy.sourcePath && (!source || !allowedPath(policy, source.path, "read"))) {
       this.policy = { ...policy, sourcePath: null, selection: undefined, selectionVersion: undefined };
@@ -115,7 +119,7 @@ export class VaultAgent {
   hasUneditedWritableNote(): boolean {
     const ref = this.refs.get("N1");
     if (!ref || this.editedNotes.has(ref.file.identity) || !this.allowedRef(ref, "read") || !this.allowedRef(ref, "edit")) return false;
-    return this.host.isCurrentNote ? this.host.isCurrentNote(ref.file) : this.host.files().some(file => file.identity === ref.file.identity && file.path === ref.file.path);
+    return this.host.isCurrentNote ? this.host.isCurrentNote(ref.file) : agentFileAt(this.host, ref.file.path)?.identity === ref.file.identity;
   }
   private reference(file: AgentFile): string {
     for (const [id, ref] of this.refs) if (!ref.provided && ref.file.identity === file.identity && ref.file.path === file.path) return id;
@@ -129,7 +133,7 @@ export class VaultAgent {
   async addReference(reference: SelectionReference) {
     this.guard();
     if (!validTaskPath(this.policy, reference.path)) throw Error("This reference is outside the permitted note paths.");
-    const file = this.host.files().find(item => item.path === reference.path);
+    const file = agentFileAt(this.host, reference.path);
     if (!file) throw Error("The reference note is unavailable.");
     const id = `S${this.next++}`;
     const range = reference.quote ? { from: 0, to: reference.quote.length } : { from: reference.from, to: reference.to };
@@ -220,7 +224,18 @@ export class VaultAgent {
       closedObject(args, ["query", "limit", "offset"]); const terms = noteTerms(textField(args.query, 4000)); const count = Number(args.limit), offset = Number(args.offset);
       if (!Number.isInteger(count) || count < 1 || count > 32) throw Error("Search returns 1–32 note references.");
       if (!Number.isSafeInteger(offset) || offset < 0) throw Error("Use the returned bounded search offset.");
-      const allowed = this.host.files().filter(file => this.allowedRef({ file }, "read"));
+      const scope = this.policy.readScope;
+      const source = scope === "current" && this.policy.sourcePath ? agentFileAt(this.host, this.policy.sourcePath) : undefined;
+      const files = scope === "current" ? (source ? [source] : []) : this.host.files(scope === "folder" ? this.policy.folder : undefined);
+      const allowed = files.filter(file => this.allowedRef({ file }, "read"));
+      if (this.policy.writeScope === "new") {
+        const paths = new Set(allowed.map(file => file.path));
+        for (const [identity, path] of this.createdNotes) {
+          if (paths.has(path)) continue;
+          const file = agentFileAt(this.host, path);
+          if (file?.identity === identity && this.allowedRef({ file }, "read")) allowed.push(file);
+        }
+      }
       const candidates = allowed.map(file => ({ file, score: rankNote(file.title, terms) * 10 })).sort((a, b) => b.score - a.score).slice(offset, offset + 32);
       const hits = []; let scanned = 0;
       for (const item of candidates) {
@@ -286,7 +301,7 @@ export class VaultAgent {
     if (name === "create_note") {
       closedObject(args, ["path", "markdown"]); const path = vaultPath(textField(args.path));
       if (!allowedPath(this.policy, path, "create")) throw Error("Create the note inside the permitted output folder.");
-      if (this.host.files().some(file => file.path === path)) throw Error("That filename already exists. Choose another name.");
+      if (agentFileAt(this.host, path)) throw Error("That filename already exists. Choose another name.");
       const markdown = this.markdown(textField(args.markdown, 4 * 1024 * 1024)); const hash = await inputDigest(markdown);
       await this.reserveOperations(1);
       const op: JournalOp = { kind: "create", path, beforeHash: "", afterHash: hash, previousHash: "", status: "pending" }; this.journal.operations.push(op); await this.host.persist(this.journal); this.guard();
@@ -326,8 +341,7 @@ export class VaultAgent {
       if (!ref.version || args.version !== ref.version || await inputDigest(before) !== ref.version) throw Error("Read the current note version first.");
       // Recovery copies intentionally retain the paths and links from the time they were saved.
       const affected = this.host.affected(ref.file.path).filter(item => item !== ref.file.path && !RECOVERY_BACKUP_PATH.test(item));
-      const filesByPath = new Map(this.host.files().map(file => [file.path, file]));
-      const permittedBacklink = (path: string, action: "read" | "edit") => { const file = filesByPath.get(path); return !!file && this.allowedRef({ file }, action); };
+      const permittedBacklink = (path: string, action: "read" | "edit") => { const file = agentFileAt(this.host, path); return !!file && this.allowedRef({ file }, action); };
       if (affected.some(item => !permittedBacklink(item, "edit"))) throw Error("A linked note is outside the allowed edit scope. Include it in the scope before renaming.");
       await this.reserveOperations(1);
       const oldPath = ref.file.path, op: JournalOp = { kind: "rename", path: oldPath, target: path, beforeHash: ref.version, afterHash: ref.version, previousHash: ref.version, status: "pending" };
@@ -361,7 +375,7 @@ export class VaultAgent {
           generatedPath(op.path); if (!this.host.trashAsset || !op.afterHash) throw Error("Attachment recovery is unavailable.");
           this.guard(); await this.host.trashAsset(op.path, op.afterHash); op.status = "undone"; restored++; await this.host.persist(journal); continue;
         }
-        const path = op.kind === "rename" ? op.target! : op.path; vaultPath(path); const file = this.host.files().find(file => file.path === path);
+        const path = op.kind === "rename" ? op.target! : op.path; vaultPath(path); const file = agentFileAt(this.host, path);
         const original = op.backup ? await this.host.readBackup(op.backup) : null;
         if (original !== null && await inputDigest(original) !== op.beforeHash) throw Error("The backup changed. Existing notes are kept.");
         if (op.kind === "trash") { if (file || original === null) throw Error("A new file occupies this name."); await this.host.create(op.path, original); }
@@ -371,7 +385,7 @@ export class VaultAgent {
           if (!op.afterHash || hash !== op.afterHash && hash !== op.previousHash) throw Error("Newer edits are kept.");
           this.guard();
           if (op.kind === "create") await this.host.trash(file);
-          else if (op.kind === "rename") { if (this.host.files().some(file => file.path === op.path)) throw Error("The old name is occupied."); await this.host.rename(file, op.path); if (this.policy.sourcePath === op.target) this.policy.sourcePath = op.path; }
+          else if (op.kind === "rename") { if (agentFileAt(this.host, op.path)) throw Error("The old name is occupied."); await this.host.rename(file, op.path); if (this.policy.sourcePath === op.target) this.policy.sourcePath = op.path; }
           else { if (original === null) throw Error("No original backup"); await this.host.replace(file, current, original); }
         }
         op.status = "undone"; restored++;
