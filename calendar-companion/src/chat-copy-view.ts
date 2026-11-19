@@ -118,7 +118,7 @@ export class ChatCopyControls {
     const current = () => this.work === work && work.current && this.root.isConnected && this.epoch === epoch && work.library.active === conversationId;
     try {
       const known = new Map(this.known().map(turn => [turn.id, turn]));
-      const full = (id: string) => this.work.fullChat(id);
+      const full = (id: string) => this.work.fullChat(id, turnConversation(known.get(id)?.conversationId ?? conversationId));
       let turns: ChatTurn[];
       if (chosen) {
         const requested = chosen.map(item => known.get(item.turn.id) ?? item.turn);

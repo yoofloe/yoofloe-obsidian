@@ -37,6 +37,7 @@ import { prepareCalendarWorkspaceDraft, workspaceDraftTool } from "./calendar-wo
 import { ChronoHudAccess } from "./chronohud-access";
 import type { ChronoHudLookupSession } from "./chronohud-lookup-session";
 import { conversationIntent, readUserDirections, type UserDirection } from "./conversation-intent";
+import type { SharedConversations, SharedConversationSummary, SharedRevision, SharedVersionChoice } from "./shared-conversations";
 
 type WorkspaceChange = "state" | "progress";
 export interface WorkspaceSource { path: string; selection?: { from: number; to: number }; selectionVersion?: string; quote?: string }
@@ -46,10 +47,14 @@ export interface WorkspaceStorage {
   save(value: unknown): Promise<void>;
   history(): Promise<WorkJournal[]>;
   saveChat?(turn: ChatTurn): Promise<void>;
-  loadChat?(id: string): Promise<ChatTurn>;
-  searchChats?(query: string, offset: number, conversationId?: string, strict?: boolean): Promise<{ turns: ChatTurn[]; nextOffset: number | null }>;
+  loadChat?(id: string, conversationId?: string): Promise<ChatTurn>;
+  conversationTurns?(id: string): AsyncIterable<ChatTurn>;
+  importMessages?(id: string, messages: AsyncIterable<ChatTurn>): Promise<void>;
+  migrateLegacy?(): Promise<{ retained: number; unavailable: number }>;
+  searchChats?(query: string, offset: number, conversationId?: string, strict?: boolean, knownIds?: ReadonlySet<string>): Promise<{ turns: ChatTurn[]; nextOffset: number | null; unavailable?: number }>;
   loadConversation?(id: string): Promise<unknown>;
   saveConversation?(id: string, value: unknown): Promise<void>;
+  deleteConversation?(id: string, workspace: unknown): Promise<void>;
 }
 interface PreviousTurn { request: string; answer: string; sourceMode?: SourceMode; contextScope?: string | null }
 /** One vault-owned controller. Views only subscribe; hiding one never discards paid work. */
@@ -59,6 +64,12 @@ export class AiWorkspace {
   autoCompact = true;
   librarySaving = false;
   libraryMessage = "";
+  legacyConversationNotice = "";
+  sharedConversations: SharedConversationSummary[] = [];
+  private stoppedSharing = new Set<string>();
+  private shareRead = 0;
+  private shareRetry = new Set<string>();
+  sharedStatus = "";
   private switchingConversation = false;
   private checkpoint: ConversationCheckpoint | null = null;
   private userDirections: UserDirection[] = [];
@@ -129,7 +140,7 @@ export class AiWorkspace {
   readonly workspaceCalendarChanges: CalendarChangeController<CalendarWorkspaceChangeDraft, CalendarWorkspaceChangeReply>;
   constructor(private readonly options: {
     current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; generated?: GeneratedStore; attachments?: AttachmentStore;
-    streamResponses?: boolean; gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; calendar?: () => CalendarSession;
+    streamResponses?: boolean; gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; sharing?: SharedConversations; calendar?: () => CalendarSession;
     calendarChange?: () => CalendarChangeSession; inboxHint(): string;
     workspaceLookup?: () => CalendarWorkspaceLookupSession;
     chronoHudLookup?: () => ChronoHudLookupSession;
@@ -240,7 +251,10 @@ export class AiWorkspace {
         const saved = raw as Record<string, unknown>;
         this.followUpDefault = followUpMode(saved.followUpDefault);
         this.autoCompact = saved.autoCompact !== false;
-        this.library = readLibrary(saved.conversationLibrary);
+        const library = readLibrary(saved.conversationLibrary);
+        await this.verifySavedConversation(saved, library.active);
+        if (!this.current) return;
+        this.library = library;
         await this.applyConversation(saved);
         if (typeof saved.mode === "string" && ["ask", "edit", "organize", "all"].includes(saved.mode)) this.mode = saved.mode as WorkMode;
         this.sourceMode = readSourceMode(saved.sourceMode);
@@ -271,6 +285,58 @@ export class AiWorkspace {
       await this.refreshSettings();
     } catch { this.restoreFailed = true; this.message = "Saved work could not be read. Existing files and keys were kept; saving is disabled to preserve the original work record. Reopen this vault after restoring the record."; }
     finally { this.ready = true; this.attachFirstPending(); this.changed(); }
+    if (!this.restoreFailed && this.current) {
+      void this.migrateConversationArchive();
+      void this.refreshSharedConversations();
+    }
+  }
+  private async migrateConversationArchive(): Promise<void> {
+    try {
+      const outcome = await this.options.storage.migrateLegacy?.();
+      if (!this.current || !outcome?.retained) return;
+      this.legacyConversationNotice = outcome.unavailable
+        ? "Some older records need review. The original vault files are kept."
+        : "Older vault copies are kept for migration on your other devices.";
+    } catch {
+      if (!this.current) return;
+      this.legacyConversationNotice = "Older vault files could not all be checked. Their original copies are kept.";
+    }
+    if (this.legacyConversationNotice) this.changed();
+  }
+  private async verifiedFullMessage(turn: ChatTurn, conversationId: string): Promise<ChatTurn> {
+    const full = await this.fullChat(turn.id, conversationId);
+    if (!full || full.requestTruncated || full.answerTruncated ||
+      !full.request.startsWith(turn.request) || !full.answer.startsWith(turn.answer))
+      throw Error("The full saved message could not be verified. Its original record is kept.");
+    return full;
+  }
+  private async verifySavedConversation(saved: Record<string, unknown>, id: string): Promise<void> {
+    if (!Array.isArray(saved.chat)) return;
+    const seen = new Set<string>();
+    for (const value of saved.chat) {
+      const turn = readChat(value);
+      if (!turn || turnConversation(turn.conversationId) !== id || seen.has(turn.id))
+        throw Error("Saved messages could not be matched to this conversation.");
+      seen.add(turn.id);
+      if (turn.status === "completed" && (turn.requestTruncated || turn.answerTruncated))
+        await this.verifiedFullMessage(turn, id);
+    }
+    if (!this.current) throw Error("The vault changed.");
+  }
+  private async verifiedContextTurns(): Promise<ChatTurn[]> {
+    const conversationId = this.library.active, result: ChatTurn[] = [];
+    for (const turn of this.chat) {
+      if (turnConversation(turn.conversationId) !== conversationId) throw Error("The conversation changed.");
+      if (turn.status === "running" || turn.status === "paused") continue;
+      if (turn.requestTruncated || (turn.status === "completed" && turn.answerTruncated)) {
+        const full = await this.verifiedFullMessage(turn, conversationId);
+        result.push({ ...turn, request: full.request.slice(0, 8000), answer: full.answer.slice(0, 24000),
+          requestTruncated: full.request.length > 8000, answerTruncated: full.answer.length > 24000,
+          contextScope: turn.contextScope === full.contextScope ? turn.contextScope : null, steers: full.steers });
+      } else result.push(turn);
+    }
+    if (!this.current || this.library.active !== conversationId) throw Error("The conversation changed.");
+    return result;
   }
   private async applyConversation(saved: Record<string, unknown>, id = this.library.active): Promise<void> {
     this.userDirections = readUserDirections(saved.userDirections);
@@ -377,23 +443,24 @@ export class AiWorkspace {
     void this.persist().catch(() => { if (this.autoCompact === enabled) this.autoCompact = prior; this.message = "The compaction setting could not be saved locally."; this.changed(); });
     this.changed();
   }
-  private async saveLibrary(library: ConversationLibrary): Promise<boolean> {
+  private async saveLibrary(library: ConversationLibrary, deleteId?: string): Promise<boolean> {
     if (!this.canSwitchConversation) return false;
     const prior = this.library;
     this.librarySaving = true;
     this.libraryMessage = "";
     this.library = library;
+    if (deleteId) this.switchingConversation = true;
     this.changed();
     try {
-      await this.persist();
+      await this.persist(deleteId);
       return this.current;
     } catch {
       this.library = prior;
-      this.libraryMessage = "The conversation change could not be saved.";
+      this.libraryMessage = deleteId ? "The conversation could not be deleted. The saved copy is kept." : "The conversation change could not be saved.";
       return false;
-    } finally { this.librarySaving = false; this.changed(); }
+    } finally { this.librarySaving = false; if (deleteId) this.switchingConversation = false; this.changed(); }
   }
-  private async switchConversation(library: ConversationLibrary, initial?: Record<string, unknown>): Promise<boolean> {
+  private async switchConversation(library: ConversationLibrary, initial?: Record<string, unknown>, deleteId?: string): Promise<boolean> {
     if (!this.canSwitchConversation) return false;
     const prior = this.library, outgoing = this.conversationState(), liveChat = this.chat, liveTask = this.task, liveAgent = this.agent,
       liveChatId = this.activeChatId, queueHeld = this.queueHeld, preview = this.preview, message = this.message;
@@ -405,16 +472,20 @@ export class AiWorkspace {
     try {
       await this.persist();
       const storage = this.options.storage;
-      if (storage.saveConversation) await storage.saveConversation(prior.active, outgoing);
-      else this.sessionConversations.set(prior.active, structuredClone(outgoing));
+      if (!deleteId) {
+        if (storage.saveConversation) await storage.saveConversation(prior.active, outgoing);
+        else this.sessionConversations.set(prior.active, structuredClone(outgoing));
+      }
       const incoming = initial ?? await (storage.loadConversation ? storage.loadConversation(library.active) : this.sessionConversations.get(library.active));
       if (!this.current) return false;
       if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) throw Error("The saved conversation could not be read.");
+      const verified = incoming as Record<string, unknown>;
+      await this.verifySavedConversation(verified, library.active);
       this.runEpoch++;
       replaced = true;
-      await this.applyConversation(incoming as Record<string, unknown>, library.active);
+      await this.applyConversation(verified, library.active);
       this.library = library;
-      await this.persist();
+      await this.persist(deleteId);
       return this.current;
     } catch {
       if (replaced) {
@@ -423,7 +494,8 @@ export class AiWorkspace {
         this.chat = liveChat; this.task = liveTask; this.agent = liveAgent; this.activeChatId = liveChatId;
         this.queueHeld = queueHeld; this.preview = preview; this.message = message;
       }
-      this.libraryMessage = "The conversation could not be opened. Your current draft is kept.";
+      this.libraryMessage = deleteId ? "The conversation could not be deleted. The saved copy is kept."
+        : "The conversation could not be opened. Your current draft is kept.";
       return false;
     } finally {
       this.switchingConversation = false;
@@ -431,9 +503,288 @@ export class AiWorkspace {
       this.changed();
     }
   }
+  get supportsConversationSync(): boolean { return !!this.options.sharing; }
+  isSharing(conversation: Conversation): boolean {
+    return !!conversation.shared && !conversation.shared.stopping && !this.stoppedSharing.has(conversation.shared.id);
+  }
+  needsSyncRetry(conversation: Conversation): boolean {
+    return this.isSharing(conversation) && (!conversation.shared?.revision || conversation.shared.pending === true || this.shareRetry.has(conversation.id));
+  }
+  syncedVersions(conversation: Conversation): readonly SharedVersionChoice[] {
+    if (!this.isSharing(conversation)) return [];
+    return this.sharedConversations.find(entry => entry.id === conversation.shared?.id)?.versions ?? [];
+  }
+  async refreshSharedConversations(): Promise<void> {
+    const sharing = this.options.sharing;
+    if (!sharing || !this.ready || this.restoreFailed || !this.current) return;
+    const epoch = ++this.shareRead;
+    try {
+      const entries = await sharing.catalog(), visible = new Set(entries.map(entry => entry.id));
+      const bindings = new Set(this.library.conversations.flatMap(item => item.shared ? [item.shared.id] : []));
+      const stopped = new Set<string>();
+      for (const id of bindings) if (!visible.has(id) && await sharing.stopped(id)) stopped.add(id);
+      if (!this.current || epoch !== this.shareRead) return;
+      const changed = JSON.stringify(entries) !== JSON.stringify(this.sharedConversations) ||
+        stopped.size !== this.stoppedSharing.size || [...stopped].some(id => !this.stoppedSharing.has(id)) || !!this.sharedStatus;
+      this.sharedConversations = entries;
+      this.stoppedSharing = stopped;
+      this.sharedStatus = "";
+      if (changed) this.changed();
+    } catch {
+      if (this.current && epoch === this.shareRead) {
+        this.sharedStatus = "Vault conversations could not be checked. Device copies are available.";
+        this.changed();
+      }
+    }
+  }
+  private updateConversationEntry(entry: Conversation): void {
+    this.library = { ...this.library, conversations: this.library.conversations.map(item => item.id === entry.id ? entry : item) };
+  }
+  async syncConversation(id: string): Promise<boolean> {
+    const sharing = this.options.sharing;
+    let entry = this.library.conversations.find(item => item.id === id);
+    if (!sharing || !entry || entry.shared?.stopping || !this.canSwitchConversation) return false;
+    this.librarySaving = this.switchingConversation = true;
+    this.libraryMessage = "";
+    this.changed();
+    try {
+      if (!entry.shared || await sharing.stopped(entry.shared.id)) {
+        const original = entry;
+        entry = { ...entry, shared: { id: crypto.randomUUID(), revision: null } };
+        this.updateConversationEntry(entry);
+        try { await this.persist(); }
+        catch (error) { this.updateConversationEntry(original); throw error; }
+      } else await this.persist();
+      await this.publishConversation(entry, this.messagesForSharing(id));
+      this.libraryMessage = "Conversation saved to the vault.";
+      return true;
+    } catch (error) {
+      this.shareRetry.add(id);
+      this.libraryMessage = error instanceof Error ? error.message : "The conversation could not be saved to the vault.";
+      return false;
+    } finally {
+      this.librarySaving = this.switchingConversation = false;
+      this.changed();
+      void this.refreshSharedConversations();
+    }
+  }
+  private async *messagesForSharing(id: string): AsyncGenerator<ChatTurn> {
+    const storage = this.options.storage;
+    const saved = id === this.library.active ? this.conversationState() : await storage.loadConversation?.(id);
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) throw Error("The saved conversation is unavailable.");
+    const previews = (saved as Record<string, unknown>).chat;
+    const recent = new Map<string, ChatTurn>();
+    if (Array.isArray(previews)) for (const value of previews) {
+      const turn = readChat(value);
+      if (!turn || turnConversation(turn.conversationId) !== id) throw Error("A message belongs to another conversation.");
+      recent.set(turn.id, turn);
+    }
+    const live = id === this.library.active ? new Map(this.chat.map(turn => [turn.id, turn])) : new Map<string, ChatTurn>();
+    for await (const full of storage.conversationTurns?.(id) ?? []) {
+      if (recent.has(full.id)) continue;
+      yield full;
+    }
+    for (const turn of recent.values()) {
+      const current = live.get(turn.id) ?? turn;
+      if (current.status === "running" || current.status === "paused") continue;
+      yield current.requestTruncated || current.answerTruncated || current.workDetailsTruncated
+        ? await this.verifiedFullMessage(current, id) : current;
+    }
+  }
+  private async publishConversation(entry: Conversation, turns: Iterable<ChatTurn> | AsyncIterable<ChatTurn>): Promise<void> {
+    if (!entry.shared || !this.options.sharing) return;
+    const revision = await this.options.sharing.publish(entry.shared, entry.name, entry.updatedAt, turns);
+    if (!this.current) throw Error("The vault changed.");
+    if (revision !== entry.shared.revision || entry.shared.pending) {
+      this.updateConversationEntry({ ...entry, shared: { id: entry.shared.id, revision } });
+      try { await this.persist(); }
+      catch (error) { this.updateConversationEntry(entry); throw error; }
+    }
+    this.shareRetry.delete(entry.id);
+  }
+  private async publishChange(entry: Conversation, turns: readonly ChatTurn[]): Promise<void> {
+    if (!entry.shared?.revision || !this.isSharing(entry) || !this.options.sharing) return;
+    const retry = this.needsSyncRetry(entry);
+    const pending = { ...entry, shared: { ...entry.shared, pending: true } };
+    this.updateConversationEntry(pending);
+    try {
+      await this.persist();
+      await this.publishConversation(pending, retry ? this.messagesForSharing(entry.id) : turns);
+    }
+    catch {
+      this.shareRetry.add(entry.id);
+      this.libraryMessage = "The device copy is saved. Choose Retry vault sync from the conversation menu.";
+      if (entry.id === this.library.active) this.message = [this.message, this.libraryMessage].filter(Boolean).join(" ");
+    }
+    void this.refreshSharedConversations();
+  }
+  async stopConversationSync(id: string): Promise<boolean> {
+    const sharing = this.options.sharing, entry = this.library.conversations.find(item => item.id === id);
+    if (!sharing || !entry?.shared || !this.canSwitchConversation) return false;
+    const shareId = entry.shared.id;
+    this.librarySaving = this.switchingConversation = true;
+    this.libraryMessage = "";
+    this.changed();
+    let original = this.library;
+    try {
+      await this.persist();
+      // Read complete records on this device before removing the vault version.
+      for (const item of this.library.conversations) {
+        if (item.shared?.id !== shareId) continue;
+        for await (const turn of this.messagesForSharing(item.id)) {
+          if (turn.requestTruncated || turn.answerTruncated) throw Error("A complete device copy is required to stop syncing.");
+        }
+      }
+      await this.keepOtherSyncedVersions(shareId);
+      original = this.library;
+      this.library = { ...original, conversations: original.conversations.map(item =>
+        item.shared?.id === shareId ? { ...item, shared: { ...item.shared, stopping: true } } : item) };
+      await this.persist();
+      original = this.library;
+      await sharing.stop(shareId);
+      this.library = { ...this.library, conversations: this.library.conversations.map(item => {
+        if (item.shared?.id !== shareId) return item;
+        this.shareRetry.delete(item.id);
+        return { ...item, shared: undefined };
+      }) };
+      await this.persist();
+      this.libraryMessage = "Vault sync stopped. Your device copies are kept.";
+      return true;
+    } catch (error) {
+      this.library = original;
+      this.libraryMessage = error instanceof Error ? error.message : "Stopping could not be confirmed. Your device copy is kept.";
+      return false;
+    } finally {
+      this.librarySaving = this.switchingConversation = false;
+      this.changed();
+      void this.refreshSharedConversations();
+    }
+  }
+  private async keepOtherSyncedVersions(shareId: string): Promise<void> {
+    const sharing = this.options.sharing, storage = this.options.storage;
+    if (!sharing || !storage.saveConversation) throw Error("Device conversation storage is unavailable.");
+    const item = (await sharing.catalog()).find(entry => entry.id === shareId);
+    if (!item) return;
+    if (item.problem === "invalid" || item.versions.some(version => !version.ready))
+      throw Error("Wait for all vault versions to arrive before stopping sync.");
+    const missing = item.versions.filter(version => !this.library.conversations.some(conversation =>
+      conversation.shared?.id === shareId && conversation.shared.revision === version.revision));
+    if (this.library.conversations.length + missing.length > MAX_CONVERSATIONS)
+      throw Error("There is no room to save each vault version on this device.");
+    const copies: Conversation[] = [];
+    for (const choice of missing) {
+      const version = await sharing.describe(shareId, choice.revision);
+      const entry = { ...newConversationRecord(crypto.randomUUID()), name: version.title,
+        shared: { id: shareId, revision: choice.revision }, updatedAt: version.at };
+      const chat = await this.importSyncedMessages(entry, version, choice.revision);
+      await storage.saveConversation(entry.id, { chat, userDirections: conversationIntent(chat, entry.id, new Set()) });
+      copies.push(entry);
+    }
+    if (!copies.length) return;
+    const previous = this.library;
+    this.library = { ...previous, conversations: [...previous.conversations, ...copies] };
+    try { await this.persist(); }
+    catch (error) { this.library = previous; throw error; }
+  }
+  private async fastForwardCandidate(entry: Conversation, version: SharedRevision, revision: string): Promise<SharedRevision | null> {
+    const sharing = this.options.sharing, storage = this.options.storage;
+    const baseRevision = entry.shared?.revision;
+    if (!sharing || !baseRevision || !storage.conversationTurns || this.needsSyncRetry(entry) ||
+      !await sharing.descendant(version.id, revision, baseRevision)) return null;
+    const base = await sharing.describe(version.id, baseRevision);
+    if ((entry.name || "Conversation") !== base.title ||
+      base.refs.some((old, index) => JSON.stringify(old) !== JSON.stringify(version.refs[index]))) return null;
+    const ids = new Set(base.refs.map(ref => ref[0]));
+    const seen = new Set<string>();
+    for await (const turn of storage.conversationTurns(entry.id)) {
+      const id = turn.sharedMessageId ?? turn.id;
+      if (!ids.has(id) || seen.has(id)) return null;
+      seen.add(id);
+    }
+    return seen.size === ids.size ? base : null;
+  }
+  private async importSyncedMessages(entry: Conversation, version: SharedRevision, revision: string, base?: SharedRevision | null): Promise<ChatTurn[]> {
+    const storage = this.options.storage, sharing = this.options.sharing;
+    if (!sharing || !storage.importMessages) throw Error("Device conversation storage is unavailable.");
+    const originalIds = new Map<string, string>();
+    if (base && storage.conversationTurns) for await (const turn of storage.conversationTurns(entry.id))
+      originalIds.set(turn.sharedMessageId ?? turn.id, turn.id);
+    const previews: ChatTurn[] = [];
+    const loadFull = (id: string) => this.fullChat(id, entry.id);
+    const recentStart = Math.max(0, version.refs.length - CHAT_HISTORY_LIMIT);
+    const incoming = async function* (): AsyncGenerator<ChatTurn> {
+      let position = 0;
+      for await (const message of sharing.messages(version)) {
+        const originalId = originalIds.get(message.id), recent = position++ >= recentStart;
+        if (originalId) {
+          if (recent) {
+            const full = await loadFull(originalId);
+            if (!full) throw Error("The device copy could not be verified.");
+            previews.push(chatPreview(full));
+          }
+        } else {
+          const turn = { ...message, id: await inputDigest(entry.id + "/" + revision + "/" + message.id), conversationId: entry.id };
+          if (recent) previews.push(chatPreview(turn));
+          yield turn;
+        }
+      }
+    };
+    await storage.importMessages(entry.id, incoming());
+    return previews;
+  }
+  async openSyncedConversation(id: string, revision: string, preferredId?: string): Promise<boolean> {
+    const sharing = this.options.sharing, storage = this.options.storage;
+    if (!sharing || !storage.importMessages || !this.canSwitchConversation || this.library.hiddenShared?.includes(id)) return false;
+    const exact = this.library.conversations.find(item => item.shared?.id === id && item.shared.revision === revision && !item.archived);
+    if (exact) return exact.id === this.library.active || await this.switchConversation({ ...this.library, active: exact.id });
+    this.librarySaving = this.switchingConversation = true;
+    this.libraryMessage = "";
+    this.changed();
+    try {
+      const version = await sharing.describe(id, revision);
+      let existing: Conversation | undefined;
+      const candidates = this.library.conversations.filter(item => item.shared?.id === id && !item.archived);
+      candidates.sort((a, b) => Number(b.id === preferredId) - Number(a.id === preferredId));
+      let base: SharedRevision | null = null;
+      for (const entry of candidates) {
+        base = await this.fastForwardCandidate(entry, version, revision);
+        if (base) { existing = entry; break; }
+      }
+      if (!existing && this.library.conversations.length >= MAX_CONVERSATIONS)
+        throw Error("This vault has reached the conversation limit.");
+      const entry: Conversation = { ...(existing ?? newConversationRecord(crypto.randomUUID())),
+        name: version.title, shared: { id, revision }, updatedAt: version.at };
+      const local = existing?.id === this.library.active ? this.conversationState()
+        : existing ? await storage.loadConversation?.(entry.id) : null;
+      if (existing && (!local || typeof local !== "object" || Array.isArray(local)))
+        throw Error("The existing device conversation could not be verified.");
+
+      const previews = await this.importSyncedMessages(entry, version, revision, base);
+      const incoming = {
+        ...(local as Record<string, unknown> | null), chat: previews, contextCheckpoint: undefined,
+        userDirections: conversationIntent(previews, entry.id, new Set()),
+      };
+      const conversations = existing
+        ? this.library.conversations.map(item => item.id === entry.id ? entry : item)
+        : [...this.library.conversations, entry];
+      this.librarySaving = this.switchingConversation = false;
+      return await this.switchConversation({ ...this.library, conversations, active: entry.id }, incoming);
+    } catch (error) {
+      this.libraryMessage = error instanceof Error ? error.message : "The synced conversation could not be verified. Your current draft is kept.";
+      return false;
+    } finally {
+      this.librarySaving = this.switchingConversation = false;
+      this.changed();
+    }
+  }
   async openConversation(id: string): Promise<boolean> {
     if (id === this.library.active) return true;
-    if (!this.library.conversations.some(item => item.id === id && !item.archived)) return false;
+    const entry = this.library.conversations.find(item => item.id === id && !item.archived);
+    if (!entry) return false;
+    const versions = this.syncedVersions(entry);
+    if (entry.shared?.revision && versions.length === 1 && versions[0].ready && versions[0].revision !== entry.shared.revision &&
+      !this.needsSyncRetry(entry) && this.canSwitchConversation)
+      return await this.openSyncedConversation(entry.shared.id, versions[0].revision, entry.id);
     return await this.switchConversation({ ...this.library, active: id });
   }
   async createConversation(folderId: string | null = null): Promise<boolean> {
@@ -445,6 +796,37 @@ export class AiWorkspace {
       outputFolder: this.outputFolder, outputFolderChosen: this.outputFolderChosen, autoAttachNote: this.autoAttachNote,
     });
   }
+  get supportsConversationDeletion(): boolean { return !!this.options.storage.deleteConversation; }
+
+  async deleteConversation(id: string): Promise<boolean> {
+    const entry = this.library.conversations.find(item => item.id === id);
+    if (!entry || !this.canSwitchConversation || !this.supportsConversationDeletion || entry.shared?.stopping)
+      return false;
+
+    const conversations = this.library.conversations.filter(item => item.id !== id);
+    const sharedId = entry.shared?.id;
+    const hidden = sharedId && !conversations.some(item => item.shared?.id === sharedId)
+      ? [...new Set([...(this.library.hiddenShared ?? []), sharedId])] : this.library.hiddenShared;
+    const next = { ...this.library, conversations, ...(hidden ? { hiddenShared: hidden } : {}) };
+    const saved = id !== this.library.active
+      ? await this.saveLibrary(next, id)
+      : await this.switchAfterDeleting(next, id);
+    if (saved) {
+      this.shareRetry.delete(id);
+      this.sessionConversations.delete(id);
+      this.libraryMessage = sharedId ? "The conversation was deleted from this device." : "The conversation was deleted.";
+      this.changed();
+    }
+    return saved;
+  }
+
+  private async switchAfterDeleting(library: ConversationLibrary, id: string): Promise<boolean> {
+    const destination = library.conversations.filter(item => !item.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (destination) return await this.switchConversation({ ...library, active: destination.id }, undefined, id);
+    const blank = newConversationRecord(crypto.randomUUID());
+    return await this.switchConversation({ ...library, active: blank.id, conversations: [...library.conversations, blank] }, {}, id);
+  }
+
   async changeConversation(id: string, patch: Partial<Pick<Conversation, "name" | "folderId" | "pinned" | "archived">>): Promise<boolean> {
     const entry = this.library.conversations.find(item => item.id === id);
     if (!entry || !this.canSwitchConversation) return false;
@@ -453,7 +835,17 @@ export class AiWorkspace {
     if (patch.name !== undefined && !name || folderId && !this.library.folders.some(folder => folder.id === folderId)) return false;
     const conversations = this.library.conversations.map(item => item.id === id ? { ...entry, ...patch, name, folderId } : item);
     const next = { ...this.library, conversations };
-    if (id !== this.library.active || !patch.archived) return await this.saveLibrary(next);
+    if (id !== this.library.active || !patch.archived) {
+      const saved = await this.saveLibrary(next);
+      const updated = this.library.conversations.find(item => item.id === id);
+      if (saved && updated?.shared && entry.name !== name) {
+        this.librarySaving = this.switchingConversation = true;
+        this.changed();
+        try { await this.publishChange(updated, []); }
+        finally { this.librarySaving = this.switchingConversation = false; this.changed(); }
+      }
+      return saved;
+    }
     const destination = conversations.filter(item => !item.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (destination) return await this.switchConversation({ ...next, active: destination.id });
     if (conversations.length >= MAX_CONVERSATIONS) {
@@ -649,11 +1041,24 @@ export class AiWorkspace {
     const workspaceLookup = this.workspaceCalendar?.excerptsEnabled ? this.workspaceCalendar.modelDelivery() : null;
     const chronoHudContext = this.chronoHud?.excerptsEnabled ? this.chronoHud.modelContext() : null;
     const scope = !this.delivery && !workspaceLookup && !chronoHudContext && !attachments.length ? await this.contextScope(agent.policy, sourceMode, this.model.model, reference, deferNoteRead) : null;
-    const previous = this.previous.filter(turn => (sourceMode === "expanded" || turn.sourceMode !== "expanded") &&
-      (turn.contextScope === undefined && !reference && !deferNoteRead || !!scope && turn.contextScope === scope)).slice(-2)
+    const turns = await this.verifiedContextTurns();
+    if (scope) {
+      const equivalents = new Map<string, string>();
+      for (let index = 0; index < turns.length; index++) {
+        const turn = turns[index], shared = turn.sharedContext;
+        if (!shared || turn.sourceMode !== sourceMode) continue;
+        if (!equivalents.has(shared.conversationId))
+          equivalents.set(shared.conversationId, await this.contextScope(agent.policy, sourceMode, this.model.model, reference, deferNoteRead, shared.conversationId));
+        if (equivalents.get(shared.conversationId) === shared.scope) turns[index] = { ...turn, contextScope: scope };
+      }
+    }
+    const compatible = scope ? turns.filter(turn => turn.contextScope === scope && turn.status === "completed") : [];
+    const savedPairs = this.previous.filter(turn => (sourceMode === "expanded" || turn.sourceMode !== "expanded") &&
+      (turn.contextScope === undefined && !reference && !deferNoteRead || !!scope && turn.contextScope === scope));
+    const previous = (compatible.some(turn => turn.sharedContext) ? compatible : savedPairs).slice(-2)
       .map(turn => ({ request: turn.request.slice(0, 2000), answer: turn.answer.slice(0, 4000) }));
     const extended = this.autoCompact && !!scope && !!findOpenAiModel(this.model.model) &&
-      (this.checkpoint?.scope === scope || this.chat.filter(turn => turn.contextScope === scope && turn.status === "completed").length >= 3);
+      (this.checkpoint?.scope === scope || compatible.length >= 3);
     const data = {
       request: pastedTextIsRequest ? "Follow my message supplied as pasted text, within the current task permissions. Other files and notes are source material." : request.trim(),
       current_note: note,
@@ -667,10 +1072,10 @@ export class AiWorkspace {
       previous_turns: previous };
     const currentBytes = new TextEncoder().encode(JSON.stringify(data)).length;
     const historyAllowance = Math.min(192 * 1024, MAX_AI_INPUT_BYTES - currentBytes - 128 * 1024);
-    const context = extended ? conversationContext(this.chat, scope, this.checkpoint, historyAllowance) : [];
+    const context = extended ? conversationContext(turns, scope, this.checkpoint, historyAllowance) : [];
     const covered = new Set(context.length ? context.flatMap(item =>
       item.role === "user" && typeof item.content === "string" ? [item.content] : []) : previous.map(turn => turn.request));
-    const recentRequests = conversationIntent(this.chat, this.library.active, covered, this.userDirections);
+    const recentRequests = conversationIntent(turns, this.library.active, covered, this.userDirections);
     const input = JSON.stringify({ ...data, previous_turns: context.length ? [] : previous,
       ...(recentRequests.length ? { recent_user_requests: recentRequests,
         continuation_instruction: "Use these earlier user directions to understand follow-ups such as doing the same work on the currently attached note. Apply the latest correction. The current request and current permissions authorize actions. Read the current target before editing. Ask only when the intended operation or target remains ambiguous. Earlier task status describes the recorded outcome." } : {}),
@@ -678,8 +1083,9 @@ export class AiWorkspace {
     safeOutbound(input);
     return { input, sourceMode, scope, context, ...(selectedReference ? { snapshot: { text: selectedReference.text, partial: selectedReference.next_cursor !== null } } : {}) };
   }
-  private contextScope(policy: TaskPolicy, mode: SourceMode, model: string, reference: SelectionReference | null, deferNoteRead: boolean): Promise<string> {
-    const base = [this.library.active, policy, mode, model];
+  private contextScope(policy: TaskPolicy, mode: SourceMode, model: string, reference: SelectionReference | null,
+    deferNoteRead: boolean, conversationId = this.library.active): Promise<string> {
+    const base = [conversationId, policy, mode, model];
     return inputDigest(JSON.stringify(reference || deferNoteRead ? [...base, reference, deferNoteRead] : base));
   }
   private calendarProposalInput(request: string, delivery: DeliveryV3 | null): string {
@@ -1064,6 +1470,11 @@ export class AiWorkspace {
       this.changed();
       if (task?.state === "stopped" && task.cleanupPending) await this.saveStoppedTask(task);
       else await this.persist();
+      if (!paused) {
+        const turn = this.chat.find(item => item.id === this.activeChatId);
+        if (turn && (turn.status === "completed" || turn.status === "stopped" || turn.status === "failed"))
+          await this.publishChange(this.activeConversation, [turn]);
+      }
       return completed;
     } catch {
       if (completed && entry) this.followUps = [{ ...entry, status: "review" }, ...this.followUps];
@@ -1130,7 +1541,13 @@ export class AiWorkspace {
   }
   async loadFullChat(id: string): Promise<void> {
     if (!this.current || !this.options.storage.loadChat || id === this.activeChatId && (this.busy || this.canContinue)) return;
-    try { const full = await this.options.storage.loadChat(id); if (!this.current) return; if (id !== this.activeChatId && (full.status === "running" || full.status === "paused")) full.status = "stopped"; const index = this.chat.findIndex(turn => turn.id === id); if (index >= 0) this.chat[index] = full; }
+    const conversationId = this.library.active;
+    try {
+      const full = await this.fullChat(id, conversationId);
+      if (!full || this.library.active !== conversationId || id === this.activeChatId && (this.busy || this.canContinue)) return;
+      const index = this.chat.findIndex(turn => turn.id === id);
+      if (index >= 0) this.chat[index] = { ...full, status: full.status === "running" || full.status === "paused" ? "stopped" : full.status };
+    }
     catch { this.message = "The full local chat record is unavailable. Its saved preview is kept."; }
     this.changed();
   }
@@ -1163,6 +1580,8 @@ export class AiWorkspace {
       if (this.activeQueueId) this.setFollowUpStatus(this.activeQueueId, "review");
       this.activeQueueId = null; this.activeAccess = null;
       await this.saveStoppedTask(task);
+      const turn = this.chat.find(item => item.id === this.activeChatId);
+      if (turn) await this.publishChange(this.activeConversation, [turn]);
       return this.current;
     } catch {
       this.message = "The final task state could not be saved locally. Completed work is kept.";
@@ -1253,16 +1672,23 @@ export class AiWorkspace {
     this.preview = ""; this.changed(); this.saveReference();
   }
   async searchChats(query: string, offset = 0, conversationId?: string, strict = false) {
-    if (this.options.storage.searchChats) return this.options.storage.searchChats(query, offset, conversationId, strict);
-    return { turns: this.chat.filter(turn => (!conversationId || turnConversation(turn.conversationId) === conversationId) && chatMatches(turn, query)), nextOffset: null };
+    if (this.options.storage.searchChats) return this.options.storage.searchChats(query, offset, conversationId, strict,
+      new Set(this.library.conversations.map(conversation => conversation.id)));
+    return { turns: this.chat.filter(turn => (!conversationId || turnConversation(turn.conversationId) === conversationId) && chatMatches(turn, query)), nextOffset: null, unavailable: 0 };
   }
-  async fullChat(id: string): Promise<ChatTurn | null> { if (!this.current || !this.options.storage.loadChat) return null; const turn = await this.options.storage.loadChat(id); return this.current ? turn : null; }
+  async fullChat(id: string, conversationId = this.library.active): Promise<ChatTurn | null> {
+    if (!this.current || !this.options.storage.loadChat) return null;
+    const turn = await this.options.storage.loadChat(id, conversationId);
+    if (turn.id !== id || turnConversation(turn.conversationId) !== conversationId)
+      throw Error("The saved message belongs to another conversation.");
+    return this.current ? turn : null;
+  }
   setSourceMode(mode: SourceMode): void { if (this.settingsLocked) return; this.sourceMode = readSourceMode(mode); this.preview = ""; this.changed(); }
-  async saveGeneratedFile(turnId: string, fileId: string): Promise<ChatTurn | null> {
+  async saveGeneratedFile(turnId: string, fileId: string, conversationId = this.library.active): Promise<ChatTurn | null> {
     if (this.settingsLocked || !this.current) return null;
     this.busy = true; this.changed();
     try {
-      const turn = this.options.storage.loadChat ? await this.options.storage.loadChat(turnId) : this.chat.find(item => item.id === turnId);
+      const turn = this.options.storage.loadChat ? await this.fullChat(turnId, conversationId) : this.chat.find(item => item.id === turnId);
       if (!this.current || !turn || turn.id !== turnId || turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated) throw Error("The full saved conversation could not be verified. Its original text is kept.");
       const file = turn.generated?.find(item => item.id === fileId); if (!file) throw Error("This generated file is not available in the saved conversation.");
       // This button authorizes one explicit attachment save, never a broader AI task.
@@ -1323,7 +1749,7 @@ export class AiWorkspace {
     finally { this.busy = false; this.changed(); }
   }
   async removeCalendar(): Promise<void> { if (this.settingsLocked) return; await this.calendar?.dispose(); this.calendar = null; this.delivery = null; this.preview = ""; this.changed(); }
-  async persist(): Promise<void> {
+  async persist(deleteId?: string): Promise<void> {
     if (!this.ready) await this.initialize();
     if (this.restoreFailed) throw Error("Saved work could not be read. The original work record was preserved.");
     const value = { ...this.conversationState(), mode: this.mode, readScope: this.readScope, writeScope: this.writeScope,
@@ -1331,7 +1757,19 @@ export class AiWorkspace {
       followUpDefault: this.followUpDefault, autoCompact: this.autoCompact, conversationLibrary: this.library,
       ...(this.customOnlineMaximum !== null ? { customOnlineMaximum: this.customOnlineMaximum } : {}),
       ...(this.customMaximum !== null ? { customMaximum: this.customMaximum } : {}) };
-    const next = this.saveQueue.then(async () => { if (!this.current) return; await this.options.storage.save(value); }); this.saveQueue = next.catch(() => {}); return next;
+    const next = this.saveQueue.then(async () => {
+      if (!this.current) {
+        if (deleteId) throw Error("The vault changed before deletion.");
+        return;
+      }
+      const storage = this.options.storage;
+      if (deleteId) {
+        if (!storage.deleteConversation) throw Error("Conversation deletion is unavailable.");
+        await storage.deleteConversation(deleteId, value);
+      } else await storage.save(value);
+    });
+    this.saveQueue = next.catch(() => {});
+    return next;
   }
   dispose(): void { this.alive = false; this.task?.dispose(); this.listeners.clear(); void this.calendar?.dispose(); this.calendarChanges.dispose(); this.workspaceCalendar?.dispose(); this.chronoHud?.dispose(); this.workspaceCalendarChanges.dispose(); }
 }

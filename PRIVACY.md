@@ -59,11 +59,10 @@ key fails, or cleanup cannot complete, the expiry is the fallback; provider abus
 No hosted vector store or persistent vault index is created. Long pauses can outlast uploaded-file availability.
 
 Code Interpreter stores generated files temporarily in its container. Results are downloaded only from validated
-OpenAI container/file references after identity/metadata checks, with bounded streaming and authenticated redirects disabled. Generated results and selected attachments are
-kept locally under `plugins/yoofloe/generated/` and `plugins/yoofloe/attachments/` in the vault configuration folder.
-Audio transcripts live alongside their local attachment copy. The plugin does not automatically erase these caches.
-After stopping work and disabling the plugin, you may delete those folders to remove local cached copies; existing
-saved note attachments and originals are separate files. Removing a file chip only removes it from the request.
+OpenAI container/file references after identity/metadata checks, with bounded streaming and authenticated redirects disabled.
+Generated results use the local `plugins/yoofloe/generated/` cache in the vault configuration folder. Selected input files
+and their audio transcripts are saved in encrypted device storage. Older attachment and transcript copies can remain in
+the configuration folder for migration. Removing a file chip removes it from the request.
 
 Search, containers, image generation and transcription can incur their own API charges. The interface tracks model
 requests, hosted tool calls and transcriptions separately. No limit removes the selected count cap; it does not mean
@@ -85,32 +84,29 @@ Requests already in flight may still be processed and charged after Stop.
 - Provider/model/effort choices and opaque prior plugin settings remain local. Gemini is hidden and inactive.
 - Keys use Obsidian secret storage with the existing vault-bound identifier. The UI checks local readback only;
   it does not establish that the key is valid remotely. The key is not written into plugin `data.json`.
-- Draft prompts, the latest answer and bounded prior turns are stored in the plugin configuration's `workspace.json`.
-- Conversation previews for the most recent 50 tasks are kept there for efficient display. Full request/answer records and
-  confirmed operation summaries are stored under `plugins/yoofloe/chats/` in the configuration directory. Loading an
-  archived conversation is local only; a new task sends limited recent context rather than the whole chat archive.
-- Original Markdown backups are stored under `Yoofloe AI/Backups/`; task journals list changed paths/digests under
-  the configuration directory's `plugins/yoofloe/tasks/`. Old panel layout state is backed up there before consolidation.
+- Drafts, full messages, conversation metadata and task journals use AES-256-GCM in Obsidian's device database,
+  outside the vault folder. The conversation key is separate from the OpenAI key and is kept in Obsidian Keychain.
+  Opening and searching the archive uses the verified local records. A new request uses bounded context and the current Access settings.
+- **Sync with this vault** saves that conversation's completed text, user corrections and note links in
+  `Yoofloe AI/Shared conversations/`. The folder follows your vault's sync settings. Obsidian Sync provides
+  end-to-end encryption when configured for the remote vault. Anyone who can read the local files can read the
+  shared messages. Drafts, file bytes, saved keys, OpenAI compaction data and pending actions stay outside this folder.
+- Original Markdown backups are stored under `Yoofloe AI/Backups/`. Old panel layout state is backed up in the plugin
+  configuration before consolidation.
 - Optional Calendar and ChronoHUD handoffs use the chosen vault’s local Inbox on Android and authenticated encrypted replies. Calendar change proposals use a
   separate encrypted payload and a short-lived transfer key in the Inbox request file. Keep the Inbox out of
   cloud sync if possible. Software that can read the Inbox can access its request files. Exact session files are
   cleaned up only when safe; independently changed or uncertain files are preserved.
 
-These local files can contain personal or confidential information. Vault sync, backup software and other trusted
-plugins may access or copy them. The plugin's scope guard is not an operating-system isolation boundary.
-Recovery files are excluded from AI search. No backup retention/deletion schedule runs automatically.
-You control local removal; verify your work first, then remove unneeded backups, task history and workspace state yourself.
-Removing the plugin alone may leave vault notes, backups, sync copies and Obsidian secrets behind.
-Use **Remove saved key** to remove that plugin's current vault-bound key from local secret storage.
+Vault backups, shared conversations, generated caches and existing configuration files can contain personal
+information and may be copied by vault sync or backups. Recovery and shared conversation files are excluded from
+Yoofloe's AI note search. **Stop syncing** removes the active vault copies after preserving device copies of received
+versions. Other devices, deleted-file history and backups can retain their own copies.
 
-To remove local conversation state, first finish or stop the task, use **Remove saved key** if you also want to remove
-the key, and disable Yoofloe. You can then remove `.obsidian/plugins/yoofloe/workspace.json` to clear the saved
-draft, latest answer, conversation previews and recent context. Remove `plugins/yoofloe/chats/` in that configuration
-directory as well if you want to remove full archived conversations. Older chat files are not purged automatically when
-their previews leave the recent 50-task display. For a custom configuration directory, substitute that directory for `.obsidian`.
-Task journals are under `plugins/yoofloe/tasks/` in that same configuration directory; original backups are ordinary
-vault files under `Yoofloe AI/Backups/`. Delete those only when you no longer need recovery. Removing a backup can make
-recovery unavailable. Other sync/backup copies and provider-side retention are managed separately.
+Older plaintext records under the plugin configuration are retained so that other devices can migrate. Check each
+device before removing the legacy `workspace.json`, `conversations/`, `chats/`, `attachments/` or `tasks/` files.
+Deleting these legacy files does not clear the new encrypted device records. Disabling or removing the plugin can
+leave those records and vault backups on the device. **Remove saved key** controls the OpenAI key in Obsidian Keychain.
 
 ## Scope, safety and your choices
 

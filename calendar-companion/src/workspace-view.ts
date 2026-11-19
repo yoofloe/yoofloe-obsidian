@@ -1,4 +1,4 @@
-import { Component, ItemView, MarkdownRenderer, Notice, Platform, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, Modal, Notice, Platform, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
 import { AiWorkspace } from "./workspace";
 import { MODE_LABELS, SCOPE_LABELS, WRITE_SCOPE_LABELS } from "./agent-policy";
 import { AREA_LABELS, PERIOD_LABELS } from "./question-query";
@@ -14,6 +14,7 @@ import { FOLLOW_UP_LIMIT, FOLLOW_UP_TEXT_LIMIT, type FollowUpMode } from "./foll
 import { formatWorkDuration } from "./work-activity";
 import { AUTO_COMPACT_TOKENS } from "./conversation-context";
 import { CONVERSATION_NAME_LIMIT, MAX_CONVERSATIONS, MAX_FOLDERS, turnConversation, type Conversation } from "./conversation-library";
+import type { SharedVersionChoice } from "./shared-conversations";
 import { CHAT_HISTORY_LIMIT, chatMatches, confirmedChangeCount, searchChatPreview, taskFailure, type ChatTurn } from "./chat-history";
 import { selectionLabel } from "./selection-reference";
 import { ReferenceModal } from "./reference-modal";
@@ -271,6 +272,7 @@ export class YoofloeAiView extends ItemView {
       if (epoch !== this.searchEpoch || !this.work.current) return;
       const ids = new Set(this.searchResults.map(turn => turn.id)); for (const turn of found.turns) if (!ids.has(turn.id)) { this.searchResults.push(turn); ids.add(turn.id); }
       this.searchNext = found.nextOffset;
+      if (found.unavailable) this.work.message = "Some saved messages could not be verified. The available results are shown.";
     } catch { if (epoch === this.searchEpoch) this.work.message = "Some local conversations could not be searched. Existing files are kept."; }
     finally {
       if (epoch === this.searchEpoch && this.work.current) {
@@ -359,10 +361,10 @@ export class YoofloeAiView extends ItemView {
     for (const file of (turn.generated ?? []).slice(0, visibleFiles)) {
       const card = assistant.createDiv({ cls: "y-ai-generated" }); card.createSpan({ text: file.name });
       if (["png", "jpg", "jpeg", "webp"].includes(file.extension)) { const picture = card.createEl("img", { attr: { src: this.app.vault.adapter.getResourcePath(generatedCachePath(this.app.vault.configDir, file)), alt: file.name, loading: "lazy" } }); picture.addEventListener("error", () => { picture.hidden = true; }); picture.addEventListener("load", () => { const scroll = this.contentEl.querySelector(".y-ai-messages"); if (this.followChat && !this.chatQuery && scroll) scroll.scrollTop = scroll.scrollHeight; }); }
-      this.button(card, "Save attachment", () => { void w.saveGeneratedFile(turn.id, file.id).then(saved => { if (saved && this.chatQuery) { const index = this.searchResults.findIndex(item => item.id === saved.id); if (index >= 0) this.searchResults[index] = saved; this.refreshConversationView(); } }); }, w.settingsLocked);
+      this.button(card, "Save attachment", () => { void w.saveGeneratedFile(turn.id, file.id, turnConversation(turn.conversationId)).then(saved => { if (saved && this.chatQuery) { const index = this.searchResults.findIndex(item => item.id === saved.id); if (index >= 0) this.searchResults[index] = saved; this.refreshConversationView(); } }); }, w.settingsLocked);
     }
     if ((turn.generated?.length ?? 0) > visibleFiles) this.button(assistant, "Show more generated files", () => { this.generatedVisible.set(turn.id, visibleFiles + 4); this.render(); });
-    if (turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated || turn.workDetailsTruncated) this.button(assistant, "Load full local conversation", () => { if (!this.chatQuery) void w.loadFullChat(turn.id); else void w.fullChat(turn.id).then(full => { if (full && this.chatQuery) { const index = this.searchResults.findIndex(item => item.id === turn.id); if (index >= 0) this.searchResults[index] = full; this.refreshConversationView(); } }).catch(() => new Notice("The full local conversation could not be loaded.")); });
+    if (turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated || turn.workDetailsTruncated) this.button(assistant, "Load full local conversation", () => { if (!this.chatQuery) void w.loadFullChat(turn.id); else void w.fullChat(turn.id, turnConversation(turn.conversationId)).then(full => { if (full && this.chatQuery) { const index = this.searchResults.findIndex(item => item.id === turn.id); if (index >= 0) this.searchResults[index] = full; this.refreshConversationView(); } }).catch(() => new Notice("The full local conversation could not be loaded.")); });
     this.chatCopy.decorate(assistant, turn, "assistant");
     this.highlight(exchange.querySelector<HTMLElement>(".y-ai-user") ?? exchange);
     return exchange;
@@ -430,6 +432,71 @@ export class YoofloeAiView extends ItemView {
       });
     });
   }
+  private deleteConfirmation(conversation: Conversation): void {
+    const work = this.work, modal = new Modal(this.app);
+    const title = conversation.name || "New conversation";
+    modal.setTitle("Delete conversation?");
+    modal.contentEl.createEl("p", { text: `Delete “${title}” and its messages and drafts from this device?` });
+    modal.contentEl.createEl("p", { text: conversation.shared
+      ? "The vault copy stays available to other devices. Saved notes and API keys are kept."
+      : "Saved notes and API keys are kept. Older copies in vault backups can still exist." });
+    const actions = modal.contentEl.createDiv({ cls: "y-ai-library-actions" });
+    this.button(actions, "Cancel", () => modal.close());
+    this.button(actions, "Delete", () => {
+      modal.close();
+      if (this.work === work) void work.deleteConversation(conversation.id).then(deleted => {
+        if (!deleted || this.work !== work) return;
+        this.chatQuery = "";
+        this.searchEpoch++;
+        this.searchResults = [];
+        this.searchNext = null;
+        this.render();
+      });
+    }, !work.canSwitchConversation || !!conversation.shared?.stopping, "mod-warning");
+    modal.open();
+  }
+  private syncConfirmation(conversation: Conversation, stop = false): void {
+    const w = this.work, modal = new Modal(this.app);
+    const title = stop ? "Stop syncing this conversation?" : "Sync this conversation with the vault?";
+    modal.contentEl.createEl("h2", { text: title });
+    modal.contentEl.createEl("p", { text: stop
+      ? "Yoofloe keeps a device copy before removing the shared files. Other devices keep copies they already saved. Obsidian Sync can retain deleted files in its history."
+      : "Anyone with access to this vault can read the shared conversation files. Confirm that your remote vault uses end-to-end encryption if you use Obsidian Sync." });
+    if (!stop) modal.contentEl.createEl("a", { text: "Obsidian sync encryption", href: "https://obsidian.md/help/sync/security",
+      attr: { target: "_blank", rel: "noopener noreferrer" } });
+    const actions = modal.contentEl.createDiv({ cls: "y-ai-library-actions" });
+    this.button(actions, "Cancel", () => modal.close());
+    this.button(actions, stop ? "Stop syncing" : "Sync with this vault", () => {
+      modal.close();
+      if (this.work !== w) return;
+      if (stop) void w.stopConversationSync(conversation.id);
+      else void w.syncConversation(conversation.id);
+    }, !w.canSwitchConversation, "mod-cta");
+    modal.open();
+  }
+  private async chooseSyncedConversation(id: string, revision: string, preferredId?: string): Promise<void> {
+    if (await this.work.openSyncedConversation(id, revision, preferredId)) {
+      this.libraryOpen = false;
+      this.chatQuery = "";
+      this.searchEpoch++;
+      this.render();
+    }
+  }
+  private syncedVersionButtons(el: HTMLElement, id: string, versions: readonly SharedVersionChoice[], entry?: Conversation): void {
+    for (const version of versions) {
+      const open = () => { void this.chooseSyncedConversation(id, version.revision, entry?.id); };
+      const label = !version.ready ? "Waiting for sync" : entry?.shared?.revision === version.revision
+        ? "Current device version" : entry && versions.length === 1 ? "Open vault update" : version.title;
+      const button = this.libraryButton(el, label, "cloud", open, !this.work.canSwitchConversation ||
+        !version.ready || entry?.shared?.revision === version.revision);
+      if (versions.length > 1) {
+        const detail = [new Date(version.at).toLocaleString(), version.lastRequest].filter(Boolean).join(" · ");
+        setTooltip(button, detail);
+        button.setAttribute("aria-label", label + " · " + detail);
+        button.createEl("small", { text: detail });
+      }
+    }
+  }
   private libraryConversation(el: HTMLElement, conversation: Conversation, showFolder = false): void {
     const w = this.work, title = conversation.name || "New conversation";
     const line = el.createDiv({ cls: "y-ai-library-row" });
@@ -447,13 +514,37 @@ export class YoofloeAiView extends ItemView {
     summary.setAttribute("aria-label", `Manage ${title}`);
     setIcon(summary, "ellipsis");
     const actions = menu.createDiv({ cls: "y-ai-library-actions" });
+    const addDelete = () => {
+      if (w.supportsConversationDeletion)
+        this.libraryButton(actions, "Delete", "trash-2", () => this.deleteConfirmation(conversation),
+          !w.canSwitchConversation || !!conversation.shared?.stopping).setAttribute("aria-label", `Delete ${title}`);
+    };
     if (conversation.archived) {
       this.libraryButton(actions, "Restore", "archive-restore", () => { void w.changeConversation(conversation.id, { archived: false }); }, !w.canSwitchConversation);
+      addDelete();
       return;
     }
     this.libraryButton(actions, "Rename", "pencil", () => this.editLibraryName("conversation", conversation.id, title), !w.canSwitchConversation);
     this.libraryButton(actions, conversation.pinned ? "Unpin" : "Pin", conversation.pinned ? "pin-off" : "pin", () => { void w.changeConversation(conversation.id, { pinned: !conversation.pinned }); }, !w.canSwitchConversation);
     this.libraryButton(actions, "Archive", "archive", () => { void w.changeConversation(conversation.id, { archived: true }); }, !w.canSwitchConversation);
+    addDelete();
+    if (w.supportsConversationSync) {
+      if (conversation.shared?.stopping) {
+        this.libraryButton(actions, "Finish stopping sync", "cloud-off", () => { void w.stopConversationSync(conversation.id); }, !w.canSwitchConversation);
+      } else if (w.isSharing(conversation)) {
+        if (w.needsSyncRetry(conversation))
+          this.libraryButton(actions, "Retry vault sync", "refresh-cw", () => { void w.syncConversation(conversation.id); }, !w.canSwitchConversation);
+        else actions.createEl("small", { text: "Saved to vault" });
+        const versions = w.syncedVersions(conversation);
+        if (versions.length > 1) actions.createEl("small", { text: "Choose a version. Both versions are kept." });
+        if (versions.some(version => version.revision !== conversation.shared?.revision))
+          this.syncedVersionButtons(actions, conversation.shared!.id, versions, conversation);
+        this.libraryButton(actions, "Stop syncing", "cloud-off", () => this.syncConfirmation(conversation, true), !w.canSwitchConversation);
+      } else {
+        actions.createEl("small", { text: "On this device" });
+        this.libraryButton(actions, "Sync with this vault", "cloud-upload", () => this.syncConfirmation(conversation), !w.canSwitchConversation);
+      }
+    }
     if (w.library.folders.length) {
       const label = menu.createEl("label", { cls: "y-ai-field" }); label.createSpan({ text: "Move to folder" });
       const select = label.createEl("select", { attr: { "aria-label": `Move ${title} to folder` } });
@@ -473,8 +564,23 @@ export class YoofloeAiView extends ItemView {
     this.libraryButton(top, "New conversation", "square-pen", () => void this.createConversation(), !w.canSwitchConversation || w.library.conversations.length >= MAX_CONVERSATIONS, true);
     this.libraryButton(top, "New folder", "folder-plus", () => this.editLibraryName("folder", null), !w.canSwitchConversation || w.library.folders.length >= MAX_FOLDERS, true);
     this.libraryNameEditor(panel);
+    if (w.legacyConversationNotice) panel.createEl("p", { text: w.legacyConversationNotice, cls: "y-ai-hint" });
     if (w.libraryMessage) panel.createEl("p", { text: w.libraryMessage, cls: "y-ai-hint", attr: { role: "status" } });
     if (!w.canSwitchConversation && !w.librarySaving) panel.createEl("p", { text: "Conversation controls are available when the workspace is idle.", cls: "y-ai-hint" });
+    const localShareIds = new Set(w.library.conversations.flatMap(item => item.shared ? [item.shared.id] : []));
+    const hiddenShares = new Set(w.library.hiddenShared);
+    const fromVault = w.sharedConversations.filter(item => !localShareIds.has(item.id) && !hiddenShares.has(item.id));
+    if (w.sharedStatus) panel.createEl("p", { text: w.sharedStatus, cls: "y-ai-hint", attr: { role: "status" } });
+    if (fromVault.length) {
+      const group = panel.createDiv({ cls: "y-ai-library-group" });
+      group.createEl("h4", { text: "From this vault" });
+      for (const item of fromVault) {
+        if (item.versions.length > 1) group.createEl("p", { text: "Choose a version. Both versions are kept.", cls: "y-ai-hint" });
+        this.syncedVersionButtons(group, item.id, item.versions);
+        if (item.problem && !item.versions.length) group.createEl("p", { cls: "y-ai-hint",
+          text: item.problem === "waiting" ? "Waiting for the conversation files to sync." : "A vault conversation could not be verified." });
+      }
+    }
     const ordered = [...w.library.conversations].sort((a, b) => b.updatedAt - a.updatedAt);
     const pinned = ordered.filter(item => !item.archived && item.pinned);
     if (pinned.length) {

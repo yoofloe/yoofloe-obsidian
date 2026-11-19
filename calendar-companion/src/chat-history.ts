@@ -24,6 +24,8 @@ export interface ChatTurn {
   uploadCleanupWarning?: string;
   generatedTruncated?: boolean;
   conversationId?: string; contextScope?: string | null;
+  sharedMessageId?: string;
+  sharedContext?: { conversationId: string; scope: string };
   durationMs?: number; activity?: WorkEvent[]; steers?: SteerNote[]; workDetailsTruncated?: boolean;
 }
 export const CHAT_HISTORY_LIMIT = 50;
@@ -79,11 +81,15 @@ export function readChat(value: unknown): ChatTurn | null {
     const a = action as Record<string, unknown>;
     if (typeof a.kind === "string" && typeof a.path === "string") actions.push({ kind: a.kind.slice(0, 32), path: a.path.slice(0, 500), ...(typeof a.target === "string" ? { target: a.target.slice(0, 500) } : {}) });
   }
+  const sharedContext = v.sharedContext && typeof v.sharedContext === "object" ? v.sharedContext as Record<string, unknown> : null;
   return { id: v.id, request: v.request, answer: v.answer, startedAt: typeof v.startedAt === "number" && Number.isFinite(v.startedAt) ? v.startedAt : null,
     model: typeof v.model === "string" ? v.model.slice(0, 128) : "", status, requests: count(v.requests), inputTokens: count(v.inputTokens), outputTokens: count(v.outputTokens), actions,
     ...(typeof v.durationMs === "number" && Number.isSafeInteger(v.durationMs) && v.durationMs >= 0 ? { durationMs: v.durationMs } : {}),
     ...(typeof v.conversationId === "string" && validChatId(v.conversationId) ? { conversationId: v.conversationId } : {}),
     ...(v.contextScope === null || validContextScope(v.contextScope) ? { contextScope: v.contextScope } : {}),
+    ...(typeof v.sharedMessageId === "string" && validChatId(v.sharedMessageId) ? { sharedMessageId: v.sharedMessageId } : {}),
+    ...(sharedContext && typeof sharedContext.conversationId === "string" && validChatId(sharedContext.conversationId) &&
+      validContextScope(sharedContext.scope) ? { sharedContext: { conversationId: sharedContext.conversationId, scope: sharedContext.scope } } : {}),
     activity: readActivity(v.activity), steers: readSteerNotes(v.steers), workDetailsTruncated: v.workDetailsTruncated === true,
     requestTruncated: v.requestTruncated === true, answerTruncated: v.answerTruncated === true,
     ...(typeof v.sourcePath === "string" ? { sourcePath: v.sourcePath.slice(0, 500) } : {}), actionsKnown: v.actionsKnown === true, actionTotal: Math.max(count(v.actionTotal), actions.length),

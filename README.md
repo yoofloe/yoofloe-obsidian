@@ -66,7 +66,14 @@ Folder scope includes subfolders while exclusions continue to apply. Selecting a
 
 Yoofloe has no server or cloud database. Yoofloe does not receive your notes, prompts or answers.
 When you choose Send, task data goes directly to OpenAI using your API key; API charges apply.
-Drafts, answers, recent context and recovery records remain on your device and may be copied by vault sync.
+Conversations are stored on this device by default. In **Conversations**, open a conversation's menu and choose
+**Sync with this vault** to make its completed messages available on other connected devices. Include the
+`Yoofloe AI/Shared conversations` folder in your Obsidian Sync settings. Anyone with access to the local vault files can read
+the shared records. Confirm that the remote vault uses end-to-end encryption. Open the conversation from
+**From this vault** on the other device. If edits diverge, choose which version to continue. **Stop syncing** saves a
+device copy of received versions and removes the shared files. Drafts, attachments and approval state stay on their device.
+Choose **Delete** in a conversation's menu to remove that conversation and its draft from this device. For a shared
+conversation, the vault copy stays available on other devices. Saved notes and API keys are kept.
 See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local removal and scope details.
 Note titles and vault-relative paths returned by search can also go to OpenAI. Select a passage while the Yoofloe pane is
 open to add a reference chip above the composer. Opening Yoofloe from a selected passage works too. Click the chip to preview it or create local image pages. Use its x button to remove
@@ -89,7 +96,7 @@ Current-news/search requests perform a real search, and saved research notes inc
 supports writing, translation, calculation and analysis of supplied facts. It uses OpenAI and is not offline AI.
 Switching source modes never expands note read/write permissions.
 
-Use **+** to select up to 10 files, 45 MiB combined. Images can be up to 20 MiB each, and audio recordings can be up to 25 MB each. Files are copied to a protected local plugin cache;
+Use **+** to select up to 10 files, 45 MiB combined. Images can be up to 20 MiB each, and audio recordings can be up to 25 MB each. Files are copied to encrypted device storage;
 selection makes no provider request. **Send** authorizes sharing the selected files with OpenAI.
 Supported inputs include PNG/JPEG/WebP, PDF, Office documents/spreadsheets, text/code and recorded audio
 (MP3, M4A, MP4, WAV, MPEG/MPGA and WebM). Unsupported or oversized files show an error before upload.

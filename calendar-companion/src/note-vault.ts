@@ -1,4 +1,5 @@
 import { App, MarkdownView, TFolder, type TFile, type Vault } from "obsidian";
+import { sharedConversationPath } from "./agent-policy";
 import { NOTE_CONTEXT_BYTES } from "./note-context";
 import { noteTerms, rankNote, type NoteWorkspace, type WorkspaceDocument } from "./note-workspace";
 const encoder = new TextEncoder();
@@ -8,7 +9,7 @@ export function createNoteWorkspace(app: App, vault: Vault, current: () => boole
   const guard = () => { if (!current() || app.vault !== vault) throw Error("The vault changed."); };
   const editorFor = (file: TFile) => app.workspace.getLeavesOfType("markdown").map(leaf => leaf.view)
     .find((view): view is MarkdownView => view instanceof MarkdownView && view.file === file && view.getMode() === "source")?.editor;
-  const valid = (file: TFile, path: string) => { guard(); return file.path === path && vault.getAbstractFileByPath(path) === file; };
+  const valid = (file: TFile, path: string) => { guard(); return !sharedConversationPath(path) && file.path === path && vault.getAbstractFileByPath(path) === file; };
   const read = async (file: TFile, path: string) => {
     if (!valid(file, path)) return null;
     const editor = editorFor(file), text = editor ? editor.getValue() : await vault.cachedRead(file);
@@ -19,7 +20,7 @@ export function createNoteWorkspace(app: App, vault: Vault, current: () => boole
   return {
     async search(question) {
       guard(); const terms = noteTerms(question);
-      const all = vault.getMarkdownFiles().filter(file => file.path !== sourcePath && !/^Yoofloe Calendar\/(?:AI backups|AI drafts)\//.test(file.path) && !/(?:^|\/)\./.test(file.path));
+      const all = vault.getMarkdownFiles().filter(file => file.path !== sourcePath && !sharedConversationPath(file.path) && !/^Yoofloe Calendar\/(?:AI backups|AI drafts)\//.test(file.path) && !/(?:^|\/)\./.test(file.path));
       const links = app.metadataCache.resolvedLinks[sourcePath] ?? {};
       const candidates = all.slice(0, 2000).map(file => ({ file, score: rankNote(file.basename, terms) * 8 + (links[file.path] ? 5 : 0) }))
         .sort((a, b) => b.score - a.score || a.file.path.localeCompare(b.file.path)).slice(0, 32);

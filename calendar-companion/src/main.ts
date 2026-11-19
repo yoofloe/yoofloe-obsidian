@@ -1,6 +1,5 @@
-import { turnConversation } from "./conversation-library";
 import { openDesktopResponse } from "./desktop-responses";
-import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, requestUrl, requireApiVersion, type SettingDefinitionRender } from "obsidian";
+import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, TFolder, requestUrl, requireApiVersion, type SettingDefinitionRender } from "obsidian";
 import { ACTION, INBOX } from "./protocol";
 import { CalendarSession, type TransferStore } from "./session";
 import { CalendarChangeSession } from "./calendar-change-session";
@@ -15,14 +14,17 @@ import { AiSession } from "./ai-session";
 import { AiSettingsModal, type AiContext } from "./ai-modals";
 import { AiWorkspace, type WorkspaceSource } from "./workspace";
 import { AI_VIEW, LegacyYoofloeView, YoofloeAiView } from "./workspace-view";
-import { loadWorkRecords, obsidianAgentHost } from "./obsidian-agent-host";
+import { obsidianAgentHost } from "./obsidian-agent-host";
 import { CompanionModal } from "./manual-import";
 import { captureSelectionReference, type SelectionReference } from "./selection-reference";
 import { observeNoteSelection } from "./note-selection-observer";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, PRIVACY_URL } from "./privacy-copy";
-import { readChat, validChatId, chatMatches, searchChatPreview, type ChatTurn } from "./chat-history";
+import { DeviceRecords, indexedRecordDatabase } from "./device-records";
+import { ConversationStorage } from "./conversation-storage";
+import { SharedConversations } from "./shared-conversations";
+import { sharedConversationPath, SHARED_CONVERSATIONS_PATH } from "./agent-policy";
 import { generatedStore } from "./generated-files";
-import { attachmentStore } from "./attachments";
+import { attachmentStore, MAX_ATTACHMENT_BYTES } from "./attachments";
 import { boundedOpenAiDownload, providerFiles } from "./provider-files";
 import { WorkspaceNotePicker } from "./note-picker";
 
@@ -111,7 +113,7 @@ export default class YoofloeAiPlugin extends Plugin {
     });
   }
   private capture(view: MarkdownView): WorkspaceSource | null {
-    if (!view.file) return null;
+    if (!view.file || sharedConversationPath(view.file.path)) return null;
     const source: WorkspaceSource = { path: view.file.path };
     if (view.getMode() === "source") {
       const ranges = view.editor.listSelections().map(({ anchor, head }) => {
@@ -265,28 +267,96 @@ export default class YoofloeAiPlugin extends Plugin {
     const ai = this.context(), owner = this.app.vault, adapter = owner.adapter, root = `${owner.configDir}/plugins/yoofloe`;
     const provider = providerFiles(async request => { const response = await requestUrl(request); return { status: response.status, text: response.text, arrayBuffer: response.arrayBuffer }; }, boundedOpenAiDownload);
     const localFiles = { configDir: owner.configDir, exists: (path: string) => adapter.exists(path), mkdir: async (path: string) => { if (!ai.current()) throw Error("Vault changed"); await adapter.mkdir(path); }, read: (path: string) => adapter.readBinary(path), write: async (path: string, bytes: ArrayBuffer) => { if (!ai.current()) throw Error("Vault changed"); await adapter.writeBinary(path, bytes); } };
-    const workspaceLimit = 8 * 1024 * 1024;
-    const readLocalState = async (path: string): Promise<unknown> => {
-      if (!ai.current()) throw Error("Vault changed");
-      if (!await adapter.exists(path)) return null;
-      const stat = await adapter.stat(path);
-      if (!stat || stat.size > workspaceLimit) throw Error("Saved work exceeds its local size limit.");
-      const value = JSON.parse(await adapter.read(path)) as unknown;
-      if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("The existing work record is not a workspace object.");
-      return value;
+    const viewWindow = this.app.workspace.containerEl.ownerDocument.defaultView ?? window;
+    const device = new DeviceRecords({
+      database: indexedRecordDatabase(viewWindow.indexedDB),
+      current: () => ai.current(),
+      secrets: () => requireApiVersion("1.11.5") ? this.app.secretStorage : null,
+      vaultId: () => {
+        const slot = "yoofloe-device-vault";
+        const value: unknown = this.app.loadLocalStorage(slot);
+        if (typeof value === "string" && /^[a-f0-9-]{36}$/.test(value)) return value;
+        if (value != null) throw Error("The device vault identifier is invalid.");
+        const id = crypto.randomUUID();
+        this.app.saveLocalStorage(slot, id);
+        if (this.app.loadLocalStorage(slot) !== id) throw Error("The device vault identifier could not be saved.");
+        return id;
+      },
+    });
+    const storage = new ConversationStorage(device, {
+      read: async (name, limit) => {
+        if (!ai.current()) throw Error("The vault changed.");
+        const path = root + "/" + name;
+        const stat = await adapter.stat(path);
+        if (!stat) return null;
+        if (stat.type !== "file" || stat.size > limit) throw Error("A legacy conversation file exceeds its device size limit.");
+        const bytes = await adapter.readBinary(path);
+        if (!ai.current() || bytes.byteLength > limit) throw Error("A legacy conversation file could not be verified.");
+        return bytes;
+      },
+      list: async folder => {
+        if (!ai.current()) throw Error("The vault changed.");
+        const path = root + "/" + folder;
+        return await adapter.exists(path) ? (await adapter.list(path)).files
+          .filter(file => file.startsWith(path + "/")).map(file => file.slice(root.length + 1)) : [];
+      },
+    }, () => ai.current());
+    const sharing = new SharedConversations({
+      current: () => ai.current(),
+      read: async (path, limit) => {
+        if (!ai.current() || !sharedConversationPath(path)) throw Error("The shared conversation path is unavailable.");
+        const stat = await adapter.stat(path);
+        if (!stat) return null;
+        if (stat.type !== "file" || stat.size > limit) throw Error("A synced conversation file exceeds its limit.");
+        const text = await adapter.read(path);
+        if (!ai.current() || new TextEncoder().encode(text).byteLength > limit) throw Error("A synced file could not be verified.");
+        return text;
+      },
+      list: async path => {
+        if (!ai.current() || !sharedConversationPath(path)) throw Error("The shared conversation folder is unavailable.");
+        return await adapter.exists(path) ? await adapter.list(path) : { files: [], folders: [] };
+      },
+      mkdir: async path => {
+        if (!sharedConversationPath(path)) throw Error("The shared conversation folder is unavailable.");
+        for (const name of ["Yoofloe AI", SHARED_CONVERSATIONS_PATH, path]) {
+          if (!ai.current()) throw Error("The vault changed.");
+          const item = owner.getAbstractFileByPath(name);
+          if (item instanceof TFolder) continue;
+          try { await owner.createFolder(name); }
+          catch { if (!(owner.getAbstractFileByPath(name) instanceof TFolder)) throw Error("The shared conversation folder could not be created."); }
+        }
+      },
+      create: async (path, text) => {
+        if (!ai.current() || !sharedConversationPath(path)) throw Error("The shared conversation path is unavailable.");
+        await owner.create(path, text);
+      },
+      remove: async (path, expected) => {
+        if (!ai.current() || !sharedConversationPath(path)) throw Error("The shared conversation path is unavailable.");
+        const file = owner.getAbstractFileByPath(path);
+        if (!(file instanceof TFile) || await owner.read(file) !== expected ||
+          !ai.current() || owner.getAbstractFileByPath(path) !== file) throw Error("A shared file changed before removal.");
+        await this.app.fileManager.trashFile(file);
+        if (await adapter.exists(path)) throw Error("A shared conversation file could not be removed.");
+      },
+    });
+    let sharedRefreshTimer = 0;
+    const refresh = (path: string, oldPath = "") => {
+      if (!sharedConversationPath(path) && !sharedConversationPath(oldPath)) return;
+      viewWindow.clearTimeout(sharedRefreshTimer);
+      sharedRefreshTimer = viewWindow.setTimeout(() => { void this.work?.refreshSharedConversations(); }, 200);
     };
-    const saveLocalState = async (path: string, value: unknown): Promise<void> => {
-      if (!ai.current()) throw Error("Vault changed");
-      const text = JSON.stringify(value);
-      if (new TextEncoder().encode(text).length > workspaceLimit) throw Error("Saved work exceeds its local size limit.");
-      await adapter.write(path, text);
-      if (!ai.current() || await adapter.read(path) !== text) throw Error("The local work record could not be confirmed.");
+    this.registerEvent(owner.on("create", file => refresh(file.path)));
+    this.registerEvent(owner.on("modify", file => refresh(file.path)));
+    this.registerEvent(owner.on("delete", file => refresh(file.path)));
+    this.registerEvent(owner.on("rename", (file, oldPath) => refresh(file.path, oldPath)));
+    this.register(() => viewWindow.clearTimeout(sharedRefreshTimer));
+    const privateAttachment = (path: string) => {
+      const name = path.slice(root.length + 1);
+      if (!path.startsWith(root + "/") || !/^attachments\/[a-f0-9-]{36}\.[a-z0-9]+(?:\.transcript\.txt)?$/.test(name))
+        throw Error("Invalid private attachment path.");
+      return name;
     };
-    const conversationPath = (id: string) => {
-      if (!validChatId(id)) throw Error("Invalid local conversation identifier.");
-      return `${root}/conversations/${id}.json`;
-    };
-    let chatQueue: Promise<void> = Promise.resolve();
+    const transcriptLimit = 512 * 1024;
     const companionStore: TransferStore = {
       exists: path => adapter.exists(path), mkdir: path => adapter.mkdir(path),
       write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
@@ -302,11 +372,24 @@ export default class YoofloeAiPlugin extends Plugin {
       ...(Platform.isDesktopApp ? { liveResponse: openDesktopResponse } : {}),
       streamResponses: Platform.isAndroidApp,
       generated: generatedStore({ ...localFiles, download: provider.download }),
-      attachments: attachmentStore({ ...localFiles, upload: provider.upload, transcribe: provider.transcribe, removeUpload: provider.removeUpload,
-        transcript: async path => { if (!await adapter.exists(path)) return null; const stat = await adapter.stat(path); if (!stat || stat.size > 512 * 1024) throw Error("The saved transcript exceeds its limit."); return adapter.read(path); },
-        saveTranscript: async (path, text) => { if (!ai.current()) throw Error("Vault changed"); await adapter.write(path, text); if (await adapter.read(path) !== text) throw Error("The transcript could not be saved locally."); },
+      attachments: attachmentStore({
+        configDir: owner.configDir, exists: path => Promise.resolve(path === root + "/attachments"),
+        mkdir: () => Promise.resolve(),
+        read: async path => {
+          const bytes = await storage.readBlob(privateAttachment(path), MAX_ATTACHMENT_BYTES);
+          if (!bytes) throw Error("The private attachment is unavailable. Attach it again.");
+          return bytes;
+        },
+        write: (path, bytes) => storage.saveBlob(privateAttachment(path), bytes, MAX_ATTACHMENT_BYTES),
+        upload: provider.upload, transcribe: provider.transcribe, removeUpload: provider.removeUpload,
+        transcript: async path => {
+          const bytes = await storage.readBlob(privateAttachment(path), transcriptLimit);
+          return bytes === null ? null : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        },
+        saveTranscript: (path, value) => storage.saveBlob(privateAttachment(path), new TextEncoder().encode(value).buffer, transcriptLimit),
       }),
-      host: current => obsidianAgentHost(this.app, owner, current), inboxHint: () => adapter.getResourcePath(`${INBOX}/`),
+      host: current => obsidianAgentHost(this.app, owner, current, journal => storage.saveJournal(journal)),
+      inboxHint: () => adapter.getResourcePath(INBOX + "/"),
       transport: async request => {
         if (!ai.current()) throw Error("Vault changed");
         const { status, text, headers } = await requestUrl(request);
@@ -317,56 +400,7 @@ export default class YoofloeAiPlugin extends Plugin {
         const { status, text, headers } = await requestUrl(request);
         return { status, text, headers };
       },
-      storage: {
-        load: () => readLocalState(`${root}/workspace.json`),
-        save: value => saveLocalState(`${root}/workspace.json`, value),
-        loadConversation: id => readLocalState(conversationPath(id)),
-        saveConversation: async (id, value) => {
-          if (!ai.current()) throw Error("Vault changed");
-          const path = conversationPath(id), folder = `${root}/conversations`;
-          if (!await adapter.exists(folder)) await adapter.mkdir(folder);
-          await saveLocalState(path, value);
-        },
-        history: () => loadWorkRecords(owner),
-        saveChat: (turn: ChatTurn) => {
-          if (!validChatId(turn.id)) return Promise.reject(Error("Invalid local chat record."));
-          if (turn.requestTruncated || turn.answerTruncated || turn.generatedTruncated || turn.workDetailsTruncated) return Promise.reject(Error("Load the full conversation before updating its archive."));
-          const text = JSON.stringify({ ...turn, requestTruncated: false, answerTruncated: false, generatedTruncated: false });
-          if (new TextEncoder().encode(text).length > 6 * 1024 * 1024) return Promise.reject(Error("The full chat record exceeds its local size limit. The current answer is kept."));
-          const next = chatQueue.then(async () => {
-            if (!ai.current()) throw Error("Vault changed"); const folder = `${root}/chats`; if (!await adapter.exists(folder)) await adapter.mkdir(folder);
-            const path = `${folder}/${turn.id}.json`; await adapter.write(path, text); if (!ai.current() || await adapter.read(path) !== text) throw Error("Local chat saving could not be confirmed.");
-          }); chatQueue = next.catch(() => {}); return next;
-        },
-        loadChat: async id => {
-          if (!ai.current() || !validChatId(id)) throw Error("This chat record is unavailable.");
-          const path = `${root}/chats/${id}.json`, stat = await adapter.stat(path);
-          if (!stat || stat.size > 6 * 1024 * 1024) throw Error("This full chat record cannot be read safely.");
-          const turn = readChat(JSON.parse(await adapter.read(path)) as unknown); if (!ai.current() || turn?.id !== id) throw Error("The local chat record could not be confirmed."); return turn;
-        },
-        searchChats: async (query, offset, conversationId, strict = false) => {
-          if (!ai.current() || !query.trim() && !conversationId || conversationId && !validChatId(conversationId) || query.length > 200 || !Number.isSafeInteger(offset) || offset < 0) return { turns: [], nextOffset: null };
-          const folder = `${root}/chats`; if (!await adapter.exists(folder)) return { turns: [], nextOffset: null };
-          const listing = await adapter.list(folder), paths = listing.files.filter(path => { const name = path.slice(folder.length + 1); return path.startsWith(folder + "/") && name.endsWith(".json") && validChatId(name.slice(0, -5)); }).sort().reverse();
-          const turns: ChatTurn[] = []; let index = offset, bytes = 0;
-          for (; index < Math.min(paths.length, offset + 20); index++) {
-            if (!ai.current()) break; const stat = await adapter.stat(paths[index]);
-            if (!stat || stat.size > 6 * 1024 * 1024) {
-              if (strict) throw Error("A saved message could not be read. Check the local chat archive and try again.");
-              continue;
-            }
-            if (bytes && bytes + stat.size > 8 * 1024 * 1024) break; bytes += stat.size;
-            try {
-              const turn = readChat(JSON.parse(await adapter.read(paths[index])) as unknown);
-              if (!turn && strict) throw Error("Invalid saved message.");
-              if (turn && (!conversationId || turnConversation(turn.conversationId) === conversationId) && (!query || chatMatches(turn, query))) turns.push(query ? searchChatPreview(turn, query) : turn);
-            } catch {
-              if (strict) throw Error("A saved message could not be read. Check the local chat archive and try again.");
-            }
-          }
-          return { turns, nextOffset: index < paths.length ? index : null };
-        },
-      },
+      storage, sharing,
       ...(Platform.isAndroidApp ? {
         calendar: () => new CalendarSession(companionOptions),
         calendarChange: () => new CalendarChangeSession({ ...companionOptions, canClean: () => this.app.vault === owner }),
