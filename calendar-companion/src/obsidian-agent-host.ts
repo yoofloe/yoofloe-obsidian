@@ -1,8 +1,8 @@
 import { App, MarkdownView, TFile, TFolder, normalizePath, parseYaml, stringifyYaml, type Vault } from "obsidian";
-import { validateJournal, type AgentFile, type AgentHost, type WorkJournal } from "./vault-agent";
+import { type AgentFile, type AgentHost, type WorkJournal } from "./vault-agent";
 import { vaultPath } from "./agent-policy";
 import { binaryDigest, generatedCachePath, generatedPath, MAX_GENERATED_BYTES, validateGeneratedBytes } from "./generated-files";
-export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean): AgentHost {
+export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean, saveJournal: (journal: WorkJournal) => Promise<void>): AgentHost {
   const guard = () => { if (!current() || app.vault !== vault) throw Error("The task stopped or the vault changed."); };
   const fileFor = (file: AgentFile): TFile => { guard(); const item = vault.getAbstractFileByPath(file.path); if (!(item instanceof TFile) || item !== file.identity) throw Error("The note was renamed or replaced."); return item; };
   const record = (file: TFile): AgentFile => ({ identity: file, path: file.path, title: file.basename, size: file.stat.size });
@@ -96,20 +96,9 @@ export function obsidianAgentHost(app: App, vault: Vault, current: () => boolean
     },
     async readBackup(path) { guard(); if (!/^Yoofloe AI\/Backups\/[0-9a-f-]+\.md$/.test(path)) throw Error("Invalid backup reference."); const file = vault.getAbstractFileByPath(path); if (!(file instanceof TFile)) throw Error("The backup is missing."); return await vault.read(file); },
     async persist(journal) {
-      guard(); if (!/^[0-9a-f-]{36}$/.test(journal.id)) throw Error("Invalid work record.");
-      const root = `${vault.configDir}/plugins/yoofloe/tasks`;
-      if (!await vault.adapter.exists(root)) { guard(); await vault.adapter.mkdir(root); }
-      guard(); const path = `${root}/${journal.id}.json`, text = JSON.stringify(journal); await vault.adapter.write(path, text); guard();
-      if (await vault.adapter.read(path) !== text) throw Error("The recovery record could not be confirmed. The task was stopped.");
+      guard();
+      await saveJournal(journal);
+      guard();
     },
   };
-}
-export async function loadWorkRecords(vault: Vault): Promise<WorkJournal[]> {
-  const root = `${vault.configDir}/plugins/yoofloe/tasks`; if (!await vault.adapter.exists(root)) return [];
-  const listing = await vault.adapter.list(root), journals: WorkJournal[] = [];
-  for (const path of listing.files.filter(path => /\/[0-9a-f-]{36}\.json$/.test(path)).slice(-30)) {
-    const stat = await vault.adapter.stat(path); if (!stat || stat.size > 262144) continue;
-    try { const data: unknown = JSON.parse(await vault.adapter.read(path)); validateJournal(data); if (path.endsWith(`/${data.id}.json`)) journals.push(data); } catch { /* An uncertain record is kept on disk. */ }
-  }
-  return journals.sort((a, b) => b.createdAt - a.createdAt);
 }

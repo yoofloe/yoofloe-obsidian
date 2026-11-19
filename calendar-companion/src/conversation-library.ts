@@ -4,8 +4,10 @@ export const FIRST_CONVERSATION_ID = "inbox";
 export const MAX_CONVERSATIONS = 200;
 export const MAX_FOLDERS = 50;
 export const CONVERSATION_NAME_LIMIT = 100;
+const SHARE_ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 
 export interface ConversationFolder { id: string; name: string }
+export interface SharedConversationBinding { id: string; revision: string | null; pending?: boolean; stopping?: boolean }
 export interface Conversation {
   id: string;
   name: string;
@@ -13,11 +15,13 @@ export interface Conversation {
   pinned: boolean;
   archived: boolean;
   updatedAt: number;
+  shared?: SharedConversationBinding;
 }
 export interface ConversationLibrary {
   active: string;
   conversations: Conversation[];
   folders: ConversationFolder[];
+  hiddenShared?: string[];
 }
 export function conversationName(value: unknown): string {
   return typeof value === "string" ? [...value.trim().slice(0, CONVERSATION_NAME_LIMIT)].map(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 ? " " : char).join("").trim() : "";
@@ -26,6 +30,14 @@ export function newConversationRecord(id: string, folderId: string | null = null
   return { id, name: "", folderId, pinned: false, archived: false, updatedAt: Date.now() };
 }
 export function turnConversation(value: string | undefined): string { return value ?? FIRST_CONVERSATION_ID; }
+
+function readSharing(value: unknown): SharedConversationBinding | undefined {
+  if (!value || typeof value !== "object") return;
+  const { id, revision, pending, stopping } = value as Record<string, unknown>;
+  if (typeof id === "string" && SHARE_ID.test(id) &&
+    (revision === null || typeof revision === "string" && /^[a-f0-9]{64}$/.test(revision)))
+    return { id, revision, ...(pending === true ? { pending: true } : {}), ...(stopping === true ? { stopping: true } : {}) };
+}
 
 export function readLibrary(raw: unknown): ConversationLibrary {
   const source = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
@@ -39,15 +51,20 @@ export function readLibrary(raw: unknown): ConversationLibrary {
   }
   if (Array.isArray(source.conversations)) for (const row of source.conversations.slice(0, MAX_CONVERSATIONS) as unknown[]) {
     if (!row || typeof row !== "object") continue;
-    const { id, name, folderId, pinned, archived, updatedAt } = row as Record<string, unknown>;
+    const { id, name, folderId, pinned, archived, updatedAt, shared } = row as Record<string, unknown>;
     if (typeof id !== "string" || !validChatId(id) || conversationIds.has(id)) continue;
     conversationIds.add(id);
+    const binding = readSharing(shared);
     conversations.push({ id, name: conversationName(name), folderId: typeof folderId === "string" && folderIds.has(folderId) ? folderId : null,
-      pinned: pinned === true, archived: archived === true, updatedAt: typeof updatedAt === "number" && Number.isFinite(updatedAt) ? updatedAt : 0 });
+      pinned: pinned === true, archived: archived === true, updatedAt: typeof updatedAt === "number" && Number.isFinite(updatedAt) ? updatedAt : 0,
+      ...(binding ? { shared: binding } : {}) });
   }
   if (!conversations.length) conversations.push(newConversationRecord(FIRST_CONVERSATION_ID));
   const active = conversations.find(conversation => conversation.id === source.active && !conversation.archived) ??
     conversations.find(conversation => !conversation.archived) ?? conversations[0];
   active.archived = false;
-  return { active: active.id, conversations, folders };
+  const hiddenShared = Array.isArray(source.hiddenShared)
+    ? [...new Set((source.hiddenShared as unknown[]).filter((id): id is string => typeof id === "string" && SHARE_ID.test(id)))]
+    : [];
+  return { active: active.id, conversations, folders, ...(hiddenShared.length ? { hiddenShared } : {}) };
 }

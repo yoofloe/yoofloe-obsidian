@@ -18,8 +18,14 @@ export function validTaskPath(policy: TaskPolicy, path: string, allowNonMarkdown
   try { vaultPath(path, allowNonMarkdown); } catch { return false; }
   // Block case aliases conservatively; permission scopes below still require exact paths.
   const blockedPath = path.toLowerCase();
-  return !(inside(blockedPath, policy.configDir.toLowerCase()) || /^(?:Yoofloe AI\/(?:Backups|History)|Yoofloe Calendar\/(?:AI backups|AI drafts|Inbox))(?:\/|$)/i.test(path) || policy.excluded.some(root => inside(blockedPath, root.toLowerCase())));
+  return !(inside(blockedPath, policy.configDir.toLowerCase()) || sharedConversationPath(path) || /^(?:Yoofloe AI\/(?:Backups|History)|Yoofloe Calendar\/(?:AI backups|AI drafts|Inbox))(?:\/|$)/i.test(path) || policy.excluded.some(root => inside(blockedPath, root.toLowerCase())));
 }
+export const SHARED_CONVERSATIONS_PATH = "Yoofloe AI/Shared conversations";
+
+export function sharedConversationPath(path: string): boolean {
+  return inside(path.replaceAll("\\", "/").toLowerCase(), SHARED_CONVERSATIONS_PATH.toLowerCase());
+}
+
 export function allowedPath(policy: TaskPolicy, path: string, action: "read" | "edit" | "create" | "organize", attachment = false): boolean {
   if (!validTaskPath(policy, path, attachment || action === "organize" && !path.endsWith(".md"))) return false;
   if (action !== "read" && policy.mode === "ask" || action === "organize" && policy.mode !== "organize" && policy.mode !== "all") return false;
