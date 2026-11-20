@@ -179,9 +179,19 @@
 .yoofloe-ai .y-ai-result-actions { display:flex; justify-content:flex-end; margin-top:8px; }
 .yoofloe-ai .y-ai-result-actions button { border:0; box-shadow:none; background:transparent; font-size:var(--font-ui-smaller); color:var(--text-muted); }
 .yoofloe-ai .y-ai-dock { display:flex; flex-direction:column; gap:3px; flex-shrink:0; min-width:0; margin:0 10px 10px; padding:6px 8px 4px; border:1px solid var(--background-modifier-border); border-radius:14px; background:var(--background-primary); box-shadow:0 2px 6px rgba(0,0,0,0.03); container:y-ai-composer / inline-size; }
-.yoofloe-ai .y-ai-compose { min-height:0; min-width:0; }
-.yoofloe-ai .y-ai-compose textarea { display:block; box-sizing:border-box; width:100%; resize:none; height:auto; min-height:0; overflow-y:hidden; padding:4px 2px; border:0; background:transparent; box-shadow:none; font:inherit; line-height:1.45; }
+.yoofloe-ai .y-ai-compose { --y-ai-reference-slot:28px; position:relative; min-height:0; min-width:0; }
+.yoofloe-ai .y-ai-compose textarea { display:block; box-sizing:border-box; width:calc(100% - var(--y-ai-reference-slot)); min-width:0; resize:none; height:auto; min-height:0; overflow-y:hidden; padding:4px 2px; border:0; background:transparent; box-shadow:none; font:inherit; line-height:1.45; }
 .yoofloe-ai .y-ai-compose textarea.is-overflowing { overflow-y:auto; }
+.yoofloe-ai .y-ai-compose > button.y-ai-reference-trigger {
+  position:absolute; inset-block-start:0; inset-inline-end:0; display:grid; place-items:center;
+  inline-size:var(--y-ai-reference-slot); block-size:min(100%,calc(1.45em + 8px)); min-width:0; min-height:0;
+  padding:0; border:0; border-radius:var(--radius-s); background:transparent; box-shadow:none; color:var(--text-muted); font:inherit;
+}
+.yoofloe-ai .y-ai-compose > button.y-ai-reference-trigger[hidden] { display:none; }
+.yoofloe-ai .y-ai-compose > button.y-ai-reference-trigger[data-action="preview"] { color:var(--text-accent); }
+.yoofloe-ai .y-ai-compose > button.y-ai-reference-trigger:hover { background:var(--background-modifier-hover); }
+.yoofloe-ai .y-ai-reference-trigger:focus-visible { outline:2px solid var(--interactive-accent); outline-offset:-2px; }
+.yoofloe-ai .y-ai-reference-trigger svg { width:15px; height:15px; }
 .yoofloe-ai .y-ai-row { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; margin:0; }
 .yoofloe-ai .y-ai-composer-controls { gap:4px; }
 .yoofloe-ai .y-ai-composer-options { display:flex; align-items:stretch; flex:0 0 auto; gap:4px; max-width:100%; overflow-x:auto; }
@@ -207,6 +217,7 @@
 .yoofloe-ai .y-ai-row :is(.y-ai-send,.y-ai-add-message,.y-ai-attach,.y-ai-close-follow-up) svg { width:16px; height:16px; }
 .yoofloe-ai .y-ai-row .y-ai-send[data-action="stop"] svg rect { fill:currentColor; }
 @media (pointer:coarse) {
+  .yoofloe-ai .y-ai-compose { --y-ai-reference-slot:36px; }
   .yoofloe-ai .y-ai-row select { min-height:36px; }
   .yoofloe-ai .y-ai-option-picker { min-height:36px; }
   .yoofloe-ai .y-ai-row :is(button.y-ai-send,button.y-ai-add-message) { flex-basis:36px; width:36px; height:36px; }
@@ -372,7 +383,10 @@
 .yoofloe-ai .y-ai-sent-file { max-width:100%; padding:3px 6px; border:1px solid var(--background-modifier-border); border-radius:5px; font-size:var(--font-ui-smaller); overflow-wrap:anywhere; }
 .yoofloe-ai .y-ai-sent-files button { min-height:26px; padding:3px 6px; font-size:var(--font-ui-smaller); background:transparent; box-shadow:none; }
 
-.yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock { display:grid; grid-template-columns:minmax(0,1fr) max-content; align-items:end; gap:6px; }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock { display:grid; grid-template-columns:minmax(0,1fr) fit-content(62%); align-items:end; gap:6px; }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock > .y-ai-compose { grid-column:1; }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock:not(.y-ai-add-message-visible,.y-ai-follow-up-open) > .y-ai-composer-controls { grid-column:2; }
+.yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock > :is(.y-ai-calendar-proposal,.y-ai-input-budget) { grid-column:1 / -1; }
 .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-api, .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-attachments, .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-row .y-ai-field, .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-row .y-ai-attach { display:none; }
 .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock.y-ai-add-message-visible,
 .yoofloe-ai.y-ai-tiny:not(.y-ai-searching) .y-ai-dock.y-ai-follow-up-open { grid-template-columns:minmax(0,1fr); }
@@ -431,17 +445,10 @@
 .yoofloe-ai .y-ai-context-toggle { display:flex; align-items:center; gap:8px; font-size:var(--font-ui-small); }
 .yoofloe-ai .y-ai-context-toggle input { flex:none; width:auto; min-height:0; margin:0; }
 
-.yoofloe-ai .y-ai-reference-chip { display:flex; align-items:center; gap:4px; min-width:0; max-width:100%; border:1px solid var(--background-modifier-border); border-radius:var(--radius-s); background:var(--background-secondary); padding:2px 4px; }
-.yoofloe-ai button.y-ai-reference-open { display:flex; align-items:center; gap:6px; flex:1; min-width:0; height:auto; min-height:28px; padding:4px; background:transparent; box-shadow:none; text-align:start; white-space:normal; overflow-wrap:anywhere; font-size:var(--font-ui-small); }
-.yoofloe-ai .y-ai-reference-icon { display:flex; flex:0 0 16px; }
-.yoofloe-ai .y-ai-reference-icon svg { width:16px; height:16px; }
-.yoofloe-ai button.y-ai-reference-remove { flex:0 0 32px; min-height:32px; padding:4px; }
-.yoofloe-ai button.y-ai-reference-undo { align-self:flex-start; padding:4px 8px; height:auto; font-size:var(--font-ui-smaller); }
 .yoofloe-ai button.y-ai-sent-reference { height:auto; max-width:100%; text-align:start; white-space:normal; overflow-wrap:anywhere; font-size:var(--font-ui-smaller); }
 .y-ai-reference-preview .y-ai-reference-text { max-height:55vh; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
 .y-ai-reference-preview .y-ai-reference-label { overflow-wrap:anywhere; }
 .y-ai-reference-preview .y-ai-reference-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px; }
-.is-mobile .yoofloe-ai button.y-ai-reference-remove { flex-basis:40px; min-height:40px; }
 
 .yoofloe-ai button.y-ai-input-budget { align-self:flex-start; display:block; height:auto; min-height:24px; padding:2px 0; background:transparent; box-shadow:none; color:var(--text-muted); font-size:var(--font-ui-smaller); white-space:normal; text-align:start; }
 

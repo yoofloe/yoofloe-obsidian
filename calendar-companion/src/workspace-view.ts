@@ -330,7 +330,9 @@ export class YoofloeAiView extends ItemView {
       if (turn.attachments?.length) { const files = user.createDiv({ cls: "y-ai-sent-files" }); for (const file of turn.attachments) files.createSpan({ text: file.name, cls: "y-ai-sent-file" }); this.button(files, "Attach again", () => w.useAttachments(turn.attachments!), w.settingsLocked); }
       if (turn.reference) {
         const reference = turn.reference;
-        const source = this.button(user, selectionLabel(reference), () => new ReferenceModal(this.app, w, reference, this.showFollowUp, turn.referenceSnapshot).open(), false, "y-ai-sent-reference");
+        const source = this.button(user, selectionLabel(reference), () => new ReferenceModal(this.app, w, reference, {
+          followUp: this.showFollowUp, snapshot: turn.referenceSnapshot,
+        }).open(), false, "y-ai-sent-reference");
         setTooltip(source, "View the reference used for this message");
       }
       this.chatCopy.decorate(user, turn, "user");
@@ -762,6 +764,20 @@ export class YoofloeAiView extends ItemView {
   private refreshComposer(): void {
     const el = this.contentEl, w = this.work;
     this.composerOptions.refresh();
+    const reference = el.querySelector<HTMLButtonElement>(".y-ai-reference-trigger");
+    const referenceAction = w.reference ? "preview" : w.canRestoreReference ? "restore" : "none";
+    if (reference && reference.dataset.action !== referenceAction) {
+      reference.dataset.action = referenceAction;
+      reference.hidden = referenceAction === "none";
+      if (!reference.hidden) {
+        const label = referenceAction === "preview" ? "Preview selected reference" : "Restore reference";
+        reference.setAttribute("aria-label", label);
+        if (referenceAction === "preview") reference.setAttribute("aria-haspopup", "dialog");
+        else reference.removeAttribute("aria-haspopup");
+        setTooltip(reference, label);
+        setIcon(reference, referenceAction === "preview" ? "text-select" : "undo-2");
+      }
+    }
     const followUp = el.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input");
     if (followUp) followUp.readOnly = w.followUpSaving;
     const run = el.querySelector<HTMLButtonElement>(".y-ai-send");
@@ -1041,6 +1057,7 @@ export class YoofloeAiView extends ItemView {
       ? [(activeField as HTMLTextAreaElement).selectionStart, (activeField as HTMLTextAreaElement).selectionEnd] as const : null;
     const followUpSelection = activeField?.matches(".y-ai-follow-up-input") && el.contains(activeField)
       ? [(activeField as HTMLTextAreaElement).selectionStart, (activeField as HTMLTextAreaElement).selectionEnd] as const : null;
+    const referenceFocused = activeField?.matches(".y-ai-reference-trigger") && el.contains(activeField);
     const dividerFocused = !!activeField && el.contains(activeField) && activeField.classList.contains("y-ai-split-handle");
     const settingsFocus = activeField && el.querySelector(".y-ai-scroll")?.contains(activeField) && activeField.matches("input,textarea,select") ? activeField.getAttribute("aria-label") : null;
     const selectionStart = settingsFocus && "selectionStart" in activeField! ? (activeField as HTMLInputElement).selectionStart : null;
@@ -1194,19 +1211,6 @@ export class YoofloeAiView extends ItemView {
     const followUp = this.showFollowUp;
     const dock = chatPanel.createDiv({ cls: `y-ai-dock${followUp ? " y-ai-follow-up-open" : ""}` });
     calendarChangeCard(dock, w);
-    if (w.reference) {
-      const reference = w.reference, chip = dock.createDiv({ cls: "y-ai-reference-chip", attr: { "aria-label": "Selected reference" } });
-      const preview = this.button(chip, "", () => new ReferenceModal(this.app, w, reference, followUp).open(), false, "y-ai-reference-open");
-      setIcon(preview.createSpan({ cls: "y-ai-reference-icon" }), "text-select");
-      preview.createSpan({ text: selectionLabel(reference) });
-      setTooltip(preview, "Preview reference. Access settings control where edits are allowed.");
-      const remove = this.button(chip, "", () => w.removeReference(), !w.canChangeReference, "clickable-icon y-ai-reference-remove");
-      remove.setAttribute("aria-label", "Remove reference from the next message"); setTooltip(remove, "Remove reference");
-      setIcon(remove, "x");
-    } else if (w.canRestoreReference) {
-      const undo = this.button(dock, "Restore reference", () => w.restoreReference(), false, "y-ai-reference-undo");
-      setTooltip(undo, "Restore the last reference and its selected images");
-    }
     const selectedAttachments = followUp ? w.followUpAttachments : w.attachments;
     if (selectedAttachments.length) {
       const attachments = dock.createDiv({ cls: "y-ai-attachments", attr: { "aria-label": "Attached files" } });
@@ -1229,6 +1233,12 @@ export class YoofloeAiView extends ItemView {
         }, 0);
       });
     }
+    const referenceButton = this.button(compose, "", () => {
+      const reference = w.reference;
+      if (reference) new ReferenceModal(this.app, w, reference, { followUp, draft: true }).open();
+      else w.restoreReference();
+    }, false, "clickable-icon y-ai-reference-trigger");
+    referenceButton.hidden = true;
     const addMessage = this.button(controls, "", () => this.openFollowUp(), false, "y-ai-add-message clickable-icon");
     addMessage.setAttribute("aria-label", "Reopen follow-up draft");
     setTooltip(addMessage, "Reopen follow-up draft");
@@ -1269,6 +1279,10 @@ export class YoofloeAiView extends ItemView {
     if (followUpSelection && followUp) {
       const input = el.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input");
       input?.focus({ preventScroll: true }); input?.setSelectionRange(...followUpSelection); if (input) this.sizeComposerInput(input);
+    }
+    if (referenceFocused && !this.settingsExpanded) {
+      const target = referenceButton.hidden ? compose.querySelector<HTMLElement>(followUp ? ".y-ai-follow-up-input" : ".y-ai-primary-prompt") : referenceButton;
+      target?.focus({ preventScroll: true });
     }
     if (dividerFocused && !divider.hidden) divider.focus({ preventScroll: true });
   }

@@ -1,25 +1,40 @@
 import { Modal, setIcon, type App } from "obsidian";
+import { SCOPE_LABELS } from "./agent-policy";
 import type { AiWorkspace } from "./workspace";
 import { selectionLabel, type ReferenceSnapshot, type SelectionReference } from "./selection-reference";
 import { selectionImages } from "./selection-image";
 import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES } from "./attachments";
 
+interface ReferenceModalOptions {
+  followUp?: boolean;
+  snapshot?: ReferenceSnapshot;
+  draft?: boolean;
+}
+
 /** This preview reads local text. Provider work starts from the composer. */
 export class ReferenceModal extends Modal {
   private alive = true;
   private imageUrls: string[] = [];
-  constructor(app: App, private readonly work: AiWorkspace, private readonly reference: SelectionReference, private readonly followUp = false, private readonly snapshot?: ReferenceSnapshot) { super(app); }
+  constructor(app: App, private readonly work: AiWorkspace, private readonly reference: SelectionReference, private readonly options: ReferenceModalOptions = {}) { super(app); }
   onOpen(): void {
+    const { draft, followUp = false, snapshot } = this.options;
     this.titleEl.setText("Reference");
     this.contentEl.addClass("y-ai-reference-preview");
     this.contentEl.createEl("p", { text: selectionLabel(this.reference), cls: "y-ai-reference-label" });
+    if (draft) {
+      const scope = this.work.readScope;
+      const access = [SCOPE_LABELS[scope]];
+      if (scope === "current") access.push(this.work.source ? this.work.title : "No note attached");
+      if (scope === "folder") access.push(this.work.outputFolder.trim() || "Vault root");
+      this.contentEl.createEl("p", { text: `Access · ${access.join(" · ")}`, cls: "y-ai-hint" });
+    }
     const state = this.contentEl.createEl("p", { text: "Loading reference…", cls: "y-ai-hint", attr: { role: "status" } });
     const text = this.contentEl.createEl("pre", { cls: "y-ai-reference-text", attr: { tabindex: "0", "aria-label": "Reference text" } });
     const actions = this.contentEl.createDiv({ cls: "y-ai-reference-actions" });
     const gallery = this.contentEl.createDiv({ cls: "y-ai-reference-images" });
     const open = actions.createEl("button", { text: "Open note" });
     open.addEventListener("click", () => { this.close(); void this.app.workspace.openLinkText(this.reference.path, ""); });
-    const whole = actions.createEl("button", { text: "Use whole note" });
+    const whole = actions.createEl("button", { text: "Attach whole note" });
     whole.disabled = !this.work.canChangeReference || this.reference.wholeNote === true;
     whole.addEventListener("click", () => {
       whole.disabled = true;
@@ -27,12 +42,22 @@ export class ReferenceModal extends Modal {
         .catch(error => { if (this.alive) state.setText(error instanceof Error ? error.message : "The reference could not be updated."); })
         .finally(() => { whole.disabled = !this.work.canChangeReference || this.reference.wholeNote === true; });
     });
-    if (this.snapshot) {
-      text.setText(this.snapshot.text);
-      state.setText(this.snapshot.partial ? "Saved preview of the opening passage." : "Saved reference from this message.");
+    if (snapshot) {
+      text.setText(snapshot.text);
+      state.setText(snapshot.partial ? "Saved preview of the opening passage." : "Saved reference from this message.");
       const close = actions.createEl("button", { text: "Close" });
       close.addEventListener("click", () => this.close());
       return;
+    }
+    if (draft) {
+      const canRemove = () => this.work.canChangeReference && this.work.reference?.id === this.reference.id;
+      const remove = actions.createEl("button", { text: "Remove reference" });
+      remove.disabled = !canRemove();
+      remove.addEventListener("click", () => {
+        if (!canRemove()) return;
+        this.close();
+        if (canRemove()) this.work.removeReference();
+      });
     }
     if (this.work.reference?.id !== this.reference.id) {
       const use = actions.createEl("button", { text: "Use reference" });
@@ -46,7 +71,7 @@ export class ReferenceModal extends Modal {
       const current = () => this.alive && this.work.current && this.work.reference?.id === this.reference.id;
       state.setText("Preparing image preview on this device…");
       void this.work.readReference(this.reference).then(async value => {
-        const available = MAX_ATTACHMENTS - (this.followUp ? this.work.followUpAttachments : this.work.attachments).length;
+        const available = MAX_ATTACHMENTS - (followUp ? this.work.followUpAttachments : this.work.attachments).length;
         const files = await selectionImages(this.app, this.contentEl, value, this.reference.path, current, available);
         if (!current()) return;
         for (const url of this.imageUrls) URL.revokeObjectURL(url);
@@ -59,15 +84,15 @@ export class ReferenceModal extends Modal {
         const attach = gallery.createEl("button", { text: files.length === 1 ? "Attach image" : "Attach images", cls: "mod-cta" });
         attach.addEventListener("click", () => {
           if (!current()) return;
-          const existing = this.followUp ? this.work.followUpAttachments : this.work.attachments;
+          const existing = followUp ? this.work.followUpAttachments : this.work.attachments;
           if (existing.length + files.length > MAX_ATTACHMENTS ||
               [...existing, ...files].reduce((total, file) => total + ("size" in file ? file.size : file.bytes), 0) > MAX_ATTACHMENT_BYTES) {
             state.setText("These pages exceed the attachment limit. Remove an attachment or choose a smaller passage.");
             return;
           }
           attach.disabled = true;
-          void this.work.addAttachments(files, undefined, this.reference.id, this.followUp).then(() => {
-            const attached = this.followUp ? this.work.followUpAttachments : this.work.attachments;
+          void this.work.addAttachments(files, undefined, this.reference.id, followUp).then(() => {
+            const attached = followUp ? this.work.followUpAttachments : this.work.attachments;
             if (current() && files.every(page => attached.some(file => file.referenceId === this.reference.id && file.name === page.name))) this.close();
             else if (this.alive) { state.setText(this.work.message); attach.disabled = false; }
           });
@@ -80,7 +105,7 @@ export class ReferenceModal extends Modal {
     void this.work.readReference(this.reference).then(value => {
       if (!this.alive) return;
       text.setText(value);
-      state.setText(`${value.length.toLocaleString()} characters · Reference material. Access settings control permitted edits.`);
+      state.setText(`${value.length.toLocaleString()} characters · Access controls reads and edits elsewhere.`);
     }).catch(error => { if (this.alive) state.setText(error instanceof Error ? error.message : "This reference is unavailable. Select it again in the note."); });
   }
   onClose(): void {

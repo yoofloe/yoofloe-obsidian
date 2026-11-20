@@ -367,6 +367,59 @@ test('a selection reference guides an edit while its scope remains governed by A
  f.work.removeReference();assert.equal(f.work.reference,null);assert.equal(f.work.source.path,'A.md');
  assert.equal(f.work.canRestoreReference,true);f.work.restoreReference();assert(f.work.reference);
 });
+test('sending a quote lets the task read before and after it and find another permitted note', async () => {
+  const f = fixture();
+  const source = await f.host.create('Allowed/Plan.md', '# Before\nEarlier detail\n# Focus\nSelected paragraph\n# After\nLater detail');
+  await f.host.create('Allowed/Supplement.md', 'Useful comparison');
+  await f.host.create('Allowed/Excluded/Supplement.md', 'Excluded text');
+  await f.host.create('Outside/Supplement.md', 'Out of scope text');
+  await f.work.initialize();
+  f.work.readScope = 'folder';
+  f.work.outputFolder = 'Allowed';
+  f.work.excluded = 'Allowed/Excluded';
+  f.work.mode = 'ask';
+  f.work.sourceMode = 'provided';
+  await f.work.newTask({ path: source.path });
+  assert(f.work.setReference({
+    id: crypto.randomUUID(), path: source.path, version: await inputDigest(source.text),
+    from: 0, to: source.text.length, firstLine: 1, lastLine: 1, quote: 'Selected paragraph',
+  }));
+  const call = (name, args) => response([{ type: 'function_call', call_id: name, name, arguments: JSON.stringify(args) }]);
+  const result = (body, name) => JSON.parse(body.input.find(item => item.type === 'function_call_output' && item.call_id === name).output);
+  const steps = [
+    body => {
+      const input = JSON.parse(body.input[0].content);
+      assert.equal(input.selected_reference.text, 'Selected paragraph');
+      assert.equal(input.selected_reference.note_reference, input.current_note.reference);
+      assert.equal(input.current_note.text, undefined);
+      assert.match(body.instructions, /note_reference.*read_outline or read_notes/);
+      return call('read_notes', { notes: [{ reference: input.selected_reference.note_reference, from_line: 1, through_line: 0 }] });
+    },
+    body => {
+      const note = result(body, 'read_notes').notes[0];
+      assert.match(note.text, /Earlier detail/);
+      assert.match(note.text, /Later detail/);
+      return call('search_notes', { query: 'Supplement', limit: 8, offset: 0 });
+    },
+    body => {
+      const matches = result(body, 'search_notes').notes;
+      assert.deepEqual(matches.filter(note => note.path.endsWith('/Supplement.md')).map(note => note.path), ['Allowed/Supplement.md']);
+      const note = matches.find(note => note.path === 'Allowed/Supplement.md');
+      return response([{ type: 'function_call', call_id: 'read-supplement', name: 'read_notes',
+        arguments: JSON.stringify({ notes: [{ reference: note.reference, from_line: 1, through_line: 0 }] }) }]);
+    },
+    body => {
+      assert.equal(result(body, 'read-supplement').notes[0].text, 'Useful comparison');
+      return response([{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Compared the passages.' }] }]);
+    },
+  ];
+  let requests = 0;
+  f.options.transport = async req => steps[requests++](JSON.parse(req.body));
+  f.work.setPrompt('Check the selected passage against the sections before and after it and the supplement.');
+  await f.work.run();
+  assert.equal(f.work.result, 'Compared the passages.');
+  assert.equal(requests, steps.length);
+});
 test('an invalid saved selection requires reference review before it can be sent',async()=>{
  const f=fixture();await f.host.create('A.md','Synthetic');f.options.storage.load=async()=>({source:'A.md',selection:{from:0,to:4},selectionVersion:'invalid'});
  await f.work.initialize();assert.equal(f.work.reference.needsReview,true);
@@ -406,7 +459,7 @@ test('Queue preserves each selected reference and its attachments even after the
  f.options.transport=async req=>{
   const body=JSON.parse(req.body),parts=body.input[0].content;
   const source=JSON.parse(Array.isArray(parts)?parts[0].text:parts);
-  sent.push({text:source.selected_reference.text,attached:source.attached_files.map(file=>file.name)});
+  sent.push({text:source.selected_reference.text,note:source.selected_reference.note_reference,attached:source.attached_files.map(file=>file.name)});
   return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Done'}]}]);
  };
  for(const [from,to,name] of [[0,5,'First.txt'],[6,12,'Second.txt']]){
@@ -416,7 +469,7 @@ test('Queue preserves each selected reference and its attachments even after the
  }
  const queued=structuredClone(f.saved().followUps);assert.equal(queued[0].context.reference.from,0);assert.equal(queued[1].context.reference.from,6);
  f.work.removeReference();await f.work.resumeQueue();
- assert.deepEqual(sent,[{text:'First',attached:['First.txt']},{text:'Second',attached:['Second.txt']}]);
+ assert.deepEqual(sent,[{text:'First',note:'N1',attached:['First.txt']},{text:'Second',note:'N1',attached:['Second.txt']}]);
  assert.equal(f.work.followUps.length,0);assert.equal(f.work.reference,null);
 });
 test('a queued reference that changed is held for review before any key read or model request',async()=>{
@@ -435,7 +488,9 @@ test('Steer carries an explicit reference and attachment at the next safe reques
  f.options.transport=async req=>{
   if(++sent===1){first.resolve();await released.promise;return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'First answer'}]}]);}
   const body=JSON.parse(req.body),last=body.input.filter(item=>item.role==='user').at(-1);
-  assert.equal(JSON.parse(last.content[0].text).selected_reference.text,'Reference');
+  const reference=JSON.parse(last.content[0].text).selected_reference;
+  assert.equal(reference.text,'Reference');
+  assert.equal(reference.note_reference,'N1');
   assert.equal(last.content[1].file_id,'file-steer');
   return response([{type:'message',role:'assistant',content:[{type:'output_text',text:'Steered answer'}]}]);
  };

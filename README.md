@@ -76,8 +76,9 @@ Choose **Delete** in a conversation's menu to remove that conversation and its d
 conversation, the vault copy stays available on other devices. Saved notes and API keys are kept.
 See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local removal and scope details.
 Note titles and vault-relative paths returned by search can also go to OpenAI. Select a passage while the Yoofloe pane is
-open to add a reference chip above the composer. Opening Yoofloe from a selected passage works too. Click the chip to preview it or create local image pages. Use its x button to remove
-the reference and its selected images from the next message. Use **Restore reference** to bring them back.
+open to attach a reference. Opening Yoofloe from a selected passage works too. Use the selection icon in the composer to
+preview the passage or create local image pages. In the preview, **Remove reference** removes the passage and its selected
+images from the next message. The restore icon in the same spot brings them back.
 References guide the task. **Access** continues to control which notes the task can read and edit, including other passages
 or notes. Open editor text, including unsaved changes, is used. Changed references require a fresh selection.
 Long passages have versioned continuation cursors and reading coverage. Queue stores each message's reference and

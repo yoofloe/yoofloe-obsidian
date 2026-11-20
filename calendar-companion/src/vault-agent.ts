@@ -139,7 +139,12 @@ export class VaultAgent {
     const range = reference.quote ? { from: 0, to: reference.quote.length } : { from: reference.from, to: reference.to };
     const ref: Ref = { file, provided: { ...reference }, allowedRange: range };
     this.refs.set(id, ref);
-    try { return await this.excerpt(ref); }
+    try {
+      const excerpt = await this.excerpt(ref);
+      if (!this.allowedRef({ file }, "read")) return excerpt;
+      const note = this.reference(file);
+      return this.refs.get(note)?.allowedRange ? excerpt : { ...excerpt, note_reference: note };
+    }
     catch (error) { this.refs.delete(id); throw error; }
   }
   private async excerpt(ref: Ref, fromLine = 1, throughLine = 0, cursor?: number, expectedVersion?: string, initialNote = false) {
@@ -194,7 +199,7 @@ export class VaultAgent {
     const id = [...this.refs].find(([, item]) => item === ref)?.[0] ?? this.reference(ref.file);
     return { reference: id, title: ref.file.title, path: ref.file.path, version, text, from_line: original.slice(0, from).split("\n").length,
       through_line: original.slice(0, Math.max(from, to - 1)).split("\n").length, total_lines: original.split("\n").length, partial: !ref.complete, selection_only: !!ref.allowedRange,
-      ...(ref.provided ? { purpose: "User-selected reference. Access settings determine permitted edits. Read a normal note reference to edit outside this excerpt.", quoted_text: !!ref.provided.quote } : {}),
+      ...(ref.provided ? { purpose: "User-selected reference. Access settings determine permitted note reads and edits.", quoted_text: !!ref.provided.quote } : {}),
       next_cursor: ref.next?.from ?? null, read_characters: readCharacters, total_characters: ref.total };
   }
   async initialContext(deferNoteRead = false): Promise<unknown> {
