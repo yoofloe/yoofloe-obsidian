@@ -36,12 +36,9 @@ Once a note is connected, browsing another note offers **Use opened note** above
 The header paperclip opens **Choose note**, including **Chat without a note**. Choosing a different note keeps the conversation, draft and permission settings.
 Running or paused tasks keep their original note.
 
-The conversation stays above the settings, and each area scrolls independently.
-Drag the divider up or down to resize the two areas. You can also focus it with Tab and use the arrow keys.
-The split is remembered on this device; double-click the divider or press Enter to reset it.
-Choose **Expand settings** to give the settings the full available panel height, then **Back to chat** to return to the same conversation and draft.
-**Stop** stays available while a task runs with settings expanded.
-Model and permission cards sit below it; Calendar, activity, privacy and recovery remain compact.
+Use the **Chat** and **Settings** tabs at the top of Yoofloe to switch between two full-height views.
+The tabs preserve the conversation, draft and both scroll positions. With a tab focused, use the left and right arrow keys to switch.
+**Plugin settings** opens the global preferences. **Stop** is available in Settings while a task runs.
 Conversation search is local: it searches saved requests, answers and attachment names, highlights matches,
 and pages through older archived conversations without an AI request. Previews remain bounded for mobile performance.
 Follow-ups in the same conversation retain recent user directions when you connect another document or change models.

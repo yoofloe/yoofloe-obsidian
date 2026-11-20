@@ -5,7 +5,6 @@ import { AREA_LABELS, PERIOD_LABELS } from "./question-query";
 import { safeNoteMarkdown } from "./note-context";
 import { VaultFolderPicker } from "./folder-picker";
 import { availableViewHeight } from "./view-bounds";
-import { WorkspaceChatSplit } from "./workspace-chat-split";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, CONTROL_NOTICE, PRIVACY_URL, OPENAI_DATA_URL } from "./privacy-copy";
 import { customRequestLimit, requestLimitLabel } from "./request-limit";
 import { generatedCachePath } from "./generated-files";
@@ -41,14 +40,12 @@ const WORK_STATUS = { running: "Working…", paused: "Paused at request limit", 
 const ACTIVITY_ICON = { working: "loader-circle", done: "check", waiting: "clock-3", blocked: "triangle-alert" };
 const ACTIVITY_LABEL = { working: "In progress", done: "Done", waiting: "Waiting", blocked: "Needs attention" };
 const QUEUE_STATUS = { queued: "Queued", "steer-pending": "Waiting to steer", sending: "Sending", review: "Review before sending" };
-const CHAT_SPLIT_KEY = "yoofloe-ai-chat-split";
 type ViewOptions = { settings(): void; chooseNote(): void; hide(): void };
-type ViewLayout = "split" | "chat" | "settings";
+type ViewLayout = "chat" | "settings";
 /** One compact, theme-native surface shared by desktop and mobile. No data is read on view construction. */
 export class YoofloeAiView extends ItemView {
   private unsubscribe: (() => void) | null = null;
   private stopViewport: (() => void) | null = null;
-  private chatSplit: WorkspaceChatSplit | null = null;
   private rendering: Component | null = null;
   private saveTimer: number | undefined;
   private durationTimer: number | undefined;
@@ -81,10 +78,10 @@ export class YoofloeAiView extends ItemView {
   private searchEpoch = 0;
   private searchTimer: number | undefined;
   private generatedVisible = new Map<string, number>();
-  private layout: ViewLayout = "split";
+  private layout: ViewLayout = "chat";
   private savedChatScroll = 0;
-  private savedFollowChat = false;
-  private lastSettingsMessage = "";
+  private savedFollowChat = true;
+  private savedSettingsScroll = 0;
   private readonly settingsId = `yoofloe-settings-${crypto.randomUUID()}`;
   constructor(leaf: WorkspaceLeaf, readonly work: AiWorkspace, private readonly options: ViewOptions) {
     super(leaf);
@@ -120,14 +117,7 @@ export class YoofloeAiView extends ItemView {
         doc.removeEventListener("pointerup", endSelection);
         doc.removeEventListener("pointercancel", endSelection);
       };
-      let saved: unknown;
-      try { saved = this.app.loadLocalStorage(CHAT_SPLIT_KEY); } catch { /* Use the default split. */ }
       this.durationTimer = win.setInterval(() => this.updateElapsed(), 1000);
-      this.chatSplit = new WorkspaceChatSplit(
-        this.contentEl, win, saved,
-        ratio => { try { this.app.saveLocalStorage(CHAT_SPLIT_KEY, ratio); } catch { /* Keep the current size in this view. */ } },
-        () => this.followChat && !this.chatQuery,
-      );
     }
     this.stopViewport = this.watchViewport(); this.render(); await this.work.initialize();
   }
@@ -139,7 +129,6 @@ export class YoofloeAiView extends ItemView {
     this.searchEpoch++; if (this.searchTimer !== undefined) this.contentEl.ownerDocument.defaultView?.clearTimeout(this.searchTimer);
     this.unsubscribe?.(); this.stopViewport?.(); this.rendering?.unload();
     this.contentEl.ownerDocument.defaultView?.clearInterval(this.durationTimer);
-    this.chatSplit?.dispose(); this.chatSplit = null;
     if (this.saveTimer !== undefined) this.contentEl.ownerDocument.defaultView?.clearTimeout(this.saveTimer);
     await this.work.persist().catch(() => {});
   }
@@ -193,30 +182,31 @@ export class YoofloeAiView extends ItemView {
     const w = this.work; return !w.busy && !w.modelSaving && !w.addingAttachments && w.ready && w.configured && !w.limitProblem && (w.canContinue ? w.canResumeWithLimit : w.hasDraft);
   }
   private get settingsExpanded(): boolean { return this.layout === "settings"; }
-  private toggleLayout(section: Exclude<ViewLayout, "split">): void {
-    const next = this.layout === section && !this.libraryOpen ? "split" : section;
-    if (next === "settings" && !this.settingsExpanded && !this.libraryOpen) {
-      const messages = this.contentEl.querySelector<HTMLElement>(".y-ai-messages");
-      this.savedChatScroll = messages?.scrollTop ?? 0;
-      this.savedFollowChat = !!messages && messages.scrollTop + messages.clientHeight >= messages.scrollHeight - 32;
+  private showLayout(section: ViewLayout): void {
+    if (this.layout !== section || this.libraryOpen) {
+      this.layout = section;
+      this.libraryOpen = false;
+      this.render();
     }
-    this.layout = next;
-    this.libraryOpen = false;
-    this.render();
     this.contentEl.querySelector<HTMLButtonElement>(`[data-view-layout="${section}"]`)?.focus({ preventScroll: true });
   }
-  private viewControls(header: HTMLElement, chatId: string): void {
-    const group = header.createDiv({ cls: "y-ai-view-controls", attr: { role: "group", "aria-label": "Workspace view" } });
+  private tabId(section: ViewLayout): string { return `${this.settingsId}-tab-${section}`; }
+  private viewTabs(parent: HTMLElement, chatId: string): void {
+    const group = parent.createDiv({ cls: "y-ai-view-tabs", attr: { role: "tablist", "aria-label": "Workspace views" } });
     for (const section of ["chat", "settings"] as const) {
-      const active = this.layout === section && !this.libraryOpen;
-      const label = active ? "Show conversation and settings" : section === "chat" ? "Expand conversation" : "Expand settings";
-      const button = this.button(group, "", () => this.toggleLayout(section), false, "clickable-icon");
+      const active = this.layout === section;
+      const button = this.button(group, section === "chat" ? "Chat" : "Settings", () => this.showLayout(section));
       button.dataset.viewLayout = section;
-      button.setAttribute("aria-label", label);
+      button.id = this.tabId(section);
+      button.tabIndex = active ? 0 : -1;
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-selected", String(active));
       button.setAttribute("aria-controls", section === "chat" ? chatId : this.settingsId);
-      button.setAttribute("aria-pressed", String(active));
-      setTooltip(button, label);
-      setIcon(button, section === "chat" ? "message-square" : "settings");
+      button.addEventListener("keydown", event => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        this.showLayout(event.key === "Home" ? "chat" : event.key === "End" ? "settings" : section === "chat" ? "settings" : "chat");
+      });
     }
   }
   private refreshLimitDisclosure(): void {
@@ -391,12 +381,12 @@ export class YoofloeAiView extends ItemView {
   private async chooseConversation(conversation: Conversation): Promise<void> {
     if (conversation.archived && !await this.work.changeConversation(conversation.id, { archived: false })) return;
     if (await this.work.openConversation(conversation.id)) {
-      this.libraryOpen = false; this.chatQuery = ""; this.searchEpoch++;
+      this.layout = "chat"; this.libraryOpen = false; this.chatQuery = ""; this.searchEpoch++;
       this.render();
     }
   }
   private async createConversation(folderId: string | null = null): Promise<void> {
-    if (await this.work.createConversation(folderId)) { this.libraryOpen = false; this.chatQuery = ""; this.render(); }
+    if (await this.work.createConversation(folderId)) { this.layout = "chat"; this.libraryOpen = false; this.chatQuery = ""; this.render(); }
   }
   private libraryButton(el: HTMLElement, label: string, icon: string, action: () => void, disabled = false, iconOnly = false): HTMLButtonElement {
     const button = this.button(el, "", action, disabled, iconOnly ? "clickable-icon y-ai-library-icon" : "y-ai-library-button");
@@ -478,6 +468,7 @@ export class YoofloeAiView extends ItemView {
   }
   private async chooseSyncedConversation(id: string, revision: string, preferredId?: string): Promise<void> {
     if (await this.work.openSyncedConversation(id, revision, preferredId)) {
+      this.layout = "chat";
       this.libraryOpen = false;
       this.chatQuery = "";
       this.searchEpoch++;
@@ -932,9 +923,8 @@ export class YoofloeAiView extends ItemView {
     this.openDetails.delete("calendar");
     this.openDetails.delete("chronohud");
     this.openDetails.add(app);
-    this.libraryOpen = false;
-    if (this.settingsExpanded) this.render();
-    else this.toggleLayout("settings");
+    if (this.settingsExpanded && !this.libraryOpen) this.render();
+    else this.showLayout("settings");
     this.contentEl.querySelector(".y-ai-app-context-title")?.scrollIntoView({ block: "start" });
   }
   private appContext(parent: HTMLElement): void {
@@ -1045,49 +1035,54 @@ export class YoofloeAiView extends ItemView {
     if (this.composing) { this.pendingRender = true; return; }
     this.pendingRender = false; this.queueSignature = "";
     const w = this.work, el = this.contentEl;
+    const previousChat = el.querySelector<HTMLElement>(".y-ai-messages");
+    const previousSettings = el.querySelector<HTMLElement>(".y-ai-scroll");
+    if (previousSettings?.getClientRects().length) this.savedSettingsScroll = previousSettings.scrollTop;
     if (this.lastConversationId !== w.library.active) {
       this.chatCopy.reset();
       this.lastConversationId = w.library.active; this.olderChats = []; this.olderOffset = 0; this.chatVisible = 10;
       this.followUpClosed = false;
+      this.savedChatScroll = 0; this.savedFollowChat = true;
+    } else if (previousChat?.getClientRects().length) {
+      this.savedChatScroll = previousChat.scrollTop;
+      this.savedFollowChat = previousChat.scrollTop + previousChat.clientHeight >= previousChat.scrollHeight - 32;
     }
     el.classList.toggle("y-ai-library-open", this.libraryOpen);
-    const wasExpanded = el.classList.contains("y-ai-settings-expanded"), previousScroll = el.querySelector<HTMLElement>(".y-ai-messages"), oldScroll = wasExpanded ? this.savedChatScroll : previousScroll?.scrollTop ?? 0, oldMenuScroll = el.querySelector<HTMLElement>(".y-ai-scroll")?.scrollTop ?? 0;
     const activeField = el.ownerDocument.activeElement;
+    const tabFocused = !!activeField && el.contains(activeField) && activeField.matches(".y-ai-view-tabs > button");
     const promptSelection = activeField?.matches(".y-ai-primary-prompt") && el.contains(activeField)
       ? [(activeField as HTMLTextAreaElement).selectionStart, (activeField as HTMLTextAreaElement).selectionEnd] as const : null;
     const followUpSelection = activeField?.matches(".y-ai-follow-up-input") && el.contains(activeField)
       ? [(activeField as HTMLTextAreaElement).selectionStart, (activeField as HTMLTextAreaElement).selectionEnd] as const : null;
     const referenceFocused = activeField?.matches(".y-ai-reference-trigger") && el.contains(activeField);
-    const dividerFocused = !!activeField && el.contains(activeField) && activeField.classList.contains("y-ai-split-handle");
     const settingsFocus = activeField && el.querySelector(".y-ai-scroll")?.contains(activeField) && activeField.matches("input,textarea,select") ? activeField.getAttribute("aria-label") : null;
     const selectionStart = settingsFocus && "selectionStart" in activeField! ? (activeField as HTMLInputElement).selectionStart : null;
     const selectionEnd = settingsFocus && "selectionEnd" in activeField! ? (activeField as HTMLInputElement).selectionEnd : null;
-    el.classList.toggle("y-ai-settings-expanded", this.settingsExpanded);
-    el.classList.toggle("y-ai-chat-expanded", this.layout === "chat");
     const oldSearch = el.querySelector<HTMLInputElement>(".y-ai-chat-search"), searchFocused = el.ownerDocument.activeElement === oldSearch, searchCursor = oldSearch?.selectionStart ?? this.chatQuery.length;
-    const follow = this.settingsExpanded || wasExpanded ? this.savedFollowChat : !previousScroll && w.chat.length > 0 || w.busy && w.chat.length > this.lastChatCount || !!previousScroll && previousScroll.scrollTop + previousScroll.clientHeight >= previousScroll.scrollHeight - 32; this.lastChatCount = w.chat.length; this.followChat = follow;
+    const follow = this.savedFollowChat || w.busy && w.chat.length > this.lastChatCount;
+    this.lastChatCount = w.chat.length; this.followChat = follow;
     this.composerOptions.close();
     this.rendering?.unload(); this.rendering = new Component(); this.rendering.load(); el.empty();
     const header = el.createDiv({ cls: "y-ai-header" }), title = header.createDiv({ cls: "y-ai-heading" });
     title.createEl("h2", { text: "Yoofloe" }); const noteContext = title.createEl("p", { text: `${w.source?.selection && w.readScope === "current" ? "Selected text · " : ""}${w.title}`, attr: { "aria-live": "polite" } });
     if (w.source?.path) setTooltip(noteContext, w.source.path);
     const note = this.button(header, "", () => this.options.chooseNote(), w.settingsLocked || !w.ready, "clickable-icon"); note.setAttribute("aria-label", "Choose note"); setTooltip(note, "Choose a note to read or edit"); setIcon(note, "paperclip");
-    const library = this.button(header, "", () => { this.libraryOpen = !this.libraryOpen; this.render(); }, false, "clickable-icon");
+    const library = this.button(header, "", () => { this.layout = "chat"; this.libraryOpen = !this.libraryOpen; this.render(); }, false, "clickable-icon");
     library.setAttribute("aria-label", "Manage conversations"); setTooltip(library, "Manage conversations"); library.setAttribute("aria-expanded", String(this.libraryOpen)); setIcon(library, "messages-square");
     const fresh = this.button(header, "", () => void this.createConversation(), !w.canSwitchConversation || w.library.conversations.length >= MAX_CONVERSATIONS, "clickable-icon");
     fresh.setAttribute("aria-label", "New conversation"); setTooltip(fresh, "New conversation"); setIcon(fresh, "square-pen");
-    const settings = this.button(header, "", () => this.options.settings(), w.settingsLocked || w.modelSaving, "clickable-icon"); settings.setAttribute("aria-label", "Yoofloe settings"); setTooltip(settings, "Yoofloe settings"); setIcon(settings, "settings-2");
     const chatId = `${this.settingsId}-chat`;
-    this.viewControls(header, chatId);
     const hide = this.button(header, "", () => this.options.hide(), false, "clickable-icon"); hide.setAttribute("aria-label", "Hide Yoofloe"); setTooltip(hide, "Hide Yoofloe"); setIcon(hide, "panel-right-close");
-    if (this.libraryOpen) this.renderLibrary(el);
+    this.viewTabs(el, chatId);
+    const chatPanel = el.createEl("section", { cls: "y-ai-chat-panel", attr: { id: chatId, role: "tabpanel", "aria-labelledby": this.tabId("chat") } });
+    chatPanel.hidden = this.settingsExpanded;
+    if (this.libraryOpen) this.renderLibrary(chatPanel);
     if (w.nextSource) {
-      const candidate = w.nextSource, context = el.createDiv({ cls: "y-ai-note-context" });
+      const candidate = w.nextSource, context = chatPanel.createDiv({ cls: "y-ai-note-context" });
       setTooltip(context.createSpan({ text: candidate.path.split("/").at(-1) ?? candidate.path }), candidate.path);
       const attach = this.button(context, candidate.selection ? "Use selection" : "Use opened note", () => w.attachNote(candidate), w.settingsLocked, "mod-cta");
       setTooltip(attach, w.settingsLocked ? "Finish or stop the current task before changing its note" : "Connect this note without clearing the conversation or draft");
     }
-    const chatPanel = el.createEl("section", { cls: "y-ai-chat-panel", attr: { id: chatId, "aria-label": "Yoofloe conversation" } });
     const searchBar = chatPanel.createDiv({ cls: "y-ai-search-bar" }), searchIcon = searchBar.createSpan({ cls: "y-ai-search-icon" }); setIcon(searchIcon, "search");
     const search = searchBar.createEl("input", { value: this.chatQuery, cls: "y-ai-chat-search", attr: { type: "search", placeholder: "Search conversations", "aria-label": "Search conversations", autocomplete: "off" } }); search.maxLength = 200;
     search.addEventListener("input", () => { this.chatQuery = search.value; this.searchEpoch++; const win = el.ownerDocument.defaultView; win?.clearTimeout(this.searchTimer); this.searchTimer = win?.setTimeout(() => { void this.searchConversation(); }, 250); });
@@ -1105,11 +1100,12 @@ export class YoofloeAiView extends ItemView {
       }
     });
     messages.addEventListener("wheel", () => { this.followChat = false; }, { passive: true }); messages.addEventListener("touchstart", () => { this.followChat = false; }, { passive: true });
-    const divider = el.createDiv({ cls: "y-ai-split-handle", attr: { hidden: "", role: "separator", tabindex: "0", "aria-orientation": "horizontal", "aria-controls": chatId, "aria-label": "Conversation height" } });
-    setTooltip(divider, "Drag to resize or use the arrow keys. Double-click to reset.");
-    const settingsBar = el.createDiv({ cls: "y-ai-settings-bar" }); settingsBar.createEl("strong", { text: "Workspace settings" });
-    if (this.settingsExpanded && (w.canStop || w.stopping)) this.button(settingsBar, w.stopping ? "Stopping…" : "Stop", () => w.stop(), !w.canStop, "y-ai-settings-stop mod-warning");
-    const scroll = el.createDiv({ cls: "y-ai-scroll", attr: { id: this.settingsId, "aria-label": "Workspace settings" } });
+    const settingsPanel = el.createEl("section", { cls: "y-ai-settings-panel", attr: { id: this.settingsId, role: "tabpanel", "aria-labelledby": this.tabId("settings") } });
+    settingsPanel.hidden = !this.settingsExpanded;
+    const settingsBar = settingsPanel.createDiv({ cls: "y-ai-settings-bar" });
+    this.button(settingsBar, "Plugin settings", () => this.options.settings(), w.settingsLocked || w.modelSaving, "y-ai-plugin-settings");
+    if (w.canStop || w.stopping) this.button(settingsBar, w.stopping ? "Stopping…" : "Stop", () => w.stop(), !w.canStop, "y-ai-settings-stop mod-warning");
+    const scroll = settingsPanel.createDiv({ cls: "y-ai-scroll", attr: { "aria-label": "Workspace settings" } });
     if (!w.configured && w.ready) {
       const intro = scroll.createDiv({ cls: "y-ai-setup" }), copy = intro.createDiv({ cls: "y-ai-setup-copy" });
       copy.createEl("strong", { text: "Connect OpenAI" }); copy.createEl("p", { text: "Your key · API charges apply" });
@@ -1266,9 +1262,9 @@ export class YoofloeAiView extends ItemView {
     });
     prompt.addEventListener("keydown", event => { if (!event.isComposing && event.key === "Enter" && (event.ctrlKey || event.metaKey) && !run.disabled && !w.busy) { event.preventDefault(); run.click(); } });
     this.sizeComposerInputs();
-    this.chatSplit?.connect({ panel: chatPanel, search: searchBar, messages, dock, divider, settingsBar });
-    scroll.scrollTop = this.settingsExpanded && !settingsFocus && feedback !== this.lastSettingsMessage ? 0 : oldMenuScroll; if (this.settingsExpanded) this.lastSettingsMessage = feedback; messages.scrollTop = follow && !this.chatQuery ? messages.scrollHeight : oldScroll;
-    if (settingsFocus) {
+    if (this.settingsExpanded) scroll.scrollTop = this.savedSettingsScroll;
+    else if (!this.libraryOpen) messages.scrollTop = follow && !this.chatQuery ? messages.scrollHeight : this.savedChatScroll;
+    if (settingsFocus && this.settingsExpanded) {
       const replacement = Array.from(scroll.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")).find(field => field.getAttribute("aria-label") === settingsFocus);
       if (replacement && !replacement.disabled) { replacement.focus({ preventScroll: true }); if (selectionStart !== null && selectionEnd !== null && "setSelectionRange" in replacement) replacement.setSelectionRange(selectionStart, selectionEnd); }
     }
@@ -1276,7 +1272,7 @@ export class YoofloeAiView extends ItemView {
     if (promptSelection && !prompt.disabled && !followUp && !this.settingsExpanded) {
       prompt.focus({ preventScroll: true }); prompt.setSelectionRange(...promptSelection); this.sizeComposerInput(prompt);
     }
-    if (followUpSelection && followUp) {
+    if (followUpSelection && followUp && !this.settingsExpanded) {
       const input = el.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input");
       input?.focus({ preventScroll: true }); input?.setSelectionRange(...followUpSelection); if (input) this.sizeComposerInput(input);
     }
@@ -1284,7 +1280,7 @@ export class YoofloeAiView extends ItemView {
       const target = referenceButton.hidden ? compose.querySelector<HTMLElement>(followUp ? ".y-ai-follow-up-input" : ".y-ai-primary-prompt") : referenceButton;
       target?.focus({ preventScroll: true });
     }
-    if (dividerFocused && !divider.hidden) divider.focus({ preventScroll: true });
+    if (tabFocused) el.querySelector<HTMLButtonElement>(`[data-view-layout="${this.layout}"]`)?.focus({ preventScroll: true });
   }
   private watchViewport(): () => void {
     const root = this.contentEl, doc = root.ownerDocument, win = doc.defaultView; if (!win) return () => {};
@@ -1303,11 +1299,10 @@ export class YoofloeAiView extends ItemView {
       root.classList.toggle("y-ai-tiny", available < 190 && (keyboard > 50 || visual));
       this.sizeComposerInputs();
       this.composerOptions.fitLabels();
-      this.chatSplit?.refresh();
       if (root.classList.contains("y-ai-tiny")) root.scrollTop = 0;
       win.clearTimeout(timer); timer = win.setTimeout(() => { const active = doc.activeElement; if (active !== null && active.instanceOf(HTMLElement) && root.contains(active) && active.matches("textarea,input,select")) active.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" }); }, 350);
     };
-    const focus = () => { const active = doc.activeElement; root.classList.toggle("y-ai-searching", active !== null && active.instanceOf(HTMLElement) && active.matches(".y-ai-chat-search")); root.classList.toggle("y-ai-editing-scope", active !== null && active.instanceOf(HTMLElement) && !!active.closest(".y-ai-scroll") && active.matches("input,textarea")); resize(); };
+    const focus = () => { const active = doc.activeElement; root.classList.toggle("y-ai-searching", active !== null && active.instanceOf(HTMLElement) && active.matches(".y-ai-chat-search")); resize(); };
     const settledResize = () => { resize(); win.clearTimeout(settleTimer); settleTimer = win.setTimeout(resize, 350); };
     const observer = new win.MutationObserver(settledResize); observer.observe(doc.body, { attributes: true, attributeFilter: ["style", "class"] }); observer.observe(doc.documentElement, { attributes: true, attributeFilter: ["style"] });
     for (const el of chrome) observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] });
