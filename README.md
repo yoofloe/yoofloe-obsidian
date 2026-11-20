@@ -36,12 +36,9 @@ Once a note is connected, browsing another note offers **Use opened note** above
 The header paperclip opens **Choose note**, including **Chat without a note**. Choosing a different note keeps the conversation, draft and permission settings.
 Running or paused tasks keep their original note.
 
-The conversation stays above the settings, and each area scrolls independently.
-Drag the divider up or down to resize the two areas. You can also focus it with Tab and use the arrow keys.
-The split is remembered on this device; double-click the divider or press Enter to reset it.
-Choose **Expand settings** to give the settings the full available panel height, then **Back to chat** to return to the same conversation and draft.
-**Stop** stays available while a task runs with settings expanded.
-Model and permission cards sit below it; Calendar, activity, privacy and recovery remain compact.
+Use the **Chat** and **Settings** tabs at the top of Yoofloe to switch between two full-height views.
+The tabs preserve the conversation, draft and both scroll positions. With a tab focused, use the left and right arrow keys to switch.
+**Plugin settings** opens the global preferences. **Stop** is available in Settings while a task runs.
 Conversation search is local: it searches saved requests, answers and attachment names, highlights matches,
 and pages through older archived conversations without an AI request. Previews remain bounded for mobile performance.
 Follow-ups in the same conversation retain recent user directions when you connect another document or change models.
@@ -76,8 +73,9 @@ Choose **Delete** in a conversation's menu to remove that conversation and its d
 conversation, the vault copy stays available on other devices. Saved notes and API keys are kept.
 See [privacy and local data controls](PRIVACY.md) for OpenAI retention, local removal and scope details.
 Note titles and vault-relative paths returned by search can also go to OpenAI. Select a passage while the Yoofloe pane is
-open to add a reference chip above the composer. Opening Yoofloe from a selected passage works too. Click the chip to preview it or create local image pages. Use its x button to remove
-the reference and its selected images from the next message. Use **Restore reference** to bring them back.
+open to attach a reference. Opening Yoofloe from a selected passage works too. Use the selection icon in the composer to
+preview the passage or create local image pages. In the preview, **Remove reference** removes the passage and its selected
+images from the next message. The restore icon in the same spot brings them back.
 References guide the task. **Access** continues to control which notes the task can read and edit, including other passages
 or notes. Open editor text, including unsaved changes, is used. Changed references require a fresh selection.
 Long passages have versioned continuation cursors and reading coverage. Queue stores each message's reference and

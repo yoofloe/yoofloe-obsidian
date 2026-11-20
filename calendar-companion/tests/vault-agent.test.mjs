@@ -144,9 +144,10 @@ test('a selected reference guides the task while Access allows edits elsewhere i
   const source = await agent.initialContext();
   const ref = await agent.addReference({ id: crypto.randomUUID(), path: 'Notes/Plan.md', version: source.version, from: 0, to: 5, firstLine: 1, lastLine: 1 });
   assert.equal(ref.text, 'Focus');
+  assert.equal(ref.note_reference, 'N1');
   const focused = await agent.initialContext();
   assert.equal(focused.text, undefined, 'the initial note is not duplicated beside its selected reference');
-  const note = (await agent.execute('read_notes', { notes: [{ reference: 'N1', from_line: 1, through_line: 0 }] })).notes[0];
+  const note = (await agent.execute('read_notes', { notes: [{ reference: ref.note_reference, from_line: 1, through_line: 0 }] })).notes[0];
   assert(note.text.includes('Other paragraph'));
   await agent.execute('apply_changes', { changes: [{ reference: 'N1', version: note.version, action: 'replace', markdown: 'Focus\nRevised elsewhere' }] });
   const found = await agent.execute('search_notes', { query: 'Other', limit: 4, offset: 0 });
@@ -164,8 +165,32 @@ test('an explicit reference outside Current note can be read but cannot grant ed
   const agent = new VaultAgent(f.host, f.policy, () => true);
   const ref = await agent.addReference({ id: crypto.randomUUID(), path: 'Notes/Other.md', version: other.version, from: 0, to: 9, firstLine: 1, lastLine: 1 });
   assert.equal(ref.text, 'Reference');
+  assert.equal(ref.note_reference, undefined);
   await assert.rejects(agent.execute('apply_changes', { changes: [{ reference: ref.reference, version: ref.version, action: 'replace_selection', markdown: 'No' }] }), /scope/);
   assert.equal(f.files.get('Notes/Other.md').text, 'Reference\nPrivate tail');
+});
+test('an excerpt from another readable note exposes its normal reference and respects the write target', async () => {
+  const path = 'Notes/Other.md';
+  const body = '# Before\nFirst paragraph\n# After\nLast paragraph';
+  const f = fixture({ 'Notes/Plan.md': 'Current note', [path]: body });
+  const policy = { ...f.policy, writeScope: 'current', mode: 'edit' };
+  const source = await new VaultAgent(f.host, { ...policy, sourcePath: path }, () => true).initialContext();
+  const agent = new VaultAgent(f.host, policy, () => true);
+  const quote = await agent.addReference({ id: crypto.randomUUID(), path, version: source.version, from: 0, to: body.length, firstLine: 1, lastLine: 1, quote: 'First paragraph' });
+  assert.equal(quote.text, 'First paragraph');
+  assert.match(quote.note_reference, /^N\d+$/);
+  assert.notEqual(quote.note_reference, 'N1');
+  const [note, selected] = (await agent.execute('read_notes', { notes: [
+    { reference: quote.note_reference, from_line: 1, through_line: 0 },
+    { reference: quote.reference, from_line: 1, through_line: 0 },
+  ] })).notes;
+  assert.equal(note.text, body);
+  assert.equal(selected.text, 'First paragraph');
+  await assert.rejects(agent.execute('apply_changes', { changes: [
+    { reference: quote.note_reference, version: note.version, action: 'append', markdown: 'Cannot write here' },
+  ] }), /edit scope/);
+  const restricted = new VaultAgent(f.host, { ...policy, excluded: [path] }, () => true);
+  await assert.rejects(restricted.addReference({ id: crypto.randomUUID(), path, version: source.version, from: 0, to: 8, firstLine: 1, lastLine: 1 }), /permitted note paths/);
 });
 test('reading-view reference tools only reveal the quoted selection', async () => {
   const f=fixture({ 'Notes/Plan.md': '# Private heading\nHidden note body' });
@@ -173,6 +198,7 @@ test('reading-view reference tools only reveal the quoted selection', async () =
   const quote='# Selected heading\nVisible quote';
   const ref=await f.agent.addReference({id:crypto.randomUUID(),path:note.path,version:note.version,from:0,to:note.text.length,firstLine:1,lastLine:2,quote});
   assert.equal(ref.text,quote);
+  assert.equal(ref.note_reference,'N1');
   const outline=await f.agent.execute('read_outline',{reference:ref.reference});
   assert.deepEqual(outline.headings.map(heading=>heading.text),['# Selected heading']);
   await assert.rejects(f.agent.execute('apply_changes',{changes:[{reference:ref.reference,version:ref.version,action:'replace_selection',markdown:'No'}]}),/scope/);
