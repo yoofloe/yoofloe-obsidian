@@ -23,13 +23,11 @@ export class ChatCopyControls {
     this.toolbar = null;
   }
 
-  menu(event: MouseEvent): void {
-    const menu = new Menu();
+  addMenuItems(menu: Menu): void {
     menu.addItem(item => item.setTitle("Copy conversation").setIcon("copy")
       .setDisabled(this.busy).onClick(() => { void this.copy(); }));
     menu.addItem(item => item.setTitle(this.selecting ? "Finish selecting" : "Select messages").setIcon("list-checks")
       .onClick(() => { this.selecting = !this.selecting; this.selected.clear(); this.refresh(); }));
-    menu.showAtMouseEvent(event);
   }
 
   renderToolbar(parent: HTMLElement): void {
