@@ -12,12 +12,18 @@ type Picker = keyof typeof PICKER_LABEL;
 type PickerChoice = { label: string; current?: boolean; apply?: () => void | Promise<void>; custom?: boolean };
 const PROMPT_SELECTOR = ".y-ai-primary-prompt, .y-ai-follow-up-input";
 type Caret = { field: ".y-ai-primary-prompt" | ".y-ai-follow-up-input"; from: number; to: number };
+type OpenPicker = { button: HTMLButtonElement; close(): void; closed(): void; conversation: string; caret?: Caret };
+type PickerViewport = { width: number; height: number };
 
 function selectedEffort(model: Readonly<AiModelOptions>): EffortSetting {
   return model.effort ?? resolveEffort(model.model) ?? "default";
 }
 
-function fitMobilePicker(container: HTMLElement): () => void {
+function keyboardInset(win: Window, body: HTMLElement): number {
+  return parseFloat(win.getComputedStyle(body).getPropertyValue("--keyboard-height")) || 0;
+}
+
+function fitMobilePicker(container: HTMLElement, unobscured: PickerViewport | null): () => void {
   const doc = container.ownerDocument, win = doc.defaultView;
   if (!win) return () => {};
   const viewport = win.visualViewport;
@@ -25,14 +31,20 @@ function fitMobilePicker(container: HTMLElement): () => void {
   const resize = () => {
     const top = viewport?.offsetTop ?? 0, left = viewport?.offsetLeft ?? 0;
     const height = viewport?.height ?? win.innerHeight;
-    const keyboard = parseFloat(win.getComputedStyle(doc.body).getPropertyValue("--keyboard-height")) || 0;
-    const bottom = top + height - (win.innerHeight - height > 80 ? 0 : keyboard);
-    const pane = { top, left, bottom, right: left + (viewport?.width ?? win.innerWidth) };
+    const width = viewport?.width ?? win.innerWidth;
+    const keyboard = keyboardInset(win, doc.body);
+    const visibleBottom = top + height;
+    // The layout and visual viewports may already stop above the keyboard.
+    const keyboardTop = keyboard && unobscured?.width === win.innerWidth ? unobscured.height - keyboard : visibleBottom;
+    const bottom = Math.min(visibleBottom, keyboardTop);
+    const pane = { top, left, bottom, right: left + width };
     const overlays = navbars.filter(bar => {
       const style = win.getComputedStyle(bar);
       return style.display !== "none" && style.visibility === "visible" && Number(style.opacity) > 0;
     }).map(bar => bar.getBoundingClientRect());
     container.style.top = `${top}px`;
+    container.style.left = `${left}px`;
+    container.style.width = `${width}px`;
     container.style.height = `${availableViewHeight(pane, bottom, bottom, overlays)}px`;
   };
   const styles = new win.MutationObserver(resize);
@@ -52,7 +64,9 @@ function fitMobilePicker(container: HTMLElement): () => void {
 }
 
 export class ComposerOptions {
-  private openPicker: { close(): void; button: HTMLButtonElement; closed(): void } | null = null;
+  private openPicker: OpenPicker | null = null;
+  private pickerEpoch = 0;
+  private unobscuredViewport: PickerViewport | null = null;
   private fitted: { group: HTMLElement; inputs: string } | null = null;
 
   constructor(private readonly app: App, private readonly root: HTMLElement, private readonly getWork: () => AiWorkspace,
@@ -110,6 +124,8 @@ export class ComposerOptions {
 
   fitLabels(): void {
     const win = this.root.ownerDocument.defaultView;
+    if (win && Platform.isMobileApp && keyboardInset(win, this.root.ownerDocument.body) === 0)
+      this.unobscuredViewport = { width: win.innerWidth, height: win.innerHeight };
     const group = this.root.querySelector<HTMLElement>(".y-ai-composer-options");
     const row = group?.parentElement;
     if (!win || !group || !row?.clientWidth) return;
@@ -139,11 +155,20 @@ export class ComposerOptions {
   }
 
   close(): void {
+    this.pickerEpoch++;
     const open = this.openPicker;
     if (!open) return;
     this.openPicker = null;
     open.button.setAttribute("aria-expanded", "false");
     open.close();
+  }
+
+  selectionForRedraw(field: Caret["field"]): readonly [number, number] | null {
+    const input = this.root.querySelector<HTMLTextAreaElement>(field);
+    if (input && input.ownerDocument.activeElement === input) return [input.selectionStart, input.selectionEnd];
+    const open = this.openPicker;
+    const caret = open?.conversation === this.getWork().library.active ? open.caret : undefined;
+    return caret?.field === field ? [caret.from, caret.to] : null;
   }
 
   private choices(kind: Picker, work: AiWorkspace): PickerChoice[] {
@@ -175,6 +200,8 @@ export class ComposerOptions {
     this.close();
     const doc = this.root.ownerDocument;
     const conversation = work.library.active;
+    const epoch = this.pickerEpoch;
+    let applied = false;
     const restoreFocus = () => {
       if (!this.root.isConnected || this.openPicker || this.getWork() !== work || work.library.active !== conversation) return;
       const picker = this.root.querySelector<HTMLButtonElement>(`[data-composer-picker="${kind}"]`);
@@ -187,7 +214,9 @@ export class ComposerOptions {
       } else if (picker && !picker.disabled) picker.focus({ preventScroll: true });
     };
     const choose = (choice: PickerChoice) => {
-      if (this.openPicker?.closed !== closed) return;
+      // The desktop host can hide the menu before it calls the chosen item's callback.
+      if (applied || epoch !== this.pickerEpoch || this.getWork() !== work || !work.current || work.library.active !== conversation || work.settingsLocked || work.modelSaving) return;
+      applied = true;
       this.close();
       if (choice.current) restoreFocus();
       else if (choice.custom) void choice.apply?.();
@@ -197,16 +226,18 @@ export class ComposerOptions {
       if (this.openPicker?.closed !== closed) return;
       this.openPicker = null;
       button.setAttribute("aria-expanded", "false");
-      doc.defaultView?.requestAnimationFrame(restoreFocus);
+      doc.defaultView?.requestAnimationFrame(() => { if (!applied && epoch === this.pickerEpoch) restoreFocus(); });
     };
     const choices = this.choices(kind, work);
+    const opening: OpenPicker = { button, conversation, caret, closed, close: () => {} };
+    this.openPicker = opening;
     button.setAttribute("aria-expanded", "true");
     if (Platform.isMobileApp) {
       if (caret) {
         this.root.querySelector<HTMLTextAreaElement>(caret.field)?.blur();
         button.focus({ preventScroll: true });
       }
-      this.showMobilePicker(kind, button, choices, choose, closed);
+      this.showMobilePicker(kind, choices, choose, opening);
     } else {
       const menu = new Menu();
       for (const choice of choices) {
@@ -218,14 +249,14 @@ export class ComposerOptions {
           else item.setDisabled(true);
         });
       }
-      this.openPicker = { close: () => menu.hide(), button, closed };
+      opening.close = () => menu.hide();
       menu.onHide(closed);
       const anchor = button.getBoundingClientRect();
       menu.showAtPosition({ x: anchor.left, y: anchor.bottom }, doc);
     }
   }
 
-  private showMobilePicker(kind: Picker, trigger: HTMLButtonElement, choices: PickerChoice[], choose: (choice: PickerChoice) => void, closed: () => void): void {
+  private showMobilePicker(kind: Picker, choices: PickerChoice[], choose: (choice: PickerChoice) => void, opening: OpenPicker): void {
     const modal = new Modal(this.app);
     modal.setTitle(PICKER_LABEL[kind]);
     modal.modalEl.setAttribute("aria-label", PICKER_LABEL[kind]);
@@ -239,10 +270,10 @@ export class ComposerOptions {
       if (choice.current) setIcon(option.createSpan({ cls: "y-ai-picker-check", attr: { "aria-hidden": "true" } }), "check");
       option.addEventListener("click", () => choose(choice));
     }
-    this.openPicker = { close: () => modal.close(), button: trigger, closed };
+    opening.close = () => modal.close();
     let stopViewport = () => {};
-    modal.setCloseCallback(() => { stopViewport(); closed(); });
+    modal.setCloseCallback(() => { stopViewport(); opening.closed(); });
     modal.open();
-    stopViewport = fitMobilePicker(modal.containerEl);
+    stopViewport = fitMobilePicker(modal.containerEl, this.unobscuredViewport);
   }
 }

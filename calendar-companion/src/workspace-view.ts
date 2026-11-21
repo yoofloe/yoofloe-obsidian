@@ -84,6 +84,7 @@ export class YoofloeAiView extends ItemView {
   private savedSearchScroll = 0;
   private savedSettingsScroll = 0;
   private readChatPosition: (() => void) | null = null;
+  private stopOpeningChatFollow: (() => void) | null = null;
   private readonly settingsId = `yoofloe-settings-${crypto.randomUUID()}`;
   constructor(leaf: WorkspaceLeaf, readonly work: AiWorkspace, private readonly options: ViewOptions) {
     super(leaf);
@@ -130,7 +131,7 @@ export class YoofloeAiView extends ItemView {
     this.contentEl.ownerDocument.defaultView?.clearTimeout(this.budgetTimer);
     this.searchEpoch++; if (this.searchTimer !== undefined) this.contentEl.ownerDocument.defaultView?.clearTimeout(this.searchTimer);
     this.unsubscribe?.(); this.stopViewport?.(); this.rendering?.unload();
-    this.readChatPosition = null;
+    this.readChatPosition = null; this.stopOpeningChatFollow = null;
     this.contentEl.ownerDocument.defaultView?.clearInterval(this.durationTimer);
     if (this.saveTimer !== undefined) this.contentEl.ownerDocument.defaultView?.clearTimeout(this.saveTimer);
     await this.work.persist().catch(() => {});
@@ -709,6 +710,7 @@ export class YoofloeAiView extends ItemView {
     return latest && (taskFailure(latest) === feedback || latest.fileWarnings?.includes(feedback)) ? "" : feedback;
   }
   private refreshProgress(): void {
+    this.stopOpeningChatFollow?.();
     const el = this.contentEl, w = this.work, messages = el.querySelector<HTMLElement>(".y-ai-transcript-content");
     const turn = w.chat.at(-1);
     if (turn && messages && !this.chatQuery) {
@@ -741,6 +743,11 @@ export class YoofloeAiView extends ItemView {
   private watchChatScroll(messages: HTMLElement, body: HTMLElement, jump: HTMLButtonElement, openAtLatest: boolean): void {
     const filtered = messages.hasAttribute("data-search-results");
     let scrollTop = messages.scrollTop;
+    // Hold the initial position through late Markdown and image layout until someone starts reading or a task updates.
+    const stopOpeningFollow = () => { openAtLatest = false; };
+    this.stopOpeningChatFollow = stopOpeningFollow;
+    messages.addEventListener("pointerdown", stopOpeningFollow, { passive: true });
+    messages.addEventListener("keydown", stopOpeningFollow);
     const updateButton = () => {
       const focused = jump.ownerDocument.activeElement === jump;
       jump.hidden = filtered || !!this.chatQuery || messages.clientHeight < 52 || nearLatest(messages);
@@ -768,7 +775,7 @@ export class YoofloeAiView extends ItemView {
       if (atLatest && this.savedChatScroll > messages.scrollHeight - messages.clientHeight) return;
       this.savedChatScroll = scrollTop;
       this.followChat = atLatest;
-      openAtLatest = false;
+      stopOpeningFollow();
     };
     this.readChatPosition = readPosition;
     messages.addEventListener("scroll", () => {
@@ -786,10 +793,7 @@ export class YoofloeAiView extends ItemView {
     // Measure the whole transcript, including late Markdown and image layout, without watching every text update.
     const win = messages.ownerDocument.defaultView;
     if (win) {
-      const observer = new win.ResizeObserver(() => {
-        updateLayout();
-        if (messages.clientHeight) openAtLatest = false;
-      });
+      const observer = new win.ResizeObserver(updateLayout);
       observer.observe(messages);
       observer.observe(body);
       this.rendering?.register(() => observer.disconnect());
@@ -1114,10 +1118,8 @@ export class YoofloeAiView extends ItemView {
     const activeField = el.ownerDocument.activeElement;
     const tabFocused = !!activeField && el.contains(activeField) && activeField.matches(".y-ai-view-tabs > button");
     const jumpFocused = !!activeField && el.contains(activeField) && activeField.matches(".y-ai-jump-latest");
-    const promptSelection = activeField?.matches(".y-ai-primary-prompt") && el.contains(activeField)
-      ? [(activeField as HTMLTextAreaElement).selectionStart, (activeField as HTMLTextAreaElement).selectionEnd] as const : null;
-    const followUpSelection = activeField?.matches(".y-ai-follow-up-input") && el.contains(activeField)
-      ? [(activeField as HTMLTextAreaElement).selectionStart, (activeField as HTMLTextAreaElement).selectionEnd] as const : null;
+    const promptSelection = differentConversation ? null : this.composerOptions.selectionForRedraw(".y-ai-primary-prompt");
+    const followUpSelection = differentConversation ? null : this.composerOptions.selectionForRedraw(".y-ai-follow-up-input");
     const referenceFocused = activeField?.matches(".y-ai-reference-trigger") && el.contains(activeField);
     const settingsFocus = activeField && el.querySelector(".y-ai-scroll")?.contains(activeField) && activeField.matches("input,textarea,select") ? activeField.getAttribute("aria-label") : null;
     const selectionStart = settingsFocus && "selectionStart" in activeField! ? (activeField as HTMLInputElement).selectionStart : null;
@@ -1241,7 +1243,7 @@ export class YoofloeAiView extends ItemView {
     data.createEl("p").createEl("a", { text: "OpenAI data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
     const autoScrollLabel = scroll.createEl("label", { cls: "y-ai-context-toggle y-ai-auto-scroll" });
     const autoScroll = autoScrollLabel.createEl("input", { attr: { type: "checkbox", "aria-label": "Auto-scroll while working" } });
-    autoScroll.checked = w.autoScrollChat;
+    autoScroll.checked = w.autoScrollChatChecked;
     autoScroll.disabled = !w.canChangeAutoScrollChat;
     autoScrollLabel.createSpan({ text: "Auto-scroll while working" });
     autoScroll.addEventListener("change", () => {

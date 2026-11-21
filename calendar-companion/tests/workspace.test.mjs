@@ -1042,6 +1042,39 @@ test('auto-scroll defaults on for older workspaces and a change while working su
   assert.equal(f.keyReads(), 0);
 });
 
+test('a failed auto-scroll preference save restores the checkbox and keeps queued saves on the prior value', async () => {
+  const f = fixture(), started = deferred(), resume = deferred();
+  await f.work.initialize();
+  const save = f.options.storage.save;
+  const written = [];
+  f.options.storage.save = async value => {
+    written.push(value.autoScrollChat);
+    if (written.length === 1) {
+      started.resolve();
+      await resume.promise;
+      throw Error('Preference could not be saved');
+    }
+    await save(value);
+  };
+
+  const toggled = f.work.setAutoScrollChat(false);
+  await started.promise;
+  assert.equal(f.work.canChangeAutoScrollChat, false);
+  assert.equal(f.work.autoScrollChatChecked, false);
+  assert.equal(f.work.autoScrollChat, true);
+  f.work.setPrompt('Keep this draft');
+  const draft = f.work.persist();
+  resume.resolve();
+
+  await assert.rejects(toggled, /Preference could not be saved/);
+  await draft;
+  assert.deepEqual(written, [false, true]);
+  assert.equal(f.work.canChangeAutoScrollChat, true);
+  assert.equal(f.work.autoScrollChatChecked, true);
+  assert.equal(f.saved().prompt, 'Keep this draft');
+  assert.equal(f.saved().autoScrollChat, true);
+});
+
 test('changing the attached document carries user directions into the next task and through a saved conversation', async () => {
   const f = fixture();
   const a = await f.host.create('Studies/First.md', 'First document');

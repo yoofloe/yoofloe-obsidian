@@ -434,7 +434,7 @@
 .yoofloe-ai .y-ai-context-toggle input { flex:none; width:auto; min-height:0; margin:0; }
 .yoofloe-ai .y-ai-auto-scroll { min-height:36px; padding:4px 2px; }
 
-.modal-container.y-ai-picker-container { box-sizing:border-box; bottom:auto; align-items:center; justify-content:center; padding:max(12px,var(--safe-area-inset-top,env(safe-area-inset-top))) max(12px,var(--safe-area-inset-right,env(safe-area-inset-right))) max(12px,var(--safe-area-inset-bottom,env(safe-area-inset-bottom))) max(12px,var(--safe-area-inset-left,env(safe-area-inset-left))); }
+.modal-container.y-ai-picker-container { box-sizing:border-box; right:auto; bottom:auto; align-items:center; justify-content:center; padding:max(12px,var(--safe-area-inset-top,env(safe-area-inset-top))) max(12px,var(--safe-area-inset-right,env(safe-area-inset-right))) max(12px,var(--safe-area-inset-bottom,env(safe-area-inset-bottom))) max(12px,var(--safe-area-inset-left,env(safe-area-inset-left))); }
 .y-ai-picker-container > .modal.y-ai-picker-modal { box-sizing:border-box; display:flex; flex-direction:column; width:min(24rem,100%); max-height:100%; height:auto; min-height:0; margin:0; padding:12px; overflow:hidden; }
 .y-ai-picker-modal .modal-title { flex-shrink:0; margin-block-end:8px; padding-inline-end:32px; font-size:var(--font-ui-medium); }
 .y-ai-picker-modal .modal-content { min-height:0; padding:0; overflow:auto; overscroll-behavior:contain; }

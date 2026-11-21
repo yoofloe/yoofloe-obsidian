@@ -63,6 +63,7 @@ export class AiWorkspace {
   library = readLibrary(null);
   autoCompact = true;
   autoScrollChat = true;
+  private pendingAutoScrollChat: boolean | null = null;
   librarySaving = false;
   libraryMessage = "";
   legacyConversationNotice = "";
@@ -210,7 +211,8 @@ export class AiWorkspace {
   get stopping() { return this.busy && this.stopRequested; }
   get canContinue() { return this.current && !!this.task?.canResume && !!this.agent; }
   get settingsLocked() { return this.switchingConversation || !this.ready || this.restoreFailed || this.busy || this.canContinue || this.addingAttachments || this.calendarChanges.busy || this.workspaceCalendar?.busy === true || this.chronoHud?.busy === true || this.workspaceCalendarChanges.busy; }
-  get canChangeAutoScrollChat(): boolean { return this.current && this.ready && !this.restoreFailed; }
+  get autoScrollChatChecked(): boolean { return this.pendingAutoScrollChat ?? this.autoScrollChat; }
+  get canChangeAutoScrollChat(): boolean { return this.current && this.ready && !this.restoreFailed && this.pendingAutoScrollChat === null; }
   get supportsCalendarChanges() { return !!this.options.calendarChange; }
   get canChangeReference() { return this.current && this.ready && !this.restoreFailed && !this.switchingConversation && !this.followUpSaving; }
   get canRestoreReference() { return this.canChangeReference && !this.reference && !!this.removedReference; }
@@ -448,8 +450,10 @@ export class AiWorkspace {
   }
   async setAutoScrollChat(enabled: boolean): Promise<void> {
     if (!this.canChangeAutoScrollChat || this.autoScrollChat === enabled) return;
-    this.autoScrollChat = enabled;
-    await this.persist();
+    this.pendingAutoScrollChat = enabled;
+    this.changed();
+    try { await this.persist(undefined, enabled); }
+    finally { this.pendingAutoScrollChat = null; this.changed(); }
   }
   private async saveLibrary(library: ConversationLibrary, deleteId?: string): Promise<boolean> {
     if (!this.canSwitchConversation) return false;
@@ -1757,12 +1761,12 @@ export class AiWorkspace {
     finally { this.busy = false; this.changed(); }
   }
   async removeCalendar(): Promise<void> { if (this.settingsLocked) return; await this.calendar?.dispose(); this.calendar = null; this.delivery = null; this.preview = ""; this.changed(); }
-  async persist(deleteId?: string): Promise<void> {
+  async persist(deleteId?: string, autoScrollPreference?: boolean): Promise<void> {
     if (!this.ready) await this.initialize();
     if (this.restoreFailed) throw Error("Saved work could not be read. The original work record was preserved.");
     const value = { ...this.conversationState(), mode: this.mode, readScope: this.readScope, writeScope: this.writeScope,
       excluded: this.excluded, maximum: this.maximum, sourceMode: this.sourceMode, onlineMaximum: this.onlineMaximum,
-      followUpDefault: this.followUpDefault, autoCompact: this.autoCompact, autoScrollChat: this.autoScrollChat, conversationLibrary: this.library,
+      followUpDefault: this.followUpDefault, autoCompact: this.autoCompact, conversationLibrary: this.library,
       ...(this.customOnlineMaximum !== null ? { customOnlineMaximum: this.customOnlineMaximum } : {}),
       ...(this.customMaximum !== null ? { customMaximum: this.customMaximum } : {}) };
     const next = this.saveQueue.then(async () => {
@@ -1771,10 +1775,12 @@ export class AiWorkspace {
         return;
       }
       const storage = this.options.storage;
+      const updated = { ...value, autoScrollChat: autoScrollPreference ?? this.autoScrollChat };
       if (deleteId) {
         if (!storage.deleteConversation) throw Error("Conversation deletion is unavailable.");
-        await storage.deleteConversation(deleteId, value);
-      } else await storage.save(value);
+        await storage.deleteConversation(deleteId, updated);
+      } else await storage.save(updated);
+      this.autoScrollChat = updated.autoScrollChat;
     });
     this.saveQueue = next.catch(() => {});
     return next;
