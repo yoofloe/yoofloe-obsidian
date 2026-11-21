@@ -257,6 +257,7 @@ export class YoofloeAiView extends ItemView {
         const budget = this.contentEl.querySelector<HTMLButtonElement>(".y-ai-input-budget");
         if (budget && !budget.getClientRects().length) menu.addItem(item => item.setTitle(budget.textContent || "Input size details")
           .setIcon("calculator").setDisabled(!budget.onclick).onClick(() => budget.click()));
+        this.addCompactAttachmentActions(menu);
         menu.addSeparator();
         this.chatCopy.addMenuItems(menu);
       }
@@ -267,6 +268,25 @@ export class YoofloeAiView extends ItemView {
       const rect = more.getBoundingClientRect();
       menu.showAtPosition({ x: rect.left, y: rect.bottom }, more.ownerDocument);
     });
+  }
+  private addCompactAttachmentActions(menu: Menu): void {
+    const dock = this.contentEl.querySelector(".y-ai-dock");
+    if (!dock?.getClientRects().length) return;
+    const attach = dock.querySelector<HTMLButtonElement>(".y-ai-attach");
+    if (attach && !attach.getClientRects().length) {
+      menu.addItem(item => item.setTitle("Attach files").setIcon("paperclip").setDisabled(attach.disabled)
+        .onClick(() => { if (attach.isConnected) attach.click(); }));
+    }
+    const chips = dock.querySelector(".y-ai-attachments");
+    if (!chips || chips.getClientRects().length) return;
+    const w = this.work, followUp = this.showFollowUp;
+    const files = followUp ? w.followUpAttachments : w.attachments;
+    const canRemove = w.canChangeReference && !w.addingAttachments && (followUp || !w.settingsLocked);
+    for (const file of files) {
+      menu.addItem(item => item.setTitle(`Remove ${file.name}`).setIcon("x")
+        .setDisabled(!canRemove)
+        .onClick(() => { if (dock.isConnected) w.removeAttachment(file.id, followUp); }));
+    }
   }
   private showNoteContext(): void {
     const w = this.work, path = w.source?.path;
@@ -351,7 +371,9 @@ export class YoofloeAiView extends ItemView {
       this.render();
       this.contentEl.querySelector<HTMLButtonElement>(".y-ai-search-trigger")?.focus({ preventScroll: true });
     };
-    this.toolbarButton(row, "Close search", "x").addEventListener("click", closeSearch);
+    const close = this.toolbarButton(row, "Close search", "x");
+    close.classList.add("y-ai-close-search");
+    close.addEventListener("click", closeSearch);
     search.addEventListener("keydown", event => {
       if (event.key !== "Escape" || event.isComposing || this.composing) return;
       event.preventDefault(); event.stopPropagation(); closeSearch();
@@ -1270,6 +1292,7 @@ export class YoofloeAiView extends ItemView {
     const selectionEnd = settingsFocus && "selectionEnd" in activeField! ? (activeField as HTMLInputElement).selectionEnd : null;
     const oldSearch = el.querySelector<HTMLInputElement>(".y-ai-chat-search");
     const searchSelection = oldSearch && activeField === oldSearch ? [oldSearch.selectionStart, oldSearch.selectionEnd] as const : null;
+    const closeSearchFocused = !!activeField && el.contains(activeField) && activeField.matches(".y-ai-close-search");
     this.composerOptions.close();
     this.rendering?.unload(); this.rendering = new Component(); this.rendering.load(); el.empty();
     const chatId = `${this.settingsId}-chat`;
@@ -1468,9 +1491,11 @@ export class YoofloeAiView extends ItemView {
       const replacement = Array.from(scroll.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")).find(field => field.getAttribute("aria-label") === settingsFocus);
       if (replacement && !replacement.disabled) { replacement.focus({ preventScroll: true }); if (selectionStart !== null && selectionEnd !== null && "setSelectionRange" in replacement) replacement.setSelectionRange(selectionStart, selectionEnd); }
     }
-    if (searchSelection && !this.settingsExpanded && !this.libraryOpen) {
-      const search = el.querySelector<HTMLInputElement>(".y-ai-chat-search");
-      search?.focus({ preventScroll: true }); search?.setSelectionRange(...searchSelection);
+    if (!this.settingsExpanded && !this.libraryOpen) {
+      if (searchSelection) {
+        const search = el.querySelector<HTMLInputElement>(".y-ai-chat-search");
+        search?.focus({ preventScroll: true }); search?.setSelectionRange(...searchSelection);
+      } else if (closeSearchFocused) el.querySelector<HTMLButtonElement>(".y-ai-close-search")?.focus({ preventScroll: true });
     }
     if (promptSelection && !prompt.disabled && !followUp && !this.settingsExpanded) {
       prompt.focus({ preventScroll: true }); prompt.setSelectionRange(...promptSelection); sizeComposerInput(prompt);
