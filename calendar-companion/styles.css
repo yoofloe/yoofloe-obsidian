@@ -131,9 +131,17 @@
 .yoofloe-ai .y-ai-search-icon svg { width:16px; height:16px; }
 .yoofloe-ai .y-ai-search-bar input { flex:1; min-width:0; width:100%; min-height:max(34px,calc(1.35em + 8px)); height:max(34px,calc(1.35em + 8px)); background:transparent; border:0; box-shadow:none; font-size:var(--font-ui-small); }
 .yoofloe-ai .y-ai-search-bar button { flex:0 0 28px; min-height:28px; padding:4px; }
-.yoofloe-ai .y-ai-messages { flex:1; min-height:0; min-width:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:12px 14px; scroll-padding-block:12px; }
+.yoofloe-ai .y-ai-transcript { position:relative; display:flex; flex:1; min-height:0; min-width:0; }
+.yoofloe-ai .y-ai-messages { flex:1; min-height:0; min-width:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:12px 14px; scroll-padding-block:12px; scroll-behavior:auto; }
 .yoofloe-ai .y-ai-messages:focus-visible { outline:1px solid var(--background-modifier-border-focus); outline-offset:-1px; }
-.yoofloe-ai .y-ai-empty { display:flex; min-height:100%; flex-direction:column; align-items:center; justify-content:center; text-align:center; color:var(--text-muted); padding:12px; }
+.yoofloe-ai .y-ai-transcript-content { display:flex; flex-direction:column; min-height:100%; min-width:0; }
+.yoofloe-ai .y-ai-jump-latest { position:absolute; inset-block-end:8px; inset-inline-start:50%; transform:translateX(-50%); z-index:1; display:grid; place-items:center; width:32px; height:32px; min-height:32px; padding:0; border:1px solid var(--background-modifier-border); border-radius:50%; background:var(--background-primary); color:var(--text-normal); }
+.yoofloe-ai .y-ai-jump-latest:hover { background:var(--background-secondary); }
+.yoofloe-ai .y-ai-jump-latest:focus-visible { outline:2px solid var(--interactive-accent); outline-offset:1px; }
+.yoofloe-ai .y-ai-jump-latest svg { width:16px; height:16px; }
+.yoofloe-ai .y-ai-jump-latest[hidden] { display:none; }
+@media (pointer:coarse) { .yoofloe-ai .y-ai-jump-latest { width:44px; height:44px; min-height:44px; } }
+.yoofloe-ai .y-ai-empty { display:flex; flex:1; flex-direction:column; align-items:center; justify-content:center; text-align:center; color:var(--text-muted); padding:12px; }
 .yoofloe-ai .y-ai-empty strong { color:var(--text-normal); font-size:var(--font-ui-medium); }
 .yoofloe-ai .y-ai-empty p { margin:6px 0; font-size:var(--font-ui-small); }
 .yoofloe-ai .y-ai-chat { display:flex; flex-direction:column; gap:20px; }
@@ -424,6 +432,18 @@
 .yoofloe-ai .y-ai-search-conversation { align-self:flex-start; font-size:var(--font-ui-smaller); }
 .yoofloe-ai .y-ai-context-toggle { display:flex; align-items:center; gap:8px; font-size:var(--font-ui-small); }
 .yoofloe-ai .y-ai-context-toggle input { flex:none; width:auto; min-height:0; margin:0; }
+.yoofloe-ai .y-ai-auto-scroll { min-height:36px; padding:4px 2px; }
+
+.modal-container.y-ai-picker-container { box-sizing:border-box; right:auto; bottom:auto; align-items:center; justify-content:center; padding:max(12px,var(--safe-area-inset-top,env(safe-area-inset-top))) max(12px,var(--safe-area-inset-right,env(safe-area-inset-right))) max(12px,var(--safe-area-inset-bottom,env(safe-area-inset-bottom))) max(12px,var(--safe-area-inset-left,env(safe-area-inset-left))); }
+.y-ai-picker-container > .modal.y-ai-picker-modal { box-sizing:border-box; display:flex; flex-direction:column; width:min(24rem,100%); max-height:100%; height:auto; min-height:0; margin:0; padding:12px; overflow:hidden; }
+.y-ai-picker-modal .modal-title { flex-shrink:0; margin-block-end:8px; padding-inline-end:32px; font-size:var(--font-ui-medium); }
+.y-ai-picker-modal .modal-content { min-height:0; padding:0; overflow:auto; overscroll-behavior:contain; }
+.y-ai-picker-modal .y-ai-picker-choice { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:44px; height:auto; padding:8px; border:0; border-radius:6px; box-shadow:none; background:transparent; color:var(--text-normal); white-space:normal; overflow-wrap:anywhere; text-align:start; }
+.y-ai-picker-modal .y-ai-picker-choice:is([aria-pressed="true"],:hover) { background:var(--background-secondary); }
+.y-ai-picker-modal .y-ai-picker-choice:focus-visible { outline:2px solid var(--interactive-accent); outline-offset:-2px; }
+.y-ai-picker-modal .y-ai-picker-choice > span:first-child { min-width:0; }
+.y-ai-picker-modal .y-ai-picker-check { display:flex; flex:none; color:var(--interactive-accent); }
+.y-ai-picker-modal .y-ai-picker-hint { margin:4px 8px; color:var(--text-muted); font-size:var(--font-ui-smaller); }
 
 .yoofloe-ai button.y-ai-sent-reference { height:auto; max-width:100%; text-align:start; white-space:normal; overflow-wrap:anywhere; font-size:var(--font-ui-smaller); }
 .y-ai-reference-preview .y-ai-reference-text { max-height:55vh; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; }
