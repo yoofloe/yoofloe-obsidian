@@ -1,6 +1,8 @@
 import type { AiTransport } from "./ai-session";
 import { findOpenAiModel } from "./openai-models";
 import { openAiTransportFailure } from "./openai-request";
+import type { DiagnosticRun } from "./diagnostics";
+import { observeHttp } from "./diagnostic-network";
 
 export interface InputBudget {
   estimated: number;
@@ -56,7 +58,7 @@ export function budgetLabel(budget: InputBudget): string {
 }
 
 export async function verifyInputBudget(
-  body: Record<string, unknown>, key: string, current: () => boolean, transport?: AiTransport, budget = estimateInput(body),
+  body: Record<string, unknown>, key: string, current: () => boolean, transport?: AiTransport, budget = estimateInput(body), diagnostics?: DiagnosticRun,
 ): Promise<InputBudget> {
   if (!current()) throw new InputBudgetError("Stopped before checking the next request.");
   const needsCount = budget.estimated >= TOKEN_COUNT_THRESHOLD || budget.hasFiles || budget.hasCompaction;
@@ -72,10 +74,11 @@ export async function verifyInputBudget(
     if (body[field] !== undefined) countBody[field] = body[field];
   let response;
   try {
-    response = await transport({
+    const encoded = JSON.stringify(countBody);
+    response = await observeHttp(diagnostics, "input_tokens", { requestBytes: new TextEncoder().encode(encoded).length, transport: "obsidian_http" }, () => transport({
       url: "https://api.openai.com/v1/responses/input_tokens", method: "POST", contentType: "application/json",
-      headers: { Authorization: "Bearer " + key }, body: JSON.stringify(countBody), throw: false,
-    });
+      headers: { Authorization: "Bearer " + key }, body: encoded, throw: false,
+    }));
   } catch (error) {
     throw new InputBudgetError(`Input-size verification ${openAiTransportFailure(error)}. Your draft and completed work are kept.`, true);
   }
@@ -83,13 +86,18 @@ export async function verifyInputBudget(
   if (response.status < 200 || response.status >= 300)
     throw new InputBudgetError(`OpenAI input-size verification returned HTTP ${response.status}. Review the attachments or try again when the connection is available.`,
       response.status === 408 || response.status === 429 || response.status >= 500);
-  if (response.text.length > 16384) throw new InputBudgetError("OpenAI returned an oversized token-count response.");
+  const invalidCount = (message: string) => {
+    diagnostics?.event("input_tokens", "failed", { reason: "response_invalid", httpStatus: response.status });
+    return new InputBudgetError(message);
+  };
+  if (response.text.length > 16384) throw invalidCount("OpenAI returned an oversized token-count response.");
   let value: unknown;
-  try { value = JSON.parse(response.text); } catch { throw new InputBudgetError("OpenAI returned an unreadable input token count."); }
+  try { value = JSON.parse(response.text); } catch { throw invalidCount("OpenAI returned an unreadable input token count."); }
   const result = value && typeof value === "object" ? value as Record<string, unknown> : {};
   if (result.object !== "response.input_tokens" || typeof result.input_tokens !== "number" || !Number.isSafeInteger(result.input_tokens) || result.input_tokens < 0)
-    throw new InputBudgetError("OpenAI did not confirm the input token count.");
+    throw invalidCount("OpenAI did not confirm the input token count.");
   budget.exact = result.input_tokens; budget.checked = true;
+  diagnostics?.event("input_tokens", "ok", { inputTokens: budget.exact });
   if (budget.inputLimit !== null && budget.exact > budget.inputLimit)
     throw new InputBudgetError(`This request needs ${budget.exact.toLocaleString()} input tokens. The input budget is ${budget.inputLimit.toLocaleString()} after reserving output space. Use fewer attachments or a smaller reference.`);
   return budget;

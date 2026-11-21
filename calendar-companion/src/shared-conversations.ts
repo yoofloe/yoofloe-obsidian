@@ -3,6 +3,7 @@ import { readChat, validChatId, type ChatTurn } from "./chat-history";
 import { conversationName, turnConversation, type SharedConversationBinding } from "./conversation-library";
 import { inputDigest } from "./question-input";
 import { validContextScope } from "./conversation-context";
+import { diagnoseLocal, type DiagnosticReason, type DiagnosticRun } from "./diagnostics";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const HASH = /^[a-f0-9]{64}$/;
@@ -179,6 +180,13 @@ function parseMessage(raw: string, expectedId: string): ChatTurn {
   return turn;
 }
 
+export function diagnoseSync(error: unknown): DiagnosticReason {
+  const message = error instanceof Error ? error.message.slice(0, 220) : "";
+  if (/^(?:Waiting for |This synced conversation version is unavailable)/.test(message)) return "revision_unavailable";
+  if (/^(?:A synced (?:conversation|message)|The synced (?:conversation|message)|The sync stop record).*(?:invalid|could not be verified)/.test(message)) return "invalid_revision";
+  return diagnoseLocal(error, "storage");
+}
+
 export class SharedConversations {
   constructor(private readonly files: SharedConversationFiles) {}
 
@@ -277,17 +285,23 @@ export class SharedConversations {
   }
 
   async publish(binding: SharedConversationBinding, title: string, at: number,
-    turns: Iterable<ChatTurn> | AsyncIterable<ChatTurn>): Promise<string> {
+    turns: Iterable<ChatTurn> | AsyncIterable<ChatTurn>, diagnostics?: DiagnosticRun): Promise<string> {
     const id = binding.id, root = folder(id), parent = binding.revision;
     title = conversationName(title) || "Conversation";
     if (containsCredential(title)) throw Error("The conversation title contains a credential.");
     const original = parent ? await this.revision(id, parent) : null;
-    if (parent && !original) throw Error("Waiting for the previous conversation version to sync.");
+    if (parent && !original) {
+      diagnostics?.event("sync_revision", "waiting", { reason: "revision_unavailable" });
+      throw Error("Waiting for the previous conversation version to sync.");
+    }
+    if (original) diagnostics?.event("sync_revision", "ok", { count: original.refs.length, contextReused: true });
     if (await this.stopped(id)) throw Error("Vault sync was turned off for this conversation.");
     await this.files.mkdir(root);
     const refs = new Map<string, TurnReference>(original?.refs.map(ref => [ref[0], ref]));
     const newOrder = new Map<string, { at: number; request: string }>();
     let lastRequest = original?.lastRequest ?? "", changed = !original || original.title !== title;
+    diagnostics?.event("sync_message", "started");
+    let written = 0;
     for await (const turn of turns) {
       const message = portableMessage(turn);
       if (!message) continue;
@@ -304,6 +318,8 @@ export class SharedConversations {
       changed = true;
       newOrder.set(message.id, { at: message.startedAt ?? 0, request: message.request.replace(/\s+/g, " ").slice(0, 160) });
       refs.set(message.id, [message.id, digest, parts]);
+      written++;
+      diagnostics?.event("sync_message", "ok", { count: written, dataBytes: bytes.byteLength });
     }
     if (!changed && parent) return parent;
     const ordered = [...refs.values()];
@@ -315,25 +331,38 @@ export class SharedConversations {
     const hash = await inputDigest(raw);
     if (await this.stopped(id)) throw Error("Vault sync was turned off for this conversation.");
     await this.put(root + "/" + revisionFile(hash), raw);
+    diagnostics?.event("sync_revision", "ok", { count: ordered.length });
     if (await this.stopped(id)) throw Error("Vault sync was turned off for this conversation.");
     return hash;
   }
 
-  async describe(id: string, revision: string): Promise<SharedRevision> {
-    const item = await this.revision(id, revision);
-    if (!item || await this.stopped(id)) throw Error("This synced conversation version is unavailable.");
-    return item;
+  async describe(id: string, revision: string, diagnostics?: DiagnosticRun): Promise<SharedRevision> {
+    diagnostics?.event("sync_revision", "started");
+    try {
+      const item = await this.revision(id, revision);
+      if (!item || await this.stopped(id)) throw Error("This synced conversation version is unavailable.");
+      diagnostics?.event("sync_revision", "ok", { count: item.refs.length });
+      return item;
+    } catch (error) {
+      diagnostics?.event("sync_revision", "failed", { reason: diagnoseSync(error) });
+      throw error;
+    }
   }
 
-  async *messages(version: SharedRevision): AsyncGenerator<ChatTurn> {
+  async *messages(version: SharedRevision, diagnostics?: DiagnosticRun): AsyncGenerator<ChatTurn> {
     const root = folder(version.id);
+    diagnostics?.event("sync_message", "started", { count: version.refs.length });
+    let read = 0;
     for (const [id, digest, parts] of version.refs) {
       this.guard();
       const text = new TextDecoder("utf-8", { fatal: true });
       let raw = "";
       for (let index = 0; index < parts; index++) {
         const chunk = await this.files.read(root + "/" + partFile(digest, index), Math.ceil(PART_BYTES / 3) * 4 + 128);
-        if (chunk === null) throw Error("Waiting for the remaining conversation files to sync.");
+        if (chunk === null) {
+          diagnostics?.event("sync_message", "unconfirmed", { reason: "revision_unavailable", count: read });
+          throw Error("Waiting for the remaining conversation files to sync.");
+        }
         const bytes = decodePart(chunk.replaceAll("\r\n", "\n"));
         if (bytes.byteLength > PART_BYTES || index + 1 < parts && bytes.byteLength !== PART_BYTES)
           throw Error("A synced message part has an invalid size.");
@@ -341,16 +370,19 @@ export class SharedConversations {
       }
       if (encoder.encode(raw).byteLength > MAX_MESSAGE_BYTES || await inputDigest(raw) !== digest)
         throw Error("A synced message could not be verified. Its stored copy is kept.");
-      yield parseMessage(raw, id);
+      const message = parseMessage(raw, id);
+      diagnostics?.event("sync_message", "ok", { count: ++read });
+      yield message;
     }
     this.guard();
     if (await this.stopped(version.id)) throw Error("Vault sync was turned off for this conversation.");
   }
 
-  async stop(id: string): Promise<void> {
+  async stop(id: string, diagnostics?: DiagnosticRun): Promise<void> {
     const root = folder(id);
     await this.files.mkdir(root);
     if (!await this.stopped(id)) await this.put(root + "/stopped.md", STOP);
+    diagnostics?.event("sync_revision", "ok", { action: "stop" });
     const { files } = await this.files.list(root);
     for (const path of files) {
       const name = path.slice(root.length + 1);

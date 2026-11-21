@@ -7,6 +7,8 @@ import { AiWorkspace } from '../dist/workspace.js';
 import { chatPreview } from '../dist/chat-history.js';
 import { collectConversationForCopy, formatCopiedConversation } from '../dist/chat-copy.js';
 import { allowedPath } from '../dist/agent-policy.js';
+import { Diagnostics } from '../dist/diagnostics.js';
+import { environment, exportedReport } from './fixtures/diagnostics.mjs';
 
 const encode = value => new TextEncoder().encode(JSON.stringify(value)).buffer;
 
@@ -114,6 +116,65 @@ async function saveHistory(peer, turns) {
   peer.work.chat = turns.slice(-50);
   await peer.work.persist();
 }
+
+test('concurrent first writes verify the same device encryption proof', async () => {
+  const { database, device, namespace, secrets, rows } = disk();
+  const diagnostics = new DeviceRecords({ database, current: () => true, vaultId: () => namespace,
+    secrets: () => ({ getSecret: key => secrets.get(key) ?? null, setSecret: (key, value) => secrets.set(key, value) }) });
+  const read = database.read;
+  let overlapped = false;
+  database.read = async key => {
+    const row = await read(key);
+    if (!overlapped && !row && key === namespace + '/key-proof') {
+      overlapped = true;
+      await diagnostics.write(new Map([['diagnostics/fixture.json', encode({ diagnostic: true })]]));
+    }
+    return row;
+  };
+  await device.write(new Map([['workspace.json', encode({ conversation: true })]]));
+  assert(overlapped);
+  assert.equal(secrets.size, 1);
+  assert.equal(rows.size, 3);
+  assert.deepEqual(await device.read('diagnostics/fixture.json', 100), encode({ diagnostic: true }));
+  assert.deepEqual(await diagnostics.read('workspace.json', 100), encode({ conversation: true }));
+});
+
+test('sync import and failure are diagnosable with device-encrypted reports outside the shared vault', async () => {
+  const primary = peer();
+  const receiver = peer();
+  receiver.options.diagnostics = new Diagnostics(receiver.local.device, environment, () => true);
+  await primary.work.initialize();
+  await saveHistory(primary, [message('inbox', 'private-message-identifier', Date.now(), 'Private synced request')]);
+  assert.equal(await primary.work.syncConversation('inbox'), true);
+  const binding = primary.work.activeConversation.shared;
+  receiver.sharedVault.receive(primary.sharedVault);
+  await receiver.work.initialize();
+  const previousConversation = receiver.work.activeConversation.id;
+  assert.equal(await receiver.work.openSyncedConversation(binding.id, binding.revision), true);
+  const destination = receiver.work.activeConversation.id;
+  assert.notEqual(destination, previousConversation);
+  assert.equal(await receiver.options.diagnostics.copyReport({ conversation: previousConversation }), null);
+  const text = await receiver.options.diagnostics.copyReport({ conversation: destination });
+  const report = exportedReport(text);
+  assert.equal(report.area, 'conversation_sync');
+  assert.equal(report.outcome, 'completed');
+  assert(report.events.some(event => event.stage === 'sync_message' && event.count === 1));
+  assert.doesNotMatch(text, /Private synced request|private-message-identifier/);
+  await receiver.options.diagnostics.flush();
+  const diagnosticRecords = [...receiver.local.rows].filter(([name]) => name.includes('/diagnostics/'));
+  assert(diagnosticRecords.length);
+  for (const [name, record] of diagnosticRecords) {
+    assert.equal(record.version, 1);
+    assert(!Buffer.from(record.ciphertext).toString('utf8').includes('sync_message'));
+    const raw = await receiver.local.device.read(name.slice(receiver.local.namespace.length + 1), 65536);
+    assert.equal(JSON.parse(new TextDecoder().decode(raw)).area, 'conversation_sync');
+  }
+  assert(![...receiver.sharedVault.files.keys()].some(name => name.includes('diagnostics')));
+  assert.equal(await receiver.work.openSyncedConversation(binding.id, '0'.repeat(64)), false);
+  const [failed] = (await receiver.options.diagnostics.recentIssues()).reports;
+  assert.equal(failed.lastFailure.reason, 'revision_unavailable');
+  receiver.options.diagnostics.dispose();
+});
 
 test('legacy conversation and full archive import as authenticated device records while retaining the source', async () => {
   const local = disk();

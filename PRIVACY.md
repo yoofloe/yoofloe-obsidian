@@ -141,3 +141,9 @@ requirements need assessment for the actual feature and distribution, including 
 A label, provenance record or optional metadata alone is not a claim of full compliance.
 See the [European Commission's Article 50 guidance](https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act).
 Do not remove required disclosures when publishing material for which they apply.
+
+## Local diagnostic reports
+
+Yoofloe records bounded diagnostic metadata for AI tasks, vault conversation sync, Calendar and ChronoHUD in its encrypted device store.
+Reports are available for seven days. Yoofloe clears expired records while the workspace is open and caps the archive at 2 MiB. **Copy diagnostics** places a selected report on the device clipboard.
+The report uses a fixed set of fields such as versions, timings, request IDs, error codes and confirmed operation counts. Note and file references use local aliases.

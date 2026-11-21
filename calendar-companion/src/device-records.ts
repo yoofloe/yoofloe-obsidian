@@ -170,10 +170,13 @@ export class DeviceRecords {
     const proofName = prefix + "key-proof";
     const database = this.options.database;
     let proof = await database.read(proofName);
-    if (!proof && create && !(await database.keys(prefix)).length) {
-      const sealed = await this.seal(proofName, encoder.encode(PROOF).buffer, key);
-      this.guard();
-      await database.write(new Map([[proofName, sealed]]), true);
+    if (!proof && create) {
+      if (!(await database.keys(prefix)).length) {
+        const sealed = await this.seal(proofName, encoder.encode(PROOF).buffer, key);
+        this.guard();
+        await database.write(new Map([[proofName, sealed]]), true);
+      }
+      // A concurrent writer may have initialized the same proof after the first read.
       proof = await database.read(proofName);
     }
     if (!proof || decoder.decode(await this.open(proofName, proof, 128, key)) !== PROOF)
@@ -215,6 +218,13 @@ export class DeviceRecords {
     const bytes = await this.open(fullName, record, limit, await this.key(scope, false));
     this.guard();
     return bytes;
+  }
+
+  async discard(names: readonly string[]): Promise<void> {
+    if (!names.length) return;
+    const scope = this.prefix();
+    await this.options.database.discard(names.map(name => scope + name));
+    this.guard();
   }
 
   async write(records: ReadonlyMap<string, ArrayBuffer>, keepExisting = false, changes?: RecordChanges): Promise<void> {

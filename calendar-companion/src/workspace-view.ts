@@ -25,6 +25,7 @@ import { renderChronoHudPanel } from "./chronohud-panel";
 import { ChatCopyControls } from "./chat-copy-view";
 import { ComposerOptions } from "./composer-options";
 import { sizeComposerInput, submitComposerShortcut } from "./composer-input";
+import { copyDiagnostics, RecentIssuesModal } from "./diagnostics-view";
 
 export const AI_VIEW = "yoofloe-ai";
 const CALENDAR_STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -141,6 +142,7 @@ export class YoofloeAiView extends ItemView {
     this.contentEl.ownerDocument.defaultView?.clearInterval(this.durationTimer);
     if (this.saveTimer !== undefined) this.contentEl.ownerDocument.defaultView?.clearTimeout(this.saveTimer);
     await this.work.persist().catch(() => {});
+    void this.work.diagnostics?.flush();
   }
   private saveSoon(): void {
     this.scheduleBudget();
@@ -260,6 +262,9 @@ export class YoofloeAiView extends ItemView {
         this.addCompactAttachmentActions(menu);
         menu.addSeparator();
         this.chatCopy.addMenuItems(menu);
+        const diagnostics = w.diagnostics;
+        if (diagnostics) menu.addItem(item => item.setTitle("Copy diagnostics").setIcon("clipboard-list").onClick(() =>
+          void copyDiagnostics(this.app, diagnostics, more.ownerDocument, { conversation: w.library.active })));
       }
       menu.addSeparator();
       menu.addItem(item => item.setTitle("Hide Yoofloe").setIcon("panel-right-close").onClick(() => this.options.hide()));
@@ -515,6 +520,10 @@ export class YoofloeAiView extends ItemView {
     summary.createSpan({ cls: "y-ai-work-mode" });
     this.updateWorkHeading(metadata, turn);
     const progress = metadata.createDiv({ cls: "y-ai-work-progress" });
+    const diagnostics = w.diagnostics;
+    if (diagnostics) this.button(metadata, "Copy diagnostics", () => {
+      void copyDiagnostics(this.app, diagnostics, metadata.ownerDocument, { turn: turn.id });
+    }, false, "y-ai-copy-diagnostics");
     this.renderWorkDetails(progress, turn);
     for (const file of turn.attachments ?? []) metadata.createEl("p", { text: `Attached: ${file.name}`, cls: "y-ai-hint" });
     if (turn.actions.length) { const actions = metadata.createDiv({ cls: "y-ai-chat-actions" }); for (const action of turn.actions) actions.createEl("p", { text: `${labels[action.kind] ?? "Changed"}: ${action.path}${action.target ? ` → ${action.target}` : ""}`, cls: "y-ai-hint" }); }
@@ -1382,6 +1391,12 @@ export class YoofloeAiView extends ItemView {
     contextSettings.createEl("p", { cls: "y-ai-hint", text: `Supported models can compact the active context at ${AUTO_COMPACT_TOKENS.toLocaleString()} tokens. Full messages remain in the local conversation.` });
     const data = this.details(secondarySettings, "privacy", "Privacy and data use");
     this.settingSummary(data, "Privacy", "", "shield-check");
+    const diagnostics = w.diagnostics;
+    if (diagnostics) {
+      const section = this.details(secondarySettings, "diagnostics", "Diagnostics");
+      this.settingSummary(section, "Diagnostics", "", "clipboard-list");
+      this.button(section, "Recent issues", () => new RecentIssuesModal(this.app, diagnostics).open());
+    }
     for (const text of [DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, CONTROL_NOTICE]) data.createEl("p", { text, cls: "y-ai-hint" });
     data.createEl("a", { text: "Privacy and local data controls ↗", href: PRIVACY_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
     data.createEl("p").createEl("a", { text: "OpenAI data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });

@@ -4,6 +4,8 @@ import type { CalendarWorkspacePanelSelection, CalendarWorkspaceSelectionPatch }
 import { emptyWorkspaceFilters, validateWorkspaceQuery, workspaceKindAllowed, workspaceSearchTerms, type WorkspaceCapabilities, type WorkspaceLookupDelivery, type WorkspaceQuery } from "./calendar-workspace-query";
 import { civilDate, validateQuestionQuery } from "./question-query";
 import type { CalendarTransferFile } from "./calendar-workspace-file";
+import type { DiagnosticRun } from "./diagnostics";
+import { replyFailure, verifiedReply, waitForReply, type BeginCompanionDiagnostics } from "./companion-diagnostics";
 
 function defaultSelection(): CalendarWorkspacePanelSelection {
   return { topic: "", areas: ["calendar"], period: "next_7_days", from: null, through: null,
@@ -23,10 +25,12 @@ export class CalendarWorkspaceAccess {
   private included: Set<number> | null = null;
   private selectionVersion = 0;
   private approvedVersion = -1;
+  private diagnostic: DiagnosticRun | undefined;
 
   constructor(private readonly options: {
     session(): CalendarWorkspaceLookupSession; vaultId(): Promise<string>; inboxHint(): string;
     current(): boolean; changed(): void;
+    diagnostics?: BeginCompanionDiagnostics;
   }) {}
 
   get requestId() { return this.pending ? this.session?.requestId ?? null : null; }
@@ -72,6 +76,8 @@ export class CalendarWorkspaceAccess {
     const query: WorkspaceQuery | null = mode === "capabilities" ?
       { mode, lookup: null, kinds: [], filters: emptyWorkspaceFilters() } : this.query();
     if (!query) return null;
+    const diagnostic = this.diagnostic = this.options.diagnostics?.(mode);
+    diagnostic?.event("transfer_write", "started", { transport: "app_handoff" });
     this.busy = true;
     this.options.changed();
     try {
@@ -85,8 +91,11 @@ export class CalendarWorkspaceAccess {
       if (!this.options.current() || this.session !== session) return null;
       this.pending = mode;
       this.message = "";
+      waitForReply(diagnostic);
       return url;
     } catch (error) {
+      diagnostic?.event("transfer_write", "failed", { reason: "unknown", transport: "app_handoff" });
+      diagnostic?.finish("failed", "review");
       this.message = error instanceof Error ? error.message : "Calendar could not be opened.";
       return null;
     } finally { this.busy = false; this.options.changed(); }
@@ -97,6 +106,8 @@ export class CalendarWorkspaceAccess {
   async receive(id: string, imported?: CalendarTransferFile): Promise<void> {
     if (!id || id !== this.requestId || !this.session || this.busy || !this.options.current()) return;
     const session = this.session;
+    const diagnostic = this.diagnostic;
+    diagnostic?.event("reply_read", "started", { action: imported ? "manual_import" : undefined });
     this.busy = true;
     try {
       const reply = await session.receive(id, imported);
@@ -106,7 +117,13 @@ export class CalendarWorkspaceAccess {
       this.delivery = reply.query.mode === "records" ? reply : null;
       this.excerptsEnabled = false; this.included = null;
       this.message = "";
-    } catch { this.message = "No verified Calendar reply yet. Finish reviewing in Calendar, then check again."; }
+      verifiedReply(diagnostic, { count: reply.records.length, action: reply.query.mode });
+      diagnostic?.event("approval", "ok", { evidence: "verified_reply" });
+      diagnostic?.finish("completed", "none");
+    } catch (error) {
+      replyFailure(diagnostic, error);
+      this.message = "No verified Calendar reply yet. Finish reviewing in Calendar, then check again.";
+    }
     finally { this.busy = false; this.options.changed(); }
   }
 
@@ -143,6 +160,8 @@ export class CalendarWorkspaceAccess {
   }
 
   async clear(resetSelection = false): Promise<void> {
+    if (this.pending) this.diagnostic?.finish("stopped", "review", { action: "clear", reason: "user_action" });
+    this.diagnostic = undefined;
     if (resetSelection) this.selection = defaultSelection();
     const session = this.session;
     this.session = null; this.pending = null; this.verified = null; this.delivery = null;

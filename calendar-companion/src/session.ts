@@ -1,5 +1,7 @@
 import { assertLive, createRequest, createQuestionRequest, INBOX, launchUrl, MAX_REPLY_BYTES, openReply, type Delivery, type Request } from "./protocol";
 import { QUERY_REPLY_BYTES, type QuestionQuery } from "./question-query";
+import { diagnoseLocal, type DiagnosticRun } from "./diagnostics";
+import { replyFailure, verifiedReply, waitForReply, type BeginCompanionDiagnostics } from "./companion-diagnostics";
 
 export interface TransferStore {
   exists(path: string): Promise<boolean>; mkdir(path: string): Promise<void>;
@@ -9,13 +11,15 @@ export interface TransferStore {
 
 /** A vault-scoped, one-use transfer; constructing it performs no I/O. */
 export class CalendarSession {
+  private diagnostic: DiagnosticRun | undefined;
   private pending: Request | null = null;
   private delivery: Delivery | null = null;
   private replyText: string | null = null;
   private live = true;
   private busy = false;
   private owner: string | null = null;
-  constructor(private readonly options: { store: TransferStore; vaultName: () => string; allowed: () => boolean; now?: () => number }) {}
+  constructor(private readonly options: { store: TransferStore; vaultName: () => string; allowed: () => boolean; now?: () => number; diagnostics?: BeginCompanionDiagnostics }) {}
+  get diagnostics() { return this.diagnostic; }
   private now() { return (this.options.now ?? Date.now)(); }
   private guard(request?: Request) {
     if (!this.options.allowed() || (this.owner !== null && this.owner !== this.options.vaultName())) this.live = false;
@@ -31,6 +35,8 @@ export class CalendarSession {
     this.guard();
     if (this.busy || this.pending) throw Error("Cancel the current request before starting another.");
     const owner = this.options.vaultName(), request = question ? createQuestionRequest(owner, question.vaultId, question.query, this.now()) : createRequest(owner, this.now());
+    const diagnostic = this.diagnostic = this.options.diagnostics?.("lookup");
+    diagnostic?.event("transfer_write", "started", { transport: "app_handoff" });
     this.busy = true; this.owner = owner; this.pending = request;
     try {
       const store = this.options.store;
@@ -38,8 +44,14 @@ export class CalendarSession {
       this.guard(request);
       if (await store.exists(this.path(request, false)) || await store.exists(this.path(request, true))) throw Error("The request path is already in use.");
       this.guard(request); await store.write(this.path(request, false), JSON.stringify(request)); this.guard(request);
-      return launchUrl(request, question?.inboxHint);
-    } catch (error) { await this.cancel(); throw error; }
+      const url = launchUrl(request, question?.inboxHint);
+      waitForReply(diagnostic);
+      return url;
+    } catch (error) {
+      diagnostic?.event("transfer_write", "failed", { reason: diagnoseLocal(error) });
+      diagnostic?.finish("failed", "review");
+      await this.cancel(); throw error;
+    }
     finally { this.busy = false; }
   }
 
@@ -47,6 +59,8 @@ export class CalendarSession {
   async receive(requestId: string): Promise<Delivery> {
     const request = this.pending; this.guard(request ?? undefined);
     if (!request || requestId !== request.requestId || this.busy || this.delivery) throw Error("No matching pending Calendar request.");
+    const diagnostic = this.diagnostic;
+    diagnostic?.event("reply_read", "started");
     this.busy = true;
     try {
       this.guard(request);
@@ -56,8 +70,12 @@ export class CalendarSession {
       if (size > (request.version === 3 ? QUERY_REPLY_BYTES : MAX_REPLY_BYTES)) throw Error("This transfer is too large.");
       const raw = await this.options.store.read(path); this.guard(request);
       const result = await openReply(raw, request, this.now()); this.guard(request);
+      verifiedReply(diagnostic, { count: result.records.length });
+      diagnostic?.event("approval", "ok", { evidence: "verified_reply" });
+      diagnostic?.finish("completed", "none");
       this.replyText = raw; this.delivery = result; return result;
-    } finally { this.busy = false; }
+    } catch (error) { replyFailure(diagnostic, error); throw error; }
+    finally { this.busy = false; }
   }
 
   /** Recheck the current vault and expiry immediately before note writes. */
@@ -71,6 +89,8 @@ export class CalendarSession {
     const request = this.pending;
     const replyText = this.replyText;
     this.pending = null; this.delivery = null; this.replyText = null;
+    if (this.diagnostic?.report.outcome === "waiting")
+      this.diagnostic.finish("stopped", "review", { action: "clear", reason: "user_action" });
     if (!request) return;
     try {
       const path = this.path(request, false);

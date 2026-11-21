@@ -1,4 +1,6 @@
 import { containsCredential } from "./agent-policy";
+import { diagnoseLocal, type DiagnosticRun } from "./diagnostics";
+import { replyFailure, verifiedReply, waitForReply, type BeginCompanionDiagnostics } from "./companion-diagnostics";
 import type { CalendarChangeAction, CalendarChangeDraft, CalendarChangeReply } from "./calendar-change";
 import type { CalendarWorkspaceChangeReply } from "./calendar-workspace-change";
 import type { CalendarTransferFile } from "./calendar-workspace-file";
@@ -45,6 +47,7 @@ export class CalendarChangeController<Draft extends ProposalIdentity = CalendarC
   message = "";
   lastReply: Reply | null = null;
   private session: ChangeTransfer<Draft, Reply> | null = null;
+  private diagnostic: DiagnosticRun | undefined;
   constructor(private readonly options: {
     session(): ChangeTransfer<Draft, Reply>;
     readDraft(saved: unknown): Promise<Draft>;
@@ -55,12 +58,14 @@ export class CalendarChangeController<Draft extends ProposalIdentity = CalendarC
     save(): Promise<void>;
     changed(): void;
     draftingChanged(): void;
+    diagnostics?: BeginCompanionDiagnostics;
   }) {}
 
   get requestId() { return this.session?.requestId ?? null; }
   get canDraft() { return this.options.current() && !this.busy && !this.state; }
 
   async restore(saved: unknown): Promise<void> {
+    this.diagnostic = undefined;
     this.enabled = false;
     this.message = "";
     this.lastReply = null;
@@ -95,14 +100,20 @@ export class CalendarChangeController<Draft extends ProposalIdentity = CalendarC
   async stage(draft: Draft, titles: Record<string, string>, current: () => boolean): Promise<void> {
     if (!current() || !this.canDraft) throw Error("Finish or clear the current Calendar proposal first.");
     const state: CalendarChangeState<Draft> = { draft, titles, status: "draft", datasetId: draft.datasetId, applied: false };
+    const diagnostic = this.diagnostic = this.options.diagnostics?.("review");
+    diagnostic?.event("proposal", "started", { count: draft.operations.length });
     this.state = state;
     this.enabled = false;
     try { await this.options.save(); }
     catch (error) {
+      diagnostic?.event("result_save", "failed", { reason: diagnoseLocal(error, "storage") });
+      diagnostic?.finish("failed", "review");
       if (this.state === state) this.state = null;
       throw error;
     }
     if (current()) {
+      diagnostic?.event("proposal", "ok", { count: draft.operations.length });
+      diagnostic?.finish("waiting", "review");
       this.message = "Proposal ready. Choose Review in Calendar to inspect and apply it there.";
       this.options.changed();
     }
@@ -119,6 +130,12 @@ export class CalendarChangeController<Draft extends ProposalIdentity = CalendarC
   async open(action: CalendarChangeAction): Promise<string | null> {
     const state = this.state;
     if (!state || !this.canOpen(action)) return null;
+    const previous = this.diagnostic;
+    const diagnostic = this.diagnostic = action === "review" && state.status === "draft" && previous?.report.outcome === "waiting"
+      ? previous : this.options.diagnostics?.(action);
+    if (previous && diagnostic !== previous && previous.report.outcome === "waiting")
+      previous.finish("unconfirmed", "check_result", { relatedRun: diagnostic?.id });
+    diagnostic?.event("transfer_write", "started", { action, transport: "app_handoff", relatedRun: previous !== diagnostic ? previous?.id : undefined });
     const waiting: CalendarChangeState<Draft> = { ...state, status: "waiting" };
     this.busy = true;
     this.options.changed();
@@ -135,14 +152,18 @@ export class CalendarChangeController<Draft extends ProposalIdentity = CalendarC
       // always be reconciled via a new, read-only status request.
       this.state = waiting;
       await this.options.save();
+      diagnostic?.event("proposal", "ok");
       const url = await session.start(state.draft, {
         vaultId, inboxHint: this.options.inboxHint(), action,
         datasetId: action === "review" ? state.draft.datasetId : state.datasetId,
       });
       this.message = action === "review" ? "Review the proposal in the Calendar app." :
         action === "undo" ? "Confirm undo in the Calendar app." : "Check the saved result in the Calendar app.";
+      waitForReply(diagnostic);
       return url;
     } catch (error) {
+      diagnostic?.event("transfer_write", "failed", { action, transport: "app_handoff", reason: diagnoseLocal(error) });
+      diagnostic?.finish("failed", "review");
       // No link was returned. Keep the previous result and allow another explicit attempt.
       this.message = error instanceof Error ? error.message : "The Calendar connection could not be confirmed.";
       if (this.state === waiting && this.options.current() && !this.requestId) {
@@ -160,12 +181,20 @@ export class CalendarChangeController<Draft extends ProposalIdentity = CalendarC
     const state = this.state, session = this.session;
     if (!state || !session || requestId !== session.requestId || !this.options.current() || this.busy) return false;
     const action = session.action;
+    const diagnostic = this.diagnostic;
+    diagnostic?.event("reply_read", "started", { action: imported ? "manual_import" : action ?? "status" });
     this.busy = true;
     try {
       const reply = await session.receive(requestId, imported);
       if (this.state !== state || !this.options.current()) return false;
       this.lastReply = reply;
       const confirmed = reply.status === "applied" || reply.status === "undone";
+      const resultAction = reply.status === "undone" ? "undo" : reply.status === "applied" ? "applied" : undefined;
+      const reason = reply.status === "cancelled" || reply.status === "conflict" || reply.status === "rejected" || reply.status === "not_found" ? reply.status : undefined;
+      verifiedReply(diagnostic, { action: resultAction, reason });
+      if (action === "review" || action === "undo") {
+        diagnostic?.event("approval", confirmed ? "ok" : "stopped", { action: resultAction, reason, evidence: "verified_reply" });
+      }
       const missingInKnownDataset = reply.status === "not_found" && state.datasetId !== null && state.datasetId === reply.datasetId && !state.applied;
       const unresolved = action === "status" && !confirmed && !missingInKnownDataset;
       const applied = reply.status === "applied" || state.applied && reply.status !== "undone";
@@ -173,10 +202,19 @@ export class CalendarChangeController<Draft extends ProposalIdentity = CalendarC
         datasetId: confirmed ? reply.datasetId : state.datasetId };
       this.message = unresolved ? "Calendar could not confirm the saved result in this workspace. Check the workspace where you reviewed this proposal." :
         missingInKnownDataset ? "Calendar found no saved result in this workspace. You can review the same proposal." : resultMessages[reply.status];
-      try { await this.options.save(); }
-      catch { this.message += " The local result could not be saved. Check status in Calendar again."; }
+      try {
+        await this.options.save();
+        diagnostic?.event("result_save", "ok", { action: resultAction });
+        diagnostic?.finish(unresolved ? "waiting" : confirmed ? "completed" : "stopped",
+          unresolved ? "check_result" : confirmed ? "none" : "review", { reason });
+      } catch {
+        diagnostic?.event("result_save", "unconfirmed", { reason: "storage", action: resultAction });
+        diagnostic?.finish("unconfirmed", "check_result");
+        this.message += " The local result could not be saved. Check status in Calendar again.";
+      }
       return true;
     } catch (error) {
+      replyFailure(diagnostic, error);
       this.message = error instanceof Error ? error.message : "No verified response yet. Check in Calendar and retry.";
       return false;
     } finally { this.busy = false; this.options.changed(); }
@@ -185,7 +223,10 @@ export class CalendarChangeController<Draft extends ProposalIdentity = CalendarC
   async disconnect(): Promise<void> {
     if (this.busy || !this.session) return;
     this.busy = true;
-    try { await this.session.dispose(); this.session = null; }
+    try {
+      await this.session.dispose(); this.session = null;
+      if (this.state?.status === "waiting") this.diagnostic?.finish("unconfirmed", "check_result", { reason: "user_action" });
+    }
     finally {
       this.busy = false;
       if (this.state?.status === "waiting") this.message = "Connection closed. Check the saved result in Calendar.";

@@ -1,11 +1,12 @@
 import { vaultPath } from "./agent-policy";
+import type { DiagnosticFile, DiagnosticRun } from "./diagnostics";
 
 export const MAX_GENERATED_BYTES = 12 * 1024 * 1024;
 export const GENERATED_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "pdf", "csv", "txt", "json"] as const;
 export interface PendingGeneratedFile { origin: string; name: string; base64?: string; container?: string; file?: string }
 export interface GeneratedFile { id: string; name: string; extension: string; bytes: number; sha256: string }
 export interface GeneratedStore {
-  stage(files: PendingGeneratedFile[], key: string, current: () => boolean, byteBudget?: number): Promise<GeneratedFile[]>;
+  stage(files: PendingGeneratedFile[], key: string, current: () => boolean, byteBudget?: number, diagnostics?: DiagnosticRun): Promise<GeneratedFile[]>;
 }
 export function generatedExtension(name: string): string {
   const extension = name.split(".").at(-1)?.toLowerCase() ?? "";
@@ -47,10 +48,10 @@ export function readGeneratedFiles(value: unknown): GeneratedFile[] {
 export function generatedStore(options: {
   configDir: string; exists(path: string): Promise<boolean>; mkdir(path: string): Promise<void>;
   write(path: string, bytes: ArrayBuffer): Promise<void>; read(path: string): Promise<ArrayBuffer>;
-  download(container: string, file: string, key: string, current: () => boolean, byteBudget?: number): Promise<ArrayBuffer>;
+  download(container: string, file: string, key: string, current: () => boolean, byteBudget?: number, diagnostics?: DiagnosticFile): Promise<ArrayBuffer>;
 }): GeneratedStore {
   const saved = new Map<string, GeneratedFile>();
-  return { async stage(files, key, current, byteBudget = 32 * 1024 * 1024) {
+  return { async stage(files, key, current, byteBudget = 32 * 1024 * 1024, diagnostics) {
     const result: GeneratedFile[] = []; let total = 0;
     for (const input of files.slice(0, 16)) {
       if (!current()) throw Error("Stopped before retrieving generated files.");
@@ -63,7 +64,8 @@ export function generatedStore(options: {
         const raw = atob(input.base64), decoded = new Uint8Array(raw.length); for (let i=0;i<raw.length;i++) decoded[i]=raw.charCodeAt(i); bytes=decoded.buffer;
       } else {
         if (!/^cntr_[A-Za-z0-9_-]{1,150}$/.test(input.container ?? "") || !/^cfile_[A-Za-z0-9_-]{1,150}$/.test(input.file ?? "")) throw Error("Invalid generated download reference.");
-        bytes = await options.download(input.container!, input.file!, key, current, remaining);
+        const trace = diagnostics ? { run: diagnostics, reference: diagnostics.alias("File", input.origin) } : undefined;
+        bytes = await options.download(input.container!, input.file!, key, current, remaining, trace);
       }
       if (!current()) throw Error("Stopped before caching the generated file.");
       validateGeneratedBytes(bytes, extension); total += bytes.byteLength;
@@ -73,6 +75,7 @@ export function generatedStore(options: {
       if (!current()) throw Error("Stopped before caching the generated file.");
       const path = generatedCachePath(options.configDir, file); await options.write(path, bytes);
       if (await binaryDigest(await options.read(path)) !== file.sha256) throw Error("The generated file could not be preserved locally.");
+      diagnostics?.event("result_save", "ok", { action: "asset", reference: diagnostics.alias("File", input.origin), dataBytes: bytes.byteLength });
       saved.set(input.origin, file); result.push(file);
     }
     return result;

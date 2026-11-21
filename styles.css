@@ -467,3 +467,7 @@
 .yoofloe-ai .y-ai-calendar-proposal ol { padding-inline-start:1.5em; }
 .yoofloe-ai .y-ai-calendar-proposal-actions { display:flex; flex-wrap:wrap; gap:6px; }
 .is-mobile .yoofloe-ai .y-ai-calendar-proposal-actions button { min-height:36px; height:auto; white-space:normal; }
+.y-ai-diagnostic-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:var(--size-4-2); padding-block:var(--size-4-2); border-top:1px solid var(--background-modifier-border); }
+.y-ai-diagnostic-row div { font-size:var(--font-ui-small); }
+.y-ai-diagnostic-report { width:100%; box-sizing:border-box; font-family:var(--font-monospace); }
+.yoofloe-ai .y-ai-copy-diagnostics { margin-block:var(--size-4-1); }
