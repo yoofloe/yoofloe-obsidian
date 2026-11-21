@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AiWorkspace } from '../dist/workspace.js';
 import { prepareCalendarChangeDraft } from '../dist/calendar-change-draft.js';
+import { diagnosticFixture, exportedReport } from './fixtures/diagnostics.mjs';
 
 const vaultId = '815b9a69-7a8f-496d-abcb-2699e5481d75';
 const datasetId = '4ac45c5b-d48b-4d1a-9a15-9b983b73a04c';
@@ -34,6 +35,7 @@ test('Calendar edit and deletion targets resolve only from the approved lookup',
 });
 
 test('a Calendar draft is local until user review, then an authenticated result enables a separate undo', async () => {
+  const { diagnostics } = diagnosticFixture();
   let saved, calls = 0, replies = 0, launches = 0, nextStatus = 'applied', requestId = null;
   let failMarker = false;
   const changes = [];
@@ -59,7 +61,7 @@ test('a Calendar draft is local until user review, then an authenticated result 
   };
   const options = {
     current: () => true, configDir: '.obsidian', gate: { busy: false }, inboxHint: () => '',
-    host: () => host, calendarChange: () => bridge,
+    host: () => host, calendarChange: () => bridge, diagnostics,
     preferences: { read: async () => ({model:'gpt-6-luna',effort:'none'}), hasKey: async () => true, key: async () => 'sk-synthetic-agent-key', vaultId: async () => vaultId },
     storage: { load: async () => ({ source:'Original.md', mode:'edit' }), save: async value => { saved = structuredClone(value); }, history: async () => [] },
     transport: async req => {
@@ -97,6 +99,12 @@ test('a Calendar draft is local until user review, then an authenticated result 
   assert(await work.calendarChanges.receive(requestId));
   assert.equal(saved.calendarChange.status, 'applied');
   assert.equal(saved.calendarChange.datasetId, datasetId);
+  const appliedText = await diagnostics.copyReport({ conversation: work.library.active });
+  const appliedReport = exportedReport(appliedText);
+  assert.equal(appliedReport.area, 'calendar');
+  assert(appliedReport.events.some(event => event.stage === 'approval' && event.action === 'applied'));
+  assert(appliedReport.events.some(event => event.stage === 'result_save' && event.outcome === 'ok'));
+  assert.doesNotMatch(appliedText, /Synthetic task|PRIVATE NOTE TEXT|Original\.md|4ac45c5b/);
   failMarker = true;
   assert.equal(await work.calendarChanges.open('undo'), null);
   assert.equal(saved.calendarChange.status, 'applied');
@@ -137,6 +145,7 @@ test('a Calendar draft is local until user review, then an authenticated result 
     await work.calendarChanges.clear();
     assert.equal(work.calendarChanges.state.draft.proposalId, retry.draft.proposalId);
   }
+  diagnostics.dispose();
 });
 
 

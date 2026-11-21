@@ -4,12 +4,28 @@ import { CalendarSession, type TransferStore } from "./session";
 import { saveDelivery, type NoteStore } from "./notes";
 import { AiDraftModal, type AiContext } from "./ai-modals";
 import { recordLabel } from "./record-types";
+import { diagnoseLocal, type DiagnosticRun } from "./diagnostics";
+import type { BeginCompanionDiagnostics } from "./companion-diagnostics";
 const REQUIREMENTS = "Direct Calendar connection requires Android phones or tablets, Yoofloe Calendar 1.8.5 or later and Obsidian 1.11.5 or later on the same device and Android user profile.";
 const STORE_URL = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
-function noteStore(vault: Vault): NoteStore {
+function noteStore(vault: Vault, diagnostic?: DiagnosticRun): NoteStore {
+  const batch = "calendar_import/" + (diagnostic?.nextAttempt() ?? 0);
+  let created = 0, pending = 0;
   return { exists: path => Promise.resolve(vault.getAbstractFileByPath(path) !== null), read: path => vault.adapter.read(path),
     mkdir: async path => { const item = vault.getAbstractFileByPath(path); if (item && !(item instanceof TFolder)) throw Error("Folder conflict"); if (!item) await vault.createFolder(path); },
-    create: async (path, text) => { await vault.create(path, text); } };
+    create: async (path, text) => {
+      const info = { action: "create", reference: diagnostic?.alias("Note", path) };
+      diagnostic?.updateJournal(batch, { confirmed: created, pending: ++pending, reverted: 0 });
+      diagnostic?.event("vault_write", "started", info);
+      try {
+        await vault.create(path, text);
+        diagnostic?.updateJournal(batch, { confirmed: ++created, pending: --pending, reverted: 0 });
+        diagnostic?.event("vault_write", "ok", info);
+      } catch (error) {
+        diagnostic?.event("vault_write", "unconfirmed", { ...info, reason: diagnoseLocal(error, "storage") });
+        throw error;
+      }
+    } };
 }
 export class CompanionModal extends Modal {
   private session: CalendarSession | null = null;
@@ -20,7 +36,7 @@ export class CompanionModal extends Modal {
   private draft: AiDraftModal | null = null;
   private owner = this.app.vault;
   constructor(app: App, private readonly pluginLive: () => boolean, private readonly closed: () => void,
-    private readonly getAi: () => AiContext, private readonly openAiSettings: () => void) { super(app); }
+    private readonly getAi: () => AiContext, private readonly openAiSettings: () => void, private readonly diagnostics?: BeginCompanionDiagnostics) { super(app); }
   private current = () => this.alive && this.pluginLive() && this.app.vault === this.owner;
   onOpen(): void {
     this.alive = true; this.contentEl.classList.add("calendar-companion");
@@ -30,7 +46,7 @@ export class CompanionModal extends Modal {
         write: (path, text) => adapter.write(path, text), read: path => adapter.read(path),
         size: async path => { const info = await adapter.stat(path); return info?.type === "file" ? info.size : null; },
         remove: path => adapter.remove(path) };
-      this.session = new CalendarSession({ store, vaultName: () => this.app.vault.getName(), allowed: () => Platform.isAndroidApp && this.current() });
+      this.session = new CalendarSession({ store, vaultName: () => this.app.vault.getName(), allowed: () => Platform.isAndroidApp && this.current(), diagnostics: this.diagnostics });
     }
     this.render();
   }
@@ -94,13 +110,21 @@ export class CompanionModal extends Modal {
   private async save(): Promise<void> {
     const session = this.session, delivery = session?.preview;
     if (!session || !delivery || this.busy || !this.current()) return;
+    const diagnostic = session.diagnostics;
+    diagnostic?.event("result_save", "started");
     this.busy = true;
     try {
-      const store = noteStore(this.owner);
+      const store = noteStore(this.owner, diagnostic);
       const result = await saveDelivery(delivery, store, () => { if (!this.current()) throw Error("Vault changed"); session.assertCanSave(delivery); });
       await session.cancel(); this.saved = true;
+      diagnostic?.event("result_save", "ok", { count: result.created });
+      diagnostic?.finish("completed", "none");
       this.message = `Saved ${result.created} new note(s); skipped ${result.skipped} identical snapshot(s).`;
-    } catch { this.message = "Some notes could not be saved. Existing notes were kept. Check for edited-name conflicts and retry; identical saved snapshots are skipped."; }
+    } catch {
+      diagnostic?.event("result_save", "unconfirmed", { reason: "storage" });
+      diagnostic?.finish("unconfirmed", "review");
+      this.message = "Some notes could not be saved. Existing notes were kept. Check for edited-name conflicts and retry; identical saved snapshots are skipped.";
+    }
     finally { this.busy = false; this.render(); }
   }
   private async cancel(): Promise<void> { if (this.busy) return; await this.session?.cancel(); this.message = "Request canceled. Existing notes were kept."; this.render(); }

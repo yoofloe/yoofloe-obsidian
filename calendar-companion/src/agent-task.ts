@@ -16,6 +16,8 @@ import { findOpenAiModel } from "./openai-models";
 import { WORK_ACTIVITY_LIMIT, workText, type ActivityKind, type ActivityState, type SteerNote, type WorkEvent } from "./work-activity";
 import type { LiveResponseRound, LiveSteerEvent, OpenLiveResponse } from "./responses-socket";
 import { estimateInput, verifyInputBudget, InputBudgetError, TOKEN_COUNT_THRESHOLD, type InputBudget } from "./input-budget";
+import { diagnoseLocal, type DiagnosticRun } from "./diagnostics";
+import { diagnoseTransport } from "./diagnostic-network";
 
 export type SteerStatus = "steer-pending" | "sending" | "applied" | "received" | "review";
 export interface AgentExecutor { execute(name: string, args: unknown): Promise<unknown>; research?(sources: WebSource[], files: GeneratedFile[]): void; hasUneditedWritableNote?(): boolean; addReference?(reference: SelectionReference): Promise<unknown> }
@@ -81,11 +83,13 @@ export class AgentTask {
     current(): boolean; preserve?(): boolean; key(): Promise<string | null>; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; streamResponses?: boolean;
     steerStatus?(note: SteerNote, status: SteerStatus): void;
     executor: AgentExecutor; gate: { busy: boolean }; generated?: GeneratedStore; attachments?: AttachmentRun; attachmentStore?: AttachmentStore; writeScope?: WriteScope; calendarDraft?: CalendarDraftTool;
+    diagnostics?: DiagnosticRun;
   }) {}
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   get durationMs(): number { return this.workedMs + (this.activeSince === null ? 0 : Math.max(0, Date.now() - this.activeSince)); }
   get draftingCalendar() { return !!this.options.calendarDraft; }
   get hasStagedCalendarProposal() { return this.stagedCalendarProposal; }
+  get diagnostics() { return this.options.diagnostics; }
   private update(kind: ActivityKind, text: string, state: ActivityState = kind === "blocked" ? "blocked" : kind === "request" ? "working" : "done"): void {
     text = workText(text);
     if (kind !== "summary") this.message = text;
@@ -101,6 +105,7 @@ export class AgentTask {
     if ((!this.busy && !this.canResume) || this.stopped || !this.options.current()) return false;
     safeOutbound(note.text);
     this.pendingSteers.push(note);
+    this.diagnostics?.event("steer", "waiting", { operationId: note.id, action: "queued" });
     this.update("follow-up", "Steer queued for the next safe step.", "waiting");
     this.tryNativeSteer();
     return true;
@@ -118,6 +123,7 @@ export class AgentTask {
   }
   private markApplied(note: SteerNote): void {
     this.steerNotes = [...this.steerNotes, note].slice(-20);
+    this.diagnostics?.event("steer", "ok", { action: "applied", operationId: note.id, requestNumber: this.requests });
     this.options.steerStatus?.(note, "applied");
     this.update("follow-up", "Steer applied to this task.");
   }
@@ -217,6 +223,11 @@ export class AgentTask {
     this.stagedCalendarProposal = false;
     this.initialItem = { role: "user", content: input };
     this.items = [...context?.items ?? [], this.initialItem];
+    if (this.autoCompact) {
+      this.diagnostics?.event("compaction", "ok", { action: "enabled", thresholdTokens: AUTO_COMPACT_TOKENS });
+      if (this.items.some(item => item.type === "compaction"))
+        this.diagnostics?.event("compaction", "ok", { action: "reused", contextReused: true });
+    }
     this.requests = 0; this.calls.clear(); this.text = ""; this.events = []; this.eventId = 0; this.workedMs = 0; this.steerNotes = []; this.usage = { input: 0, output: 0, reasoning: 0 };
     if (initialNote) this.update("tool", `Attached note: ${initialNote}`);
     await this.advance(maximum);
@@ -241,7 +252,7 @@ export class AgentTask {
       prepared = { text };
       if (context.attachments.length) {
         if (!this.options.attachmentStore) throw Error("Attachment processing is unavailable for this task.");
-        prepared.attachments = this.options.attachmentStore.forTask(context.attachments);
+        prepared.attachments = this.options.attachmentStore.forTask(context.attachments, false, this.diagnostics);
         const files = prepared.attachments;
         this.steerUploads.push(onFailure => files.cleanup(key, onFailure));
       }
@@ -262,10 +273,14 @@ export class AgentTask {
     const summarize = !!findOpenAiModel(model.model) && effort !== "none";
     this.busy = true; this.options.gate.busy = true; this.stopped = false; this.stopDeferredCleanup = false;
     this.pausedForInput = false; this.pausedForConnection = false; this.state = "running"; this.activeSince = Date.now();
+    const previousFailure = this.diagnostics?.report.lastFailure;
     try {
       this.update("status", this.requests ? "Continuing the task" : "Preparing the request", "working");
       const value = await this.options.key();
-      if (!value) throw Error("Save your OpenAI API key locally before starting. No request was sent.");
+      if (!value) {
+        this.diagnostics?.event("prepare", "failed", { reason: "missing_key" });
+        throw Error("Save your OpenAI API key locally before starting. No request was sent.");
+      }
       const key = validateOpenAiKey(value);
       const attachments = this.options.attachments;
       if (attachments && !this.cleanupUploads) this.cleanupUploads = onFailure => attachments.cleanup(key, onFailure);
@@ -309,11 +324,14 @@ export class AgentTask {
             bytes = new TextEncoder().encode(body).length;
           }
         }
-        if (bytes > MAX_AI_INPUT_BYTES) throw Error("This task reached its data budget. Your work is kept. Start a focused follow-up.");
+        if (bytes > MAX_AI_INPUT_BYTES) {
+          this.diagnostics?.event("context", "failed", { reason: "input_budget", requestBytes: bytes });
+          throw Error("This task reached its data budget. Your work is kept. Start a focused follow-up.");
+        }
         this.inputBudget = estimateInput(payload, body, bytes);
         if (this.options.countTokens && (this.inputBudget.hasFiles || this.inputBudget.hasCompaction || this.inputBudget.estimated >= TOKEN_COUNT_THRESHOLD))
           this.update("status", "Checking input size", "working");
-        this.inputBudget = await verifyInputBudget(payload, key, () => !this.stopped && this.options.current(), this.options.countTokens, this.inputBudget);
+        this.inputBudget = await verifyInputBudget(payload, key, () => !this.stopped && this.options.current(), this.options.countTokens, this.inputBudget, this.diagnostics);
         const firstSteer = this.items.length;
         this.items.push(...messages);
         const result = await this.requestReply(body, bytes, key, maximum, effort, hosted.length, canSaveGenerated).catch((error: unknown) => {
@@ -323,26 +341,35 @@ export class AgentTask {
         });
         if (!result) break;
         const { reply, trace } = result;
+        this.diagnostics?.event("provider_reply", "ok", { requestNumber: this.requests, inputTokens: reply.usage.input, outputTokens: reply.usage.output,
+          count: reply.calls.length, remoteConfirmed: true });
         const newFiles = await this.collectReply(reply, key, canSaveGenerated, true, trace);
         if (this.stopped || !this.options.current()) { this.state = "stopped"; this.update("status", "Stopped. The returned answer and completed work are kept; no further file action was run."); break; }
-        if (reply.incomplete) { this.state = "failed"; this.update("blocked", "A partial answer was returned. It is kept; no retry was made."); break; }
+        if (reply.incomplete) {
+          this.diagnostics?.event("provider_reply", "unconfirmed", { requestNumber: this.requests, remoteConfirmed: true, reason: "stream_incomplete" });
+          this.state = "failed"; this.update("blocked", "A partial answer was returned. It is kept; no retry was made."); break;
+        }
         const completeLocalWork = this.steerNotes.length === 0 && !this.pendingSteers.length && newFiles > 0 && (canSaveGenerated ? requestsVaultWork(this.initialInput) : localTools.some(tool => tool.name === "apply_changes") && requestsAttachedNoteEdit(this.initialInput) && this.options.executor.hasUneditedWritableNote?.() === true);
         if (completeLocalWork && !reply.calls.length) this.items.push({ role: "user", content: "The research or generation step has returned. Complete the original requested document work with the permitted vault tools if needed. Do not repeat the research just to save its results. If the original request only wanted an answer, give that answer." });
         if (!reply.calls.length && !completeLocalWork && !this.pendingSteers.length) { this.state = "completed"; this.update("status", this.fileWarnings.length ? "The answer is kept, but some files need attention. See the file messages below." : this.generated.length && !canSaveGenerated ? "Task complete. Generated files are available in this chat; use Save attachment to save a copy." : "Task complete. Review the answer and changed files below."); break; }
         let roundBlocked = newFiles === 0 && reply.calls.length > 0;
         for (const call of reply.calls) {
           if (this.stopped || !this.options.current()) break;
+          const info = { action: call.name, attempt: this.diagnostics?.nextAttempt(), requestNumber: this.requests };
           let result: string, blocked = false;
           const prior = this.calls.get(call.id), fingerprint = call.name + "\n" + call.arguments;
           if (prior) {
             if (prior.args !== fingerprint) throw Error("A tool identifier was reused for different work. The task was stopped.");
             result = prior.result; blocked = prior.blocked;
+            this.diagnostics?.event("tool", "skipped", { ...info, reason: "already_executed", contextReused: true });
           } else if (this.pendingSteers.length) {
             result = JSON.stringify({ status: "superseded", message: "The user redirected the task before this action started." });
+            this.diagnostics?.event("tool", "skipped", { ...info, reason: "superseded", operationId: this.pendingSteers[0]?.id });
             this.update("tool", `Skipped ${toolLabel(call.name).toLowerCase()} for the new direction.`);
             this.calls.set(call.id, { args: fingerprint, result, blocked });
           } else {
             const label = toolLabel(call.name);
+            this.diagnostics?.event("tool", "started", info);
             this.update("tool", label, "working");
             if (this.stopped || !this.options.current()) break;
             try {
@@ -354,9 +381,15 @@ export class AgentTask {
               if (this.draftingCalendar) this.stagedCalendarProposal = true;
               result = JSON.stringify(outcome);
               safeOutbound(result);
+              this.diagnostics?.event("tool", "ok", info);
               this.update("tool", toolResult(label, outcome));
             }
-            catch (error) { blocked = true; const message = error instanceof Error ? error.message : "This action could not be completed."; result = JSON.stringify({ status: "blocked", message }); this.update("blocked", message); }
+            catch (error) {
+              blocked = true; const message = error instanceof Error ? error.message : "This action could not be completed.";
+              result = JSON.stringify({ status: "blocked", message });
+              this.diagnostics?.event("tool", "failed", { ...info, reason: diagnoseLocal(error) });
+              this.update("blocked", message);
+            }
             this.calls.set(call.id, { args: fingerprint, result, blocked });
           }
           this.items.push({ type: "function_call_output", call_id: call.id, output: result });
@@ -376,6 +409,11 @@ export class AgentTask {
       this.pausedForInput = sessionCanContinue && error instanceof InputBudgetError && error.retryable;
       this.pausedForConnection = sessionCanContinue && error instanceof OpenAiDnsLookupError;
       const paused = error instanceof AttachmentBudgetPause || this.pausedForInput || this.pausedForConnection;
+      if (this.diagnostics?.report.lastFailure === previousFailure || error instanceof AttachmentBudgetPause) {
+        this.diagnostics?.event("prepare", paused ? "paused" : this.stopped ? "stopped" : "failed", {
+          reason: error instanceof AttachmentBudgetPause ? "request_limit" : error instanceof InputBudgetError ? "input_budget" : diagnoseLocal(error),
+        });
+      }
       if (paused) {
         if (this.pausedForConnection) for (const note of this.sendingSteers) this.options.steerStatus?.(note, "steer-pending");
         this.pendingSteers = [...this.sendingSteers, ...this.pendingSteers]; this.sendingSteers = [];
@@ -411,6 +449,9 @@ export class AgentTask {
     this.update("request", `OpenAI request ${this.requests}${maximum === "none" ? " · no request-count limit" : ` of ${maximum}`} · ${this.model.model}${effort ? ` · ${effort}` : " · model default"}`);
     let reply: AgentReply, trace: string | undefined;
     if (live) {
+      const info = { transport: "responses_websocket" as const, requestNumber: this.requests, requestBytes: bytes, attempt: this.diagnostics?.nextAttempt() };
+      const started = performance.now();
+      this.diagnostics?.event("model_request", "started", info);
       this.live = live;
       this.nativeApplied = null;
       this.canSendNative = (maximum === "none" || this.requests < maximum) && (hostedCount === 0 || this.onlineMaximum === "none");
@@ -427,6 +468,10 @@ export class AgentTask {
         if (!result.response) throw Error("The live connection ended before the response was confirmed. Any returned answer is kept. Review unsent or unconfirmed messages before sending again.");
         this.replayAppliedSteer();
         reply = parseAgentReply(200, result.response);
+        this.diagnostics?.event("model_request", "ok", { ...info, remoteConfirmed: true, elapsedMs: Math.round(performance.now() - started) });
+      } catch (error) {
+        this.diagnostics?.event("model_request", "unconfirmed", { ...info, ...diagnoseTransport(error), elapsedMs: Math.round(performance.now() - started) });
+        throw error;
       } finally {
         live.close();
         this.live = null;
@@ -435,12 +480,16 @@ export class AgentTask {
       }
     } else {
       const streamed = this.options.streamResponses === true;
-      const { response, trace: httpTrace } = await requestOpenAiRound(this.options.transport, body, key, this.requests, bytes, streamed);
+      const { response, trace: httpTrace } = await requestOpenAiRound(this.options.transport, body, key, this.requests, bytes, streamed, this.diagnostics);
       trace = httpTrace;
+      let parsedStream = !streamed || response.status < 200 || response.status >= 300;
       try {
-        const responseText = streamed && response.status >= 200 && response.status < 300 ? openAiStreamResult(response.text) : response.text;
+        const responseText = parsedStream ? response.text : openAiStreamResult(response.text);
+        parsedStream = true;
         reply = parseAgentReply(response.status, responseText);
       } catch (error) {
+        this.diagnostics?.event(parsedStream ? "provider_reply" : "stream", "failed", { requestNumber: this.requests,
+          httpStatus: response.status, reason: !parsedStream ? "stream_incomplete" : response.status >= 300 ? "http" : "response_invalid" });
         const detail = error instanceof Error ? error.message : "OpenAI returned an unreadable response.";
         throw Error(`OpenAI request ${this.requests} · ${detail} (${trace})`);
       }
@@ -461,10 +510,14 @@ export class AgentTask {
       const compact = index >= 0 ? readCompaction(reply.output[index]) : null;
       if (compact) {
         const pendingCalls = reply.output.slice(0, index).filter(item => item.type === "function_call");
+        this.diagnostics?.event("compaction", "ok", { action: "applied", requestNumber: this.requests, count: this.items.length });
         this.items = [compact, ...pendingCalls, ...reply.output.slice(index + 1)];
         this.compaction = compact;
         this.update("status", "Conversation context compacted.");
-      } else this.items.push(...reply.output.filter(item => item.type !== "compaction"));
+      } else {
+        if (index >= 0) this.diagnostics?.event("compaction", "unconfirmed", { reason: "response_invalid", requestNumber: this.requests });
+        this.items.push(...reply.output.filter(item => item.type !== "compaction"));
+      }
     }
     for (const summary of reply.summaries) this.addSummary(summary);
     if (reply.text) this.text = withSources(reply.text, this.citedSources.length ? this.citedSources : this.sources);
@@ -474,10 +527,18 @@ export class AgentTask {
       if (!preserve()) break;
       try {
         if (!this.options.generated) throw Error("Generated-file storage is unavailable on this device.");
-        const files = await this.options.generated.stage([pending], key, preserve, 32 * 1024 * 1024 - stagedBytes);
+        const files = await this.options.generated.stage([pending], key, preserve, 32 * 1024 * 1024 - stagedBytes, this.diagnostics);
         stagedBytes += files.reduce((total, file) => total + file.bytes, 0);
         for (const file of files) if (!this.generated.some(saved => saved.id === file.id)) { this.generated.push(file); newFiles++; }
-      } catch (error) { const warning = error instanceof Error ? error.message : "A generated file could not be preserved. No retry was made."; this.fileWarnings.push(warning); this.update("blocked", warning); if (replay) this.items.push({ role: "user", content: JSON.stringify({ file_delivery_failed: warning, note: "Do not claim this file was saved. Explain this failure; do not regenerate or retry automatically." }) }); }
+      } catch (error) {
+        this.diagnostics?.event("result_save", "unconfirmed", {
+          action: "asset", reference: this.diagnostics.alias("File", pending.origin), reason: diagnoseLocal(error),
+        });
+        const warning = error instanceof Error ? error.message : "A generated file could not be preserved. No retry was made.";
+        this.fileWarnings.push(warning);
+        this.update("blocked", warning);
+        if (replay) this.items.push({ role: "user", content: JSON.stringify({ file_delivery_failed: warning, note: "Do not claim this file was saved. Explain this failure; do not regenerate or retry automatically." }) });
+      }
     }
     this.options.executor.research?.(this.citedSources.length ? this.citedSources : this.sources, this.generated);
     if (replay && this.generated.length) this.items.push({ role: "user", content: JSON.stringify({ generated_files_in_local_cache: this.generated.map(file => ({ reference: file.id, name: file.name, extension: file.extension, bytes: file.bytes })), note: canSaveGenerated ? "These files are cached results, not saved note attachments. Use save_generated_file for the original requested vault work; do not regenerate merely to save. File references may be used only in this task." : "Automatic file saving is not permitted by this write target. The user may choose Save attachment. Do not request an unavailable save tool or regenerate the file." }) });

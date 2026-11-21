@@ -2,8 +2,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AiWorkspace } from "../dist/workspace.js";
+import { diagnosticFixture, exportedReport } from "./fixtures/diagnostics.mjs";
 
-function fixture() {
+function fixture(diagnostics, missingFirst = false) {
   let id,query,delivery;
   const input=[];
   const vaultId="fa5bf192-e649-40b7-a2e2-55531b39bf85";
@@ -12,6 +13,7 @@ function fixture() {
     async start(options){assert.equal(options.vaultId,vaultId);id=crypto.randomUUID();query=options.query;return "chronohud://obsidian/connect";},
     async receive(requestId) {
       assert.equal(requestId,id);
+      if (missingFirst) { missingFirst = false; throw Error("No ChronoHUD reply yet. Approve the lookup in ChronoHUD."); }
       delivery={version:1,requestId:id,exportedAt:Date.now(),query,
         context:{zone:"Europe/Warsaw",scanned:2,matched:2,partial:false},records:[
           {area:"dashboard",title:"Withheld title",text:"PRIVATE SYNTHETIC EXCERPT",date:"2031-06-01"},
@@ -23,7 +25,7 @@ function fixture() {
     async dispose(){id=null;delivery=null;},
   };
   const work=new AiWorkspace({
-    current:()=>true,configDir:".obsidian",gate:{busy:false},inboxHint:()=>"",chronoHudLookup:()=>session,
+    current:()=>true,configDir:".obsidian",gate:{busy:false},inboxHint:()=>"",chronoHudLookup:()=>session,diagnostics,
     host:()=>({files:()=>[]}),preferences:{
       read:async()=>({model:"gpt-6-luna",effort:"none"}),hasKey:async()=>true,key:async()=>"sk-synthetic-agent-key",vaultId:async()=>vaultId,
     },
@@ -37,6 +39,27 @@ function fixture() {
   });
   return {work,input};
 }
+
+test("ChronoHUD records a missing reply and its verified follow-up in the same safe report", async () => {
+  const { diagnostics } = diagnosticFixture();
+  const { work } = fixture(diagnostics, true);
+  await work.initialize();
+  const access = work.chronoHud;
+  access.updateDraft({ areas: ["dashboard", "matrix"], terms: "PRIVATE QUERY" });
+  assert(await access.open());
+  await access.receive(access.requestId);
+  const [waiting] = (await diagnostics.recentIssues()).reports;
+  assert.equal(waiting.area, "chronohud");
+  assert.equal(waiting.outcome, "waiting");
+  assert.equal(waiting.lastFailure.reason, "no_verified_reply");
+  await access.receive(access.requestId);
+  const text = await diagnostics.copyReport({ id: waiting.id });
+  const report = exportedReport(text);
+  assert.equal(report.outcome, "completed");
+  assert(report.events.some(event => event.stage === "result_receive" && event.count === 2));
+  assert.doesNotMatch(text, /PRIVATE QUERY|PRIVATE SYNTHETIC EXCERPT|2031-06-01|Europe\/Warsaw/);
+  diagnostics.dispose();
+});
 
 test("approved ChronoHUD selections send once, with stable references and no excluded text",async()=>{
   const {work:w,input}=fixture();

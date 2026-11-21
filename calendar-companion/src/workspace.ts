@@ -1,5 +1,6 @@
 import { AgentTask, AGENT_INSTRUCTION, type AgentExecutor, type CalendarDraftTool, type SteerStatus } from "./agent-task";
 import { agentFileAt, VaultAgent, type AgentHost, type WorkJournal } from "./vault-agent";
+import { diagnoseLocal, type DiagnosticRun, type Diagnostics } from "./diagnostics";
 import { allowedPath, validTaskPath, containsCredential, safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
 import type { AiPreferences } from "./ai-preferences";
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport } from "./ai-session";
@@ -37,7 +38,7 @@ import { prepareCalendarWorkspaceDraft, workspaceDraftTool } from "./calendar-wo
 import { ChronoHudAccess } from "./chronohud-access";
 import type { ChronoHudLookupSession } from "./chronohud-lookup-session";
 import { conversationIntent, readUserDirections, type UserDirection } from "./conversation-intent";
-import type { SharedConversations, SharedConversationSummary, SharedRevision, SharedVersionChoice } from "./shared-conversations";
+import { diagnoseSync, type SharedConversations, type SharedConversationSummary, type SharedRevision, type SharedVersionChoice } from "./shared-conversations";
 
 type WorkspaceChange = "state" | "progress";
 export interface WorkspaceSource { path: string; selection?: { from: number; to: number }; selectionVersion?: string; quote?: string }
@@ -70,6 +71,7 @@ export class AiWorkspace {
   sharedConversations: SharedConversationSummary[] = [];
   private stoppedSharing = new Set<string>();
   private shareRead = 0;
+  private syncScanIssue = "";
   private shareRetry = new Set<string>();
   sharedStatus = "";
   private switchingConversation = false;
@@ -120,6 +122,7 @@ export class AiWorkspace {
   previous: PreviousTurn[] = [];
   chat: ChatTurn[] = [];
   private activeChatId: string | null = null;
+  private activeDiagnostics: DiagnosticRun | undefined;
   calendarQuestion = "";
   area: QueryArea | "auto" = "auto";
   period: QueryPeriod | "auto" = "auto";
@@ -143,6 +146,7 @@ export class AiWorkspace {
   constructor(private readonly options: {
     current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; generated?: GeneratedStore; attachments?: AttachmentStore;
     streamResponses?: boolean; gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; sharing?: SharedConversations; calendar?: () => CalendarSession;
+    diagnostics?: Diagnostics;
     calendarChange?: () => CalendarChangeSession; inboxHint(): string;
     workspaceLookup?: () => CalendarWorkspaceLookupSession;
     chronoHudLookup?: () => ChronoHudLookupSession;
@@ -153,12 +157,14 @@ export class AiWorkspace {
     const current = () => this.current;
     const vaultId = () => this.options.preferences.vaultId();
     const inboxHint = () => this.options.inboxHint();
+    const calendarDiagnostics = (action: string) => this.diagnostics?.start("calendar", this.library.active, { action, relatedRun: this.activeDiagnostics?.id });
     this.workspaceCalendar = this.options.workspaceLookup ? new CalendarWorkspaceAccess({
-      session: this.options.workspaceLookup, current, vaultId, inboxHint,
+      session: this.options.workspaceLookup, current, vaultId, inboxHint, diagnostics: calendarDiagnostics,
       changed: () => { this.previewEpoch++; this.preview = ""; this.changed(); },
     }) : null;
     this.chronoHud = this.options.chronoHudLookup ? new ChronoHudAccess({
       session: this.options.chronoHudLookup, current, vaultId, inboxHint: () => this.options.chronoHudInboxHint?.() ?? "",
+      diagnostics: action => this.diagnostics?.start("chronohud", this.library.active, { action, relatedRun: this.activeDiagnostics?.id }),
       changed: () => { this.previewEpoch++; this.preview = ""; this.changed(); },
     }) : null;
     this.workspaceCalendarChanges = new CalendarChangeController({
@@ -167,7 +173,7 @@ export class AiWorkspace {
         return this.options.workspaceChange();
       },
       current: () => !!this.options.workspaceChange && this.current,
-      vaultId, inboxHint, changed, save: () => this.persist(),
+      vaultId, inboxHint, changed, save: () => this.persist(), diagnostics: calendarDiagnostics,
       readDraft: value => readCalendarWorkspaceChangeDraft(value, validateCalendarWorkspaceOperation),
       authorize: draft => !!draft.datasetId && this.workspaceCalendar?.datasetId === draft.datasetId,
       draftingChanged: () => this.calendarModeChanged(),
@@ -181,6 +187,7 @@ export class AiWorkspace {
       vaultId: () => this.options.preferences.vaultId(),
       inboxHint: () => this.options.inboxHint(),
       save: () => this.persist(),
+      diagnostics: calendarDiagnostics,
       readDraft: readCalendarChangeDraft,
       changed: () => this.changed(),
       draftingChanged: () => this.calendarModeChanged(),
@@ -214,6 +221,7 @@ export class AiWorkspace {
   get autoScrollChatChecked(): boolean { return this.pendingAutoScrollChat ?? this.autoScrollChat; }
   get canChangeAutoScrollChat(): boolean { return this.current && this.ready && !this.restoreFailed && this.pendingAutoScrollChat === null; }
   get supportsCalendarChanges() { return !!this.options.calendarChange; }
+  get diagnostics() { return this.options.diagnostics; }
   get canChangeReference() { return this.current && this.ready && !this.restoreFailed && !this.switchingConversation && !this.followUpSaving; }
   get canRestoreReference() { return this.canChangeReference && !this.reference && !!this.removedReference; }
   get referenceRevision() { return this.referenceEpoch; }
@@ -243,7 +251,10 @@ export class AiWorkspace {
   subscribe(listener: (change: WorkspaceChange) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   changed(change: WorkspaceChange = "state"): void { if (this.current) for (const listener of this.listeners) listener(change); }
   async initialize(): Promise<void> {
-    if (!this.initialization) this.initialization = this.load();
+    if (!this.initialization) {
+      this.initialization = this.load();
+      this.diagnostics?.maintain();
+    }
     await this.initialization;
   }
   private async load(): Promise<void> {
@@ -288,7 +299,13 @@ export class AiWorkspace {
       }
       try { this.history = await this.options.storage.history(); } catch { this.message = "Your draft and conversation were restored. Recovery history could not be listed; its existing files were kept."; }
       await this.refreshSettings();
-    } catch { this.restoreFailed = true; this.message = "Saved work could not be read. Existing files and keys were kept; saving is disabled to preserve the original work record. Reopen this vault after restoring the record."; }
+    } catch {
+      const diagnostic = this.diagnostics?.start("assistant", this.library.active);
+      diagnostic?.event("conversation_save", "failed", { reason: "storage" });
+      diagnostic?.finish("failed", "review");
+      this.restoreFailed = true;
+      this.message = "Saved work could not be read. Existing files and keys were kept; saving is disabled to preserve the original work record. Reopen this vault after restoring the record.";
+    }
     finally { this.ready = true; this.attachFirstPending(); this.changed(); }
     if (!this.restoreFailed && this.current) {
       void this.migrateConversationArchive();
@@ -536,14 +553,34 @@ export class AiWorkspace {
       const stopped = new Set<string>();
       for (const id of bindings) if (!visible.has(id) && await sharing.stopped(id)) stopped.add(id);
       if (!this.current || epoch !== this.shareRead) return;
+      const invalid = entries.filter(entry => entry.problem === "invalid").length;
+      const waiting = entries.filter(entry => entry.problem === "waiting").length;
+      const conflicting = entries.filter(entry => entry.versions.filter(version => version.ready).length > 1).length;
+      const issue = invalid || waiting || conflicting ? [invalid, waiting, conflicting].join("/") : "";
+      if (issue !== this.syncScanIssue) {
+        this.syncScanIssue = issue;
+        if (issue) {
+          const diagnostic = this.diagnostics?.start("conversation_sync", this.library.active, { action: "scan", transport: "vault_files" });
+          if (invalid) diagnostic?.event("sync_scan", "failed", { reason: "invalid_revision", count: invalid });
+          if (waiting) diagnostic?.event("sync_scan", "unconfirmed", { reason: "revision_unavailable", count: waiting });
+          if (conflicting) diagnostic?.event("sync_scan", "unconfirmed", { reason: "conflict", count: conflicting });
+          diagnostic?.finish(invalid ? "failed" : "unconfirmed", "review");
+        }
+      }
       const changed = JSON.stringify(entries) !== JSON.stringify(this.sharedConversations) ||
         stopped.size !== this.stoppedSharing.size || [...stopped].some(id => !this.stoppedSharing.has(id)) || !!this.sharedStatus;
       this.sharedConversations = entries;
       this.stoppedSharing = stopped;
       this.sharedStatus = "";
       if (changed) this.changed();
-    } catch {
+    } catch (error) {
       if (this.current && epoch === this.shareRead) {
+        if (this.syncScanIssue !== "failed") {
+          this.syncScanIssue = "failed";
+          const diagnostic = this.diagnostics?.start("conversation_sync", this.library.active, { action: "scan", transport: "vault_files" });
+          diagnostic?.event("sync_scan", "failed", { reason: diagnoseSync(error) });
+          diagnostic?.finish("failed", "review");
+        }
         this.sharedStatus = "Vault conversations could not be checked. Device copies are available.";
         this.changed();
       }
@@ -556,6 +593,8 @@ export class AiWorkspace {
     const sharing = this.options.sharing;
     let entry = this.library.conversations.find(item => item.id === id);
     if (!sharing || !entry || entry.shared?.stopping || !this.canSwitchConversation) return false;
+    const diagnostic = this.diagnostics?.start("conversation_sync", id, { action: "publish", transport: "vault_files" });
+    diagnostic?.event("sync_publish", "started");
     this.librarySaving = this.switchingConversation = true;
     this.libraryMessage = "";
     this.changed();
@@ -567,10 +606,15 @@ export class AiWorkspace {
         try { await this.persist(); }
         catch (error) { this.updateConversationEntry(original); throw error; }
       } else await this.persist();
-      await this.publishConversation(entry, this.messagesForSharing(id));
+      diagnostic?.event("conversation_save", "ok");
+      await this.publishConversation(entry, this.messagesForSharing(id), diagnostic);
+      diagnostic?.event("sync_publish", "ok");
+      diagnostic?.finish("completed", "none");
       this.libraryMessage = "Conversation saved to the vault.";
       return true;
     } catch (error) {
+      diagnostic?.event("sync_publish", "failed", { reason: diagnoseSync(error) });
+      diagnostic?.finish("failed", "review");
       this.shareRetry.add(id);
       this.libraryMessage = error instanceof Error ? error.message : "The conversation could not be saved to the vault.";
       return false;
@@ -603,27 +647,39 @@ export class AiWorkspace {
         ? await this.verifiedFullMessage(current, id) : current;
     }
   }
-  private async publishConversation(entry: Conversation, turns: Iterable<ChatTurn> | AsyncIterable<ChatTurn>): Promise<void> {
+  private async publishConversation(entry: Conversation, turns: Iterable<ChatTurn> | AsyncIterable<ChatTurn>, diagnostic?: DiagnosticRun): Promise<void> {
     if (!entry.shared || !this.options.sharing) return;
-    const revision = await this.options.sharing.publish(entry.shared, entry.name, entry.updatedAt, turns);
+    const revision = await this.options.sharing.publish(entry.shared, entry.name, entry.updatedAt, turns, diagnostic);
     if (!this.current) throw Error("The vault changed.");
     if (revision !== entry.shared.revision || entry.shared.pending) {
       this.updateConversationEntry({ ...entry, shared: { id: entry.shared.id, revision } });
-      try { await this.persist(); }
-      catch (error) { this.updateConversationEntry(entry); throw error; }
+      try { await this.persist(); diagnostic?.event("conversation_save", "ok"); }
+      catch (error) {
+        diagnostic?.event("conversation_save", "failed", { reason: "storage" });
+        this.updateConversationEntry(entry);
+        throw error;
+      }
     }
     this.shareRetry.delete(entry.id);
   }
   private async publishChange(entry: Conversation, turns: readonly ChatTurn[]): Promise<void> {
     if (!entry.shared?.revision || !this.isSharing(entry) || !this.options.sharing) return;
     const retry = this.needsSyncRetry(entry);
+    const diagnostic = this.diagnostics?.start("conversation_sync", entry.id, {
+      action: "publish", transport: "vault_files", relatedRun: this.activeDiagnostics?.id, contextReused: retry,
+    });
+    diagnostic?.event("sync_publish", "started");
     const pending = { ...entry, shared: { ...entry.shared, pending: true } };
     this.updateConversationEntry(pending);
     try {
       await this.persist();
-      await this.publishConversation(pending, retry ? this.messagesForSharing(entry.id) : turns);
+      await this.publishConversation(pending, retry ? this.messagesForSharing(entry.id) : turns, diagnostic);
+      diagnostic?.event("sync_publish", "ok");
+      diagnostic?.finish("completed", "none");
     }
-    catch {
+    catch (error) {
+      diagnostic?.event("sync_publish", "failed", { reason: diagnoseSync(error) });
+      diagnostic?.finish("failed", "review");
       this.shareRetry.add(entry.id);
       this.libraryMessage = "The device copy is saved. Choose Retry vault sync from the conversation menu.";
       if (entry.id === this.library.active) this.message = [this.message, this.libraryMessage].filter(Boolean).join(" ");
@@ -633,6 +689,8 @@ export class AiWorkspace {
   async stopConversationSync(id: string): Promise<boolean> {
     const sharing = this.options.sharing, entry = this.library.conversations.find(item => item.id === id);
     if (!sharing || !entry?.shared || !this.canSwitchConversation) return false;
+    const diagnostic = this.diagnostics?.start("conversation_sync", id, { action: "stop", transport: "vault_files" });
+    diagnostic?.event("sync_stop", "started");
     const shareId = entry.shared.id;
     this.librarySaving = this.switchingConversation = true;
     this.libraryMessage = "";
@@ -653,16 +711,20 @@ export class AiWorkspace {
         item.shared?.id === shareId ? { ...item, shared: { ...item.shared, stopping: true } } : item) };
       await this.persist();
       original = this.library;
-      await sharing.stop(shareId);
+      await sharing.stop(shareId, diagnostic);
       this.library = { ...this.library, conversations: this.library.conversations.map(item => {
         if (item.shared?.id !== shareId) return item;
         this.shareRetry.delete(item.id);
         return { ...item, shared: undefined };
       }) };
       await this.persist();
+      diagnostic?.event("sync_stop", "ok");
+      diagnostic?.finish("completed", "none");
       this.libraryMessage = "Vault sync stopped. Your device copies are kept.";
       return true;
     } catch (error) {
+      diagnostic?.event("sync_stop", "unconfirmed", { reason: diagnoseSync(error) });
+      diagnostic?.finish("unconfirmed", "review");
       this.library = original;
       this.libraryMessage = error instanceof Error ? error.message : "Stopping could not be confirmed. Your device copy is kept.";
       return false;
@@ -715,7 +777,7 @@ export class AiWorkspace {
     }
     return seen.size === ids.size ? base : null;
   }
-  private async importSyncedMessages(entry: Conversation, version: SharedRevision, revision: string, base?: SharedRevision | null): Promise<ChatTurn[]> {
+  private async importSyncedMessages(entry: Conversation, version: SharedRevision, revision: string, base?: SharedRevision | null, diagnostic?: DiagnosticRun): Promise<ChatTurn[]> {
     const storage = this.options.storage, sharing = this.options.sharing;
     if (!sharing || !storage.importMessages) throw Error("Device conversation storage is unavailable.");
     const originalIds = new Map<string, string>();
@@ -726,7 +788,7 @@ export class AiWorkspace {
     const recentStart = Math.max(0, version.refs.length - CHAT_HISTORY_LIMIT);
     const incoming = async function* (): AsyncGenerator<ChatTurn> {
       let position = 0;
-      for await (const message of sharing.messages(version)) {
+      for await (const message of sharing.messages(version, diagnostic)) {
         const originalId = originalIds.get(message.id), recent = position++ >= recentStart;
         if (originalId) {
           if (recent) {
@@ -748,12 +810,19 @@ export class AiWorkspace {
     const sharing = this.options.sharing, storage = this.options.storage;
     if (!sharing || !storage.importMessages || !this.canSwitchConversation || this.library.hiddenShared?.includes(id)) return false;
     const exact = this.library.conversations.find(item => item.shared?.id === id && item.shared.revision === revision && !item.archived);
-    if (exact) return exact.id === this.library.active || await this.switchConversation({ ...this.library, active: exact.id });
+    const diagnostic = this.diagnostics?.start("conversation_sync", exact?.id, { action: "import", transport: "vault_files" });
+    diagnostic?.event("sync_import", "started");
+    if (exact) {
+      const opened = exact.id === this.library.active || await this.switchConversation({ ...this.library, active: exact.id });
+      diagnostic?.event("sync_import", opened ? "ok" : "failed", { contextReused: true });
+      diagnostic?.finish(opened ? "completed" : "failed", opened ? "none" : "review");
+      return opened;
+    }
     this.librarySaving = this.switchingConversation = true;
     this.libraryMessage = "";
     this.changed();
     try {
-      const version = await sharing.describe(id, revision);
+      const version = await sharing.describe(id, revision, diagnostic);
       let existing: Conversation | undefined;
       const candidates = this.library.conversations.filter(item => item.shared?.id === id && !item.archived);
       candidates.sort((a, b) => Number(b.id === preferredId) - Number(a.id === preferredId));
@@ -766,12 +835,14 @@ export class AiWorkspace {
         throw Error("This vault has reached the conversation limit.");
       const entry: Conversation = { ...(existing ?? newConversationRecord(crypto.randomUUID())),
         name: version.title, shared: { id, revision }, updatedAt: version.at };
+      diagnostic?.relateConversation(entry.id);
       const local = existing?.id === this.library.active ? this.conversationState()
         : existing ? await storage.loadConversation?.(entry.id) : null;
       if (existing && (!local || typeof local !== "object" || Array.isArray(local)))
         throw Error("The existing device conversation could not be verified.");
 
-      const previews = await this.importSyncedMessages(entry, version, revision, base);
+      const previews = await this.importSyncedMessages(entry, version, revision, base, diagnostic);
+      diagnostic?.event("conversation_save", "ok", { count: version.refs.length, contextReused: !!base });
       const incoming = {
         ...(local as Record<string, unknown> | null), chat: previews, contextCheckpoint: undefined,
         userDirections: conversationIntent(previews, entry.id, new Set()),
@@ -780,8 +851,13 @@ export class AiWorkspace {
         ? this.library.conversations.map(item => item.id === entry.id ? entry : item)
         : [...this.library.conversations, entry];
       this.librarySaving = this.switchingConversation = false;
-      return await this.switchConversation({ ...this.library, conversations, active: entry.id }, incoming);
+      const opened = await this.switchConversation({ ...this.library, conversations, active: entry.id }, incoming);
+      diagnostic?.event("sync_import", opened ? "ok" : "unconfirmed");
+      diagnostic?.finish(opened ? "completed" : "unconfirmed", opened ? "none" : "review");
+      return opened;
     } catch (error) {
+      diagnostic?.event("sync_import", "failed", { reason: diagnoseSync(error) });
+      diagnostic?.finish("failed", "review");
       this.libraryMessage = error instanceof Error ? error.message : "The synced conversation could not be verified. Your current draft is kept.";
       return false;
     } finally {
@@ -1030,11 +1106,41 @@ export class AiWorkspace {
     return { sourcePath: this.source?.path ?? null, folder: this.outputFolder.trim().replace(/\/$/, ""), readScope: this.readScope, writeScope: this.writeScope, mode: this.mode,
       configDir: this.options.configDir, excluded };
   }
-  private createTask(executor: AgentExecutor, current = () => this.current, writeScope = this.writeScope, attachments: Attachment[] = [], pastedTextIsRequest = false, calendarDraft?: CalendarDraftTool): AgentTask {
+  private createTask(executor: AgentExecutor, current = () => this.current, writeScope = this.writeScope, attachments: Attachment[] = [], pastedTextIsRequest = false, calendarDraft?: CalendarDraftTool, diagnostics?: DiagnosticRun): AgentTask {
     return new AgentTask({ current, preserve: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate, generated: this.options.generated, writeScope,
       liveResponse: this.options.liveResponse, streamResponses: this.options.streamResponses, steerStatus: (note, status) => this.updateSteer(note, status),
-      attachmentStore: this.options.attachments, countTokens: this.options.countTokens, calendarDraft,
-      ...(attachments.length && this.options.attachments ? { attachments: this.options.attachments.forTask(attachments, pastedTextIsRequest) } : {}) });
+       attachmentStore: this.options.attachments, countTokens: this.options.countTokens, calendarDraft, diagnostics,
+       ...(attachments.length && this.options.attachments ? { attachments: this.options.attachments.forTask(attachments, pastedTextIsRequest, diagnostics) } : {}) });
+  }
+  private journalHost(current: () => boolean, run?: DiagnosticRun): AgentHost {
+    const host = this.options.host(current);
+    if (!run) return host;
+    return { ...host, persist: journal => this.recordJournal(host, journal, run) };
+  }
+  private async recordJournal(host: AgentHost, journal: WorkJournal, run?: DiagnosticRun): Promise<void> {
+    if (!run) { await host.persist(journal); return; }
+    const counts = { confirmed: 0, pending: 0, reverted: 0 };
+    for (const [index, op] of journal.operations.entries()) {
+      if (op.status === "done") counts.confirmed++;
+      else if (op.status === "undone") counts.reverted++;
+      else counts.pending++;
+      const identity = journal.id + "/" + index;
+      if (run.changedOperation(identity, op.status)) {
+        run.event(op.status === "undone" ? "undo" : "vault_write", op.status === "pending" ? "waiting" : "ok", {
+          action: op.kind, reference: run.alias(op.kind === "asset" ? "File" : "Note", op.path),
+          reason: op.status === "pending" ? "pending_confirmation" : undefined, evidence: "local_journal",
+        });
+      }
+    }
+    run.updateJournal(journal.id, counts);
+    run.event("journal_save", "started", { count: journal.operations.length });
+    try {
+      await host.persist(journal);
+      run.event("journal_save", "ok", { count: journal.operations.length, evidence: "local_journal" });
+    } catch (error) {
+      run.event("journal_save", "failed", { reason: diagnoseLocal(error, "storage") });
+      throw error;
+    }
   }
   private rememberJournal(journal: WorkJournal): void { if (journal.operations.length) this.history = [journal, ...this.history.filter(j => j.id !== journal.id)].slice(0, 30); }
   private rememberLast(): void {
@@ -1296,6 +1402,9 @@ export class AiWorkspace {
     const context: FollowUpContext = { reference: this.reference ? { ...this.reference } : null, attachments: [...this.followUpAttachments], deferNoteRead: this.deferNoteRead };
     if (context.reference?.needsReview) { this.queueMessage = "Review or remove the selected reference before sending."; this.changed(); return false; }
     const entry: FollowUp = { id: existing?.id ?? crypto.randomUUID(), text, access, context, status: mode === "steer" ? "steer-pending" : "queued" };
+    const pending = mode === "queue" ? this.diagnostics?.start("assistant", this.library.active, { action: "queued", operationId: entry.id, relatedRun: this.activeDiagnostics?.id }) : undefined;
+    const diagnostic = mode === "steer" ? this.activeDiagnostics : pending;
+    diagnostic?.event(mode, "started", { operationId: entry.id });
     const draft = this.followUpDraft;
     const task = this.task;
     this.followUpSaving = true;
@@ -1308,9 +1417,13 @@ export class AiWorkspace {
     this.changed("progress");
     try {
       await this.persist();
+      diagnostic?.event(mode, "ok", { action: "queued", operationId: entry.id });
+      pending?.finish("completed", "none");
       if (mode === "steer") this.deliverSteer(entry, task);
       if (mode === "queue") this.queueMessage = this.queueHeld ? "Resume the queue when you are ready." : "";
     } catch {
+      diagnostic?.event(mode, "failed", { reason: "storage", operationId: entry.id });
+      pending?.finish("failed", "review");
       this.followUps = existing ? this.followUps.map(item => item.id === entry.id ? existing : item) : this.followUps.filter(item => item.id !== entry.id);
       if (!this.followUpDraft) {
         this.followUpDraft = draft; this.followUpAttachments = context.attachments; this.editingFollowUpId = existing?.id ?? null;
@@ -1346,6 +1459,9 @@ export class AiWorkspace {
   }
   private updateSteer(note: SteerNote, status: SteerStatus): void {
     if (!this.followUps.some(entry => entry.id === note.id)) return;
+    this.activeDiagnostics?.event("steer", status === "review" ? "unconfirmed" : status === "applied" || status === "received" ? "ok" : "waiting", {
+      action: status === "steer-pending" ? "queued" : status, operationId: note.id,
+    });
     if (status === "applied" || status === "received") {
       this.followUps = this.followUps.filter(entry => entry.id !== note.id);
       if (this.task && this.agent) this.captureChat(this.task, this.agent);
@@ -1399,9 +1515,24 @@ export class AiWorkspace {
     const reference = selectedReference && !calendarDraft ? { ...selectedReference } : null;
     const deferNoteRead = queued ? queued.context?.deferNoteRead === true : this.deferNoteRead;
     const pastedTextIsRequest = !request.trim() && attachments.some(file => file.pastedText);
-    if (this.restoreFailed || !this.current || this.switchingConversation || this.busy || this.modelSaving || this.addingAttachments || this.calendarChanges.busy || !request.trim() && !pastedTextIsRequest) return false;
-    if (attachments.length && !this.options.attachments) { this.message = "Attachment processing is unavailable. Existing files are kept."; this.changed(); return false; }
-    if (this.limitProblem) { this.message = this.limitProblem; this.changed(); return false; }
+    if (!this.current || this.switchingConversation || this.busy || this.modelSaving || this.addingAttachments || this.calendarChanges.busy || !request.trim() && !pastedTextIsRequest) return false;
+    const diagnostic = this.diagnostics?.start("assistant", this.library.active, {
+      action: queued ? "dequeued" : "send", operationId: queued?.id, model: this.model.model, effort: this.model.effort ?? "default",
+      readScope: this.readScope, writeScope: this.writeScope, requestLimit: this.maximum, count: attachments.length,
+    });
+    const unavailableAttachments = attachments.length > 0 && !this.options.attachments;
+    const limitProblem = this.limitProblem;
+    if (this.restoreFailed || unavailableAttachments || limitProblem) {
+      const reason = this.restoreFailed ? "storage" : unavailableAttachments ? "unsupported" : "request_limit";
+      diagnostic?.event("prepare", "failed", { reason });
+      diagnostic?.finish("failed", "review");
+      if (this.restoreFailed) return false;
+      this.message = unavailableAttachments ? "Attachment processing is unavailable. Existing files are kept." : limitProblem;
+      this.changed();
+      return false;
+    }
+    this.activeDiagnostics = diagnostic;
+    diagnostic?.event("prepare", "started");
     const epoch = ++this.runEpoch;
     this.activeQueueId = queued?.id ?? null;
     if (queued) this.setFollowUpStatus(queued.id, "sending");
@@ -1412,7 +1543,7 @@ export class AiWorkspace {
     try {
       this.rememberLast();
       const access = this.followUpAccess();
-      const agent = new VaultAgent(this.options.host(current), this.policy(), current);
+      const agent = new VaultAgent(this.journalHost(current, diagnostic), this.policy(), current);
       const workspaceLookup = workspaceDraft ? this.workspaceDraftDelivery() : null;
       const workspaceIdentity = workspaceDraft ? this.workspaceCalendar?.selectionIdentity() : null;
       const tool = workspaceLookup ? workspaceDraftTool(workspaceLookup) : null;
@@ -1439,9 +1570,11 @@ export class AiWorkspace {
               const proposal = await prepareCalendarChangeDraft(args, calendarLookup);
               await this.calendarChanges.stage(proposal.draft, proposal.titles, current);
               return { status: "drafted", operations: proposal.draft.operations.length, next: "Review in Calendar" };
-            } } : undefined);
+            } } : undefined, diagnostic);
           this.task = task; this.agent = agent; this.lastRequest = request; this.activeAccess = access;
           this.activeChatId = crypto.randomUUID();
+          diagnostic?.relateTurn(this.activeChatId);
+          diagnostic?.event("prepare", "ok");
           this.touchConversation(conversationName(request) || this.title);
           const turn: ChatTurn = { id: this.activeChatId, conversationId: this.library.active, contextScope: scope, request: request.trim(), answer: "", startedAt: Date.now(), model: this.model.model, status: "running", requests: 0, inputTokens: 0, outputTokens: 0, actions: [], attachments: [...attachments], sourceMode };
           if (reference) turn.reference = reference;
@@ -1458,10 +1591,16 @@ export class AiWorkspace {
           if (this.current) { await this.collectTask(task, agent); completed = task.state === "completed"; }
         }
       }
-    } catch (error) { this.message = epoch !== this.runEpoch ? "Stopped. No further request or file action was started." : error instanceof Error ? error.message : "The task could not finish. No automatic retry was made."; }
+    } catch (error) {
+      diagnostic?.event(task ? "conversation_save" : "prepare", epoch !== this.runEpoch ? "stopped" : "failed", {
+        reason: epoch !== this.runEpoch ? "user_action" : diagnoseLocal(error, task ? "storage" : "unknown"),
+      });
+      this.message = epoch !== this.runEpoch ? "Stopped. No further request or file action was started." : error instanceof Error ? error.message : "The task could not finish. No automatic retry was made.";
+    }
     return await this.finishRun(task, completed);
   }
   private async finishRun(task: AgentTask | null, completed: boolean): Promise<boolean> {
+    const diagnostic = task?.diagnostics ?? this.activeDiagnostics;
     this.running = false;
     completed = completed && !this.stopRequested;
     if (this.stopRequested) this.message = "Stopped. Completed work and any returned answer are kept; no further request or file action will start.";
@@ -1482,18 +1621,31 @@ export class AiWorkspace {
       this.changed();
       if (task?.state === "stopped" && task.cleanupPending) await this.saveStoppedTask(task);
       else await this.persist();
+      diagnostic?.event("conversation_save", "ok");
       if (!paused) {
         const turn = this.chat.find(item => item.id === this.activeChatId);
         if (turn && (turn.status === "completed" || turn.status === "stopped" || turn.status === "failed"))
           await this.publishChange(this.activeConversation, [turn]);
       }
+      if (paused) diagnostic?.finish("paused", this.canResumeWithLimit ? "continue" : "raise_limit", {
+        requestNumber: task?.requests || undefined,
+        reason: task?.pausedForConnection ? "dns" : task?.pausedForInput ? "input_budget" : "request_limit",
+      });
+      else if (completed) diagnostic?.finish("completed", "none", { requestNumber: task?.requests || undefined });
+      else diagnostic?.finish(task?.state === "stopped" || this.stopRequested ? "stopped" : "failed", "review");
       return completed;
     } catch {
+      diagnostic?.event("conversation_save", "failed", { reason: "storage" });
+      diagnostic?.finish(paused ? "paused" : "unconfirmed", paused && this.canResumeWithLimit ? "continue" : paused ? "raise_limit" : "review");
       if (completed && entry) this.followUps = [{ ...entry, status: "review" }, ...this.followUps];
       this.holdQueue("Local saving could not be confirmed. Review the queue before sending again.");
       this.message += " Local saving could not be confirmed.";
       return false;
-    } finally { this.busy = false; this.changed(); }
+    } finally {
+      if (!paused && this.activeDiagnostics === diagnostic) this.activeDiagnostics = undefined;
+      void this.diagnostics?.flush();
+      this.busy = false; this.changed();
+    }
   }
   private watchTask(task: AgentTask): () => void {
     return task.subscribe(() => {
@@ -1514,7 +1666,7 @@ export class AiWorkspace {
     }
     for (const journal of agent.journals) if (journal.operations.length) {
       journal.status = task.state !== "completed" || task.events.some(e => e.kind === "blocked") ? "interrupted" : "complete";
-      await this.options.host(() => this.current).persist(journal); this.rememberJournal(journal);
+      await this.recordJournal(this.options.host(() => this.current), journal, task.diagnostics); this.rememberJournal(journal);
     }
     this.captureChat(task, agent);
     this.userDirections = conversationIntent(this.chat, this.library.active, new Set(), this.userDirections);
@@ -1548,8 +1700,12 @@ export class AiWorkspace {
     if (task.events.at(-1)?.kind === "response") void this.archiveChat(turn);
   }
   private async archiveChat(turn: ChatTurn): Promise<void> {
+    const diagnostic = this.activeDiagnostics?.report.turn === turn.id ? this.activeDiagnostics : undefined;
     try { await this.options.storage.saveChat?.(turn); }
-    catch { this.message = "Full chat saving could not be confirmed. The current answer is kept; copy it before starting another task."; }
+    catch {
+      diagnostic?.event("conversation_save", "unconfirmed", { reason: "storage" });
+      this.message = "Full chat saving could not be confirmed. The current answer is kept; copy it before starting another task.";
+    }
   }
   async loadFullChat(id: string): Promise<void> {
     if (!this.current || !this.options.storage.loadChat || id === this.activeChatId && (this.busy || this.canContinue)) return;
@@ -1567,6 +1723,7 @@ export class AiWorkspace {
     if (this.busy || !this.canContinue || !this.task || !this.agent) return;
     if (!this.canResumeWithLimit) { this.message = this.limitProblem || "Choose a total limit above requests already used, or no request-count limit."; this.changed(); return; }
     const task = this.task, agent = this.agent;
+    task.diagnostics?.resume({ contextReused: true, requestNumber: task.requests + 1, requestLimit: this.maximum, evidence: "user_action" });
     this.busy = true; this.running = true; this.stopRequested = false; this.message = "Continuing the original task with its original model and scopes."; this.changed();
     const unsubscribe = this.watchTask(task);
     let completed = false;
@@ -1584,6 +1741,7 @@ export class AiWorkspace {
     if (this.busy || !this.canContinue) return false;
     const task = this.task;
     if (!task) return false;
+    task.diagnostics?.finish("stopped", "review", { reason: "user_action" });
     this.busy = true; this.changed();
     try {
       task.finish();
@@ -1624,6 +1782,7 @@ export class AiWorkspace {
   }
   stop(): void {
     if (!this.canStop) return;
+    this.activeDiagnostics?.event("stop", "started", { reason: "user_action" });
     this.stopRequested = true; this.runEpoch++;
     this.holdQueue("Resume the queue when you are ready.");
     if (this.task?.busy || this.task?.state === "paused") this.task.stop(true);
@@ -1655,6 +1814,8 @@ export class AiWorkspace {
   async addAttachments(files: readonly File[], pastedText?: Attachment["pastedText"], referenceId?: string, followUp = this.busy || this.canContinue): Promise<void> {
     if (!this.canChangeReference || this.addingAttachments || !files.length || !followUp && this.settingsLocked) return;
     if (!this.options.attachments) { this.message = "Attachment storage is unavailable."; this.changed(); return; }
+    const active = this.activeDiagnostics;
+    const diagnostic = active ?? this.diagnostics?.start("assistant", this.library.active, { action: "asset", count: files.length });
     const epoch = this.referenceEpoch;
     const current = () => this.current && (!referenceId || epoch === this.referenceEpoch && this.reference?.id === referenceId);
     this.addingAttachments = true; this.message = "Adding attachments on this device…"; this.changed();
@@ -1662,13 +1823,21 @@ export class AiWorkspace {
       for (const file of files) {
         const selected = followUp ? this.followUpAttachments : this.attachments;
         if (selected.length >= MAX_ATTACHMENTS || selected.reduce((sum,a) => sum+a.bytes,0)+file.size > MAX_ATTACHMENT_BYTES) throw Error(`Attach up to ${MAX_ATTACHMENTS} files with a combined size of ${MAX_ATTACHMENT_MIB} MiB. Earlier selections are kept.`);
+        const info = { dataBytes: file.size, reference: diagnostic?.alias("File", file.name) };
+        diagnostic?.event("attachment_read", "started", info);
         const item = await this.options.attachments.add(file, current); if (!current()) return;
+        diagnostic?.event("attachment_read", "ok", info);
         if (pastedText) item.pastedText = pastedText;
         if (referenceId) item.referenceId = referenceId;
         if (!selected.some(existing => existing.sha256 === item.sha256 && existing.name === item.name && existing.referenceId === item.referenceId && !!existing.pastedText === !!item.pastedText)) selected.push(item);
       }
       this.message = pastedText ? "Pasted text is attached." : "Attachments are ready on this device. Send shares them with OpenAI; audio transcription has an additional charge."; await this.persist();
-    } catch (error) { this.message = error instanceof Error ? error.message : "An attachment could not be added."; }
+      if (!active) diagnostic?.finish("completed", "none");
+    } catch (error) {
+      diagnostic?.event("attachment_read", "failed", { reason: diagnoseLocal(error) });
+      if (!active) diagnostic?.finish("failed", "review");
+      this.message = error instanceof Error ? error.message : "An attachment could not be added.";
+    }
     finally { if (this.current) await this.persist().catch(() => { this.message += " The attachment selection could not be saved locally."; }); this.addingAttachments = false; this.changed(); }
   }
   useAttachments(files: readonly Attachment[]): void {
@@ -1698,6 +1867,7 @@ export class AiWorkspace {
   setSourceMode(mode: SourceMode): void { if (this.settingsLocked) return; this.sourceMode = readSourceMode(mode); this.preview = ""; this.changed(); }
   async saveGeneratedFile(turnId: string, fileId: string, conversationId = this.library.active): Promise<ChatTurn | null> {
     if (this.settingsLocked || !this.current) return null;
+    const diagnostic = this.diagnostics?.start("assistant", conversationId, { action: "asset" });
     this.busy = true; this.changed();
     try {
       const turn = this.options.storage.loadChat ? await this.fullChat(turnId, conversationId) : this.chat.find(item => item.id === turnId);
@@ -1705,21 +1875,42 @@ export class AiWorkspace {
       const file = turn.generated?.find(item => item.id === fileId); if (!file) throw Error("This generated file is not available in the saved conversation.");
       // This button authorizes one explicit attachment save, never a broader AI task.
       const original = this.policy(), policy: TaskPolicy = { ...original, mode: "edit", writeScope: "new" };
-      const agent = new VaultAgent(this.options.host(() => this.current), policy, () => this.current); agent.research([], [file]);
+      const agent = new VaultAgent(this.journalHost(() => this.current, diagnostic), policy, () => this.current); agent.research([], [file]);
       const path = `${this.outputFolder ? this.outputFolder.replace(/\/$/, "") + "/" : ""}Yoofloe assets/${file.id}.${file.extension}`;
       await agent.execute("save_generated_file", { reference: file.id, path }); await agent.finish();
       for (const journal of agent.journals) this.rememberJournal(journal);
       turn.actions.push({ kind: "asset", path }); turn.actionTotal = (turn.actionTotal ?? turn.actions.length - 1) + 1; turn.actionsKnown = true;
       if (this.options.storage.saveChat) await this.options.storage.saveChat(turn);
       const index = this.chat.findIndex(item => item.id === turn.id); if (index >= 0) this.chat[index] = turn;
-      this.message = `Saved attachment: ${path}. No AI request was made.`; await this.persist(); return turn;
-    } catch (error) { this.message = error instanceof Error ? error.message : "The attachment could not be saved."; return null; }
+      this.message = `Saved attachment: ${path}. No AI request was made.`; await this.persist();
+      diagnostic?.event("result_save", "ok", { action: "asset" });
+      diagnostic?.finish("completed", "none");
+      return turn;
+    } catch (error) {
+      diagnostic?.event("result_save", "unconfirmed", { action: "asset", reason: diagnoseLocal(error, "storage") });
+      diagnostic?.finish("unconfirmed", "review");
+      this.message = error instanceof Error ? error.message : "The attachment could not be saved."; return null;
+    }
     finally { this.busy = false; this.changed(); }
   }
   async undo(journal: WorkJournal): Promise<void> {
     if (!this.current || this.settingsLocked) return; this.busy = true; this.changed();
-    try { const agent = new VaultAgent(this.options.host(() => this.current), this.policy(), () => this.current); const result = await agent.undo(journal); if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath; this.message = `Reverted ${result.restored} action(s). Kept ${result.kept} action(s) to protect newer or uncertain changes.`; await this.persist(); }
-    catch { this.message = "Recovery could not be confirmed. Notes and backups were kept."; }
+    const diagnostic = this.diagnostics?.start("assistant", this.library.active, { action: "undo" });
+    diagnostic?.event("undo", "started", { count: journal.operations.length });
+    try {
+      const agent = new VaultAgent(this.journalHost(() => this.current, diagnostic), this.policy(), () => this.current);
+      const result = await agent.undo(journal);
+      if (this.source && agent.policy.sourcePath) this.source.path = agent.policy.sourcePath;
+      this.message = `Reverted ${result.restored} action(s). Kept ${result.kept} action(s) to protect newer or uncertain changes.`;
+      await this.persist();
+      diagnostic?.event("undo", "ok", { count: result.restored });
+      if (result.kept) diagnostic?.event("undo", "unconfirmed", { count: result.kept, reason: "pending_confirmation" });
+      diagnostic?.finish(result.kept ? "unconfirmed" : "completed", result.kept ? "review" : "none");
+    } catch (error) {
+      diagnostic?.event("undo", "unconfirmed", { reason: diagnoseLocal(error, "storage") });
+      diagnostic?.finish("unconfirmed", "review");
+      this.message = "Recovery could not be confirmed. Notes and backups were kept.";
+    }
     finally { this.busy = false; this.changed(); }
   }
   async confirmTrash(): Promise<void> {
@@ -1785,5 +1976,5 @@ export class AiWorkspace {
     this.saveQueue = next.catch(() => {});
     return next;
   }
-  dispose(): void { this.alive = false; this.task?.dispose(); this.listeners.clear(); void this.calendar?.dispose(); this.calendarChanges.dispose(); this.workspaceCalendar?.dispose(); this.chronoHud?.dispose(); this.workspaceCalendarChanges.dispose(); }
+  dispose(): void { this.alive = false; this.task?.dispose(); this.listeners.clear(); void this.calendar?.dispose(); this.calendarChanges.dispose(); this.workspaceCalendar?.dispose(); this.chronoHud?.dispose(); this.workspaceCalendarChanges.dispose(); void this.diagnostics?.dispose(); }
 }

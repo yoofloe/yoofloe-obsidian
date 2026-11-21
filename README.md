@@ -53,6 +53,11 @@ Drag across conversation text and right-click **Copy** for a partial selection. 
 and the message selection controls. Full and selected message copies load their saved original text, including older messages.
 The conversation shows user requests, assistant answers, actual confirmed operations, sources and returned files.
 
+Use **Copy diagnostics** in a task's activity details or the conversation menu for a timeline and a structured report.
+**Settings → Diagnostics → Recent issues** finds reports from interrupted tasks, vault sync, Calendar and ChronoHUD on this device.
+Reports keep the last verified step, observed request and reply status, saved changes and recovery actions.
+Reports are available for seven days in an encrypted device archive capped at 2 MiB. The copied report contains diagnostic metadata and anonymous note or file references.
+
 The task reads relevant excerpts as needed within your chosen data scope; it does not upload the whole vault upfront.
 The model control shows the full GPT version/name and the exact selected API model ID.
 Images use GPT-Image-2.6 Flare. Image planning uses Low for Fast/Light or Model default, Medium for Balanced, and High for deeper settings. This separate image setting keeps Fast text responses compatible with image generation; image rendering can still incur tool charges.

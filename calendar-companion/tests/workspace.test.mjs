@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { AiWorkspace } from '../dist/workspace.js';
 import { inputDigest } from '../dist/question-input.js';
 import { chatPreview } from '../dist/chat-history.js';
+import { diagnosticFixture, exportedReport } from './fixtures/diagnostics.mjs';
 const response = output => ({ status: 200, text: JSON.stringify({ status: 'completed', output }) });
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 function fixture() {
@@ -25,6 +26,24 @@ function fixture() {
   };
   return { work: new AiWorkspace(options), options, host, files, journals, saved: () => saved, calls: () => calls, keyReads: () => keyReads };
 }
+
+test('an initial storage failure creates a report before any Chat turn or outbound request exists', async () => {
+  const f = fixture();
+  const { diagnostics } = diagnosticFixture();
+  f.options.diagnostics = diagnostics;
+  f.options.storage.save = async () => { throw new DOMException('private workspace path', 'QuotaExceededError'); };
+  await f.work.initialize();
+  f.work.setPrompt('Private unsent request');
+  await f.work.run();
+  assert.equal(f.work.chat.length, 0);
+  assert.equal(f.calls(), 0);
+  const [issue] = (await diagnostics.recentIssues()).reports;
+  assert.equal(issue.area, 'assistant');
+  assert.equal(issue.lastFailure.reason, 'storage');
+  const report = await diagnostics.copyReport({ id: issue.id });
+  assert.doesNotMatch(report, /Private unsent request|private workspace path/);
+  diagnostics.dispose();
+});
 test('a model change retains a supported depth and saves Model default for an incompatible depth', async () => {
   const f = fixture();
   await f.work.initialize();
@@ -173,6 +192,8 @@ test('when the DNS failure prevents the write, the partial reply leaves the draf
 
 test('an OpenAI host lookup failure on request seven preserves the edit and attachment for an explicit continuation', async () => {
   const f = fixture();
+  const { diagnostics } = diagnosticFixture();
+  f.options.diagnostics = diagnostics;
   const note = await f.host.create('Current.md', '# Original\nBody\n');
   const edited = '# Updated\nBody';
   const attachment = { id: crypto.randomUUID(), name: 'fixture.jpg', extension: 'jpg', kind: 'image', mime: 'image/jpeg', bytes: 6, sha256: 'a'.repeat(64) };
@@ -210,6 +231,13 @@ test('an OpenAI host lookup failure on request seven preserves the edit and atta
   f.work.setPrompt('Update the heading on the current note.');
   await f.work.run();
   const paused = f.work.chat.at(-1);
+  const interruption = exportedReport(await diagnostics.copyReport({ turn: paused.id }));
+  assert.equal(interruption.outcome, 'paused');
+  assert.equal(interruption.nextAction, 'raise_limit');
+  assert.equal(interruption.lastFailure.stage, 'model_request');
+  assert.equal(interruption.lastFailure.reason, 'dns');
+  assert.equal(interruption.changes.confirmed, 1);
+  assert.doesNotMatch(JSON.stringify(interruption), /Current\.md|fixture\.jpg|Update the heading|sk-synthetic/);
   assert.equal(paused.status, 'paused');
   assert.equal(paused.pausedForConnection, true);
   assert.equal(paused.actionTotal, 1);
@@ -236,6 +264,15 @@ test('an OpenAI host lookup failure on request seven preserves the edit and atta
   assert.equal(edits, 1);
   assert.equal(preparations, 1);
   assert.equal(cleanups, 1);
+  const recovery = exportedReport(await diagnostics.copyReport({ turn: paused.id }));
+  assert.equal(recovery.id, interruption.id);
+  assert.equal(recovery.manualContinuations, 1);
+  assert.equal(recovery.automaticRetries, 0);
+  assert.equal(recovery.lastResume.contextReused, true);
+  assert.equal(recovery.outcome, 'completed');
+  const writes = recovery.events.filter(item => item.stage === 'vault_write' && item.outcome === 'ok');
+  assert.equal(writes.length, 1);
+  diagnostics.dispose();
 });
 
 test('Finish here persists the stopped task before network cleanup and then saves the result', async () => {

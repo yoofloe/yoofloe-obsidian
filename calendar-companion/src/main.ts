@@ -1,5 +1,5 @@
 import { openDesktopResponse } from "./desktop-responses";
-import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, TFolder, requestUrl, requireApiVersion, type SettingDefinitionRender } from "obsidian";
+import { App, FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, PluginSettingTab, Setting, TFile, TFolder, apiVersion, requestUrl, requireApiVersion, type SettingDefinitionRender } from "obsidian";
 import { ACTION, INBOX } from "./protocol";
 import { CalendarSession, type TransferStore } from "./session";
 import { CalendarChangeSession } from "./calendar-change-session";
@@ -20,6 +20,7 @@ import { captureSelectionReference, type SelectionReference } from "./selection-
 import { observeNoteSelection } from "./note-selection-observer";
 import { DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, PRIVACY_URL } from "./privacy-copy";
 import { DeviceRecords, indexedRecordDatabase } from "./device-records";
+import { Diagnostics } from "./diagnostics";
 import { ConversationStorage } from "./conversation-storage";
 import { SharedConversations } from "./shared-conversations";
 import { sharedConversationPath, SHARED_CONVERSATIONS_PATH } from "./agent-policy";
@@ -265,12 +266,15 @@ export default class YoofloeAiPlugin extends Plugin {
   private workspace(): AiWorkspace {
     if (this.work) return this.work;
     const ai = this.context(), owner = this.app.vault, adapter = owner.adapter, root = `${owner.configDir}/plugins/yoofloe`;
-    const provider = providerFiles(async request => { const response = await requestUrl(request); return { status: response.status, text: response.text, arrayBuffer: response.arrayBuffer }; }, boundedOpenAiDownload);
+    const provider = providerFiles(async request => {
+      const { status, text, arrayBuffer, headers } = await requestUrl(request);
+      return { status, text, arrayBuffer, headers };
+    }, (url, key, maximum, current, diagnostics) => boundedOpenAiDownload(url, key, maximum, current, undefined, diagnostics));
     const localFiles = { configDir: owner.configDir, exists: (path: string) => adapter.exists(path), mkdir: async (path: string) => { if (!ai.current()) throw Error("Vault changed"); await adapter.mkdir(path); }, read: (path: string) => adapter.readBinary(path), write: async (path: string, bytes: ArrayBuffer) => { if (!ai.current()) throw Error("Vault changed"); await adapter.writeBinary(path, bytes); } };
     const viewWindow = this.app.workspace.containerEl.ownerDocument.defaultView ?? window;
-    const device = new DeviceRecords({
+    const ownerName = owner.getName(), sameVault = () => this.app.vault === owner && owner.getName() === ownerName;
+    const deviceOptions = {
       database: indexedRecordDatabase(viewWindow.indexedDB),
-      current: () => ai.current(),
       secrets: () => requireApiVersion("1.11.5") ? this.app.secretStorage : null,
       vaultId: () => {
         const slot = "yoofloe-device-vault";
@@ -282,6 +286,26 @@ export default class YoofloeAiPlugin extends Plugin {
         if (this.app.loadLocalStorage(slot) !== id) throw Error("The device vault identifier could not be saved.");
         return id;
       },
+    };
+    const device = new DeviceRecords({ ...deviceOptions, current: () => ai.current() });
+    // Only the diagnostic archive can finish its encrypted checkpoint during plugin unload.
+    const diagnosticDevice = new DeviceRecords({ ...deviceOptions, current: sameVault });
+    const document = viewWindow.document;
+    const networkSignals = () => ({ online: viewWindow.navigator.onLine, visible: document.visibilityState === "visible" });
+    const platform = Platform.isAndroidApp ? "android" : Platform.isIosApp ? "ios" :
+      Platform.isWin ? "windows" : Platform.isMacOS ? "macos" : Platform.isLinux ? "linux" : "other";
+    const diagnostics = new Diagnostics(diagnosticDevice, { plugin: this.manifest.version, obsidian: apiVersion, platform },
+      sameVault, Date.now, networkSignals, viewWindow);
+    const networkChanged = () => diagnostics.signal("network", networkSignals());
+    this.registerDomEvent(viewWindow, "online", networkChanged);
+    this.registerDomEvent(viewWindow, "offline", networkChanged);
+    this.registerDomEvent(document, "visibilitychange", () => {
+      diagnostics.signal("visibility", networkSignals());
+      if (document.visibilityState !== "visible") void diagnostics.flush();
+    });
+    this.registerDomEvent(viewWindow, "pagehide", () => {
+      diagnostics.signal("session", { visible: false });
+      void diagnostics.flush();
     });
     const storage = new ConversationStorage(device, {
       read: async (name, limit) => {
@@ -400,9 +424,9 @@ export default class YoofloeAiPlugin extends Plugin {
         const { status, text, headers } = await requestUrl(request);
         return { status, text, headers };
       },
-      storage, sharing,
+      storage, sharing, diagnostics,
       ...(Platform.isAndroidApp ? {
-        calendar: () => new CalendarSession(companionOptions),
+        calendar: () => new CalendarSession({ ...companionOptions, diagnostics: action => diagnostics.start("calendar", this.work?.library.active, { action }) }),
         calendarChange: () => new CalendarChangeSession({ ...companionOptions, canClean: () => this.app.vault === owner }),
       } : {}),
       ...(Platform.isAndroidApp ? {
@@ -421,7 +445,12 @@ export default class YoofloeAiPlugin extends Plugin {
   }
   openManual(): void {
     if (!this.live || !Platform.isAndroidApp) return; if (this.manual) { this.manual.open(); return; }
-    this.manual = new CompanionModal(this.app, () => this.live, () => { this.manual = null; }, () => this.context(), () => this.openAiSettings(true)); this.manual.open();
+    this.manual = new CompanionModal(this.app, () => this.live, () => { this.manual = null; }, () => this.context(), () => this.openAiSettings(true),
+      action => {
+        const work = this.workspace();
+        return work.diagnostics?.start("calendar", work.library.active, { action });
+      });
+    this.manual.open();
   }
   onunload(): void { this.live = false; this.work?.dispose(); this.work = null; this.ai?.session.enableForSession(false); this.aiSettings?.close(); this.manual?.close(); this.aiSettings = null; this.manual = null; this.ai = null; }
 }

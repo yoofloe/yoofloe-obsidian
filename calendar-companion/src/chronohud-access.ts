@@ -1,6 +1,8 @@
 
 import type { CalendarTransferFile } from "./calendar-workspace-file";
 import type { ChronoHudLookupSession } from "./chronohud-lookup-session";
+import type { DiagnosticRun } from "./diagnostics";
+import { replyFailure, verifiedReply, waitForReply, type BeginCompanionDiagnostics } from "./companion-diagnostics";
 import {
   CHRONOHUD_MAX_RECORDS, CHRONOHUD_MAX_TEXT_BYTES, chronohudExcerptReference, chronohudSearchTerms,
   type ChronoHudArea, type ChronoHudDelivery, type ChronoHudQuery,
@@ -26,9 +28,11 @@ export class ChronoHudAccess {
   private session: ChronoHudLookupSession | null = null;
   private selectionVersion = 0;
   private approvedVersion = -1;
+  private diagnostic: DiagnosticRun | undefined;
 
   constructor(private readonly options: {
     current(): boolean; session(): ChronoHudLookupSession; vaultId(): Promise<string>; inboxHint(): string; changed(): void;
+    diagnostics?: BeginCompanionDiagnostics;
   }) {}
 
   get requestId() { return this.pending ? this.session?.requestId ?? null : null; }
@@ -45,6 +49,8 @@ export class ChronoHudAccess {
     if (this.pending || this.busy || !this.options.current() || !this.draft.areas.length) return null;
     const query: ChronoHudQuery = { areas: [...this.draft.areas], terms: chronohudSearchTerms(this.draft.terms),
       maxRecords: CHRONOHUD_MAX_RECORDS, maxTextBytes: CHRONOHUD_MAX_TEXT_BYTES };
+    const diagnostic = this.diagnostic = this.options.diagnostics?.("lookup");
+    diagnostic?.event("transfer_write", "started", { transport: "app_handoff" });
     this.busy = true;
     this.options.changed();
     try {
@@ -60,8 +66,11 @@ export class ChronoHudAccess {
       if (!this.options.current() || this.session !== session) return null;
       this.pending = true;
       this.message = "";
+      waitForReply(diagnostic);
       return url;
     } catch (error) {
+      diagnostic?.event("transfer_write", "failed", { reason: "unknown", transport: "app_handoff" });
+      diagnostic?.finish("failed", "review");
       this.message = error instanceof Error ? error.message : "ChronoHUD could not be opened.";
       return null;
     } finally {
@@ -77,6 +86,8 @@ export class ChronoHudAccess {
   async receive(id: string, imported?: CalendarTransferFile): Promise<void> {
     const session = this.session;
     if (!id || id !== this.requestId || !session || this.busy || !this.options.current()) return;
+    const diagnostic = this.diagnostic;
+    diagnostic?.event("reply_read", "started", { action: imported ? "manual_import" : undefined });
     this.busy = true;
     try {
       const delivery = await session.receive(id, imported);
@@ -87,7 +98,11 @@ export class ChronoHudAccess {
       this.excerptsEnabled = false;
       this.includedIndices = new Set(delivery.records.map((_, i) => i));
       this.message = "";
-    } catch {
+      verifiedReply(diagnostic, { count: delivery.records.length });
+      diagnostic?.event("approval", "ok", { evidence: "verified_reply" });
+      diagnostic?.finish("completed", "none");
+    } catch (error) {
+      replyFailure(diagnostic, error);
       this.message = "No verified ChronoHUD reply yet. Finish approving the request in ChronoHUD.";
     } finally {
       this.busy = false;
@@ -146,6 +161,8 @@ export class ChronoHudAccess {
   }
 
   async clear(resetSelection = false): Promise<void> {
+    if (this.pending) this.diagnostic?.finish("stopped", "review", { action: "clear", reason: "user_action" });
+    this.diagnostic = undefined;
     const session = this.session;
     this.session = null;
     this.pending = false;
