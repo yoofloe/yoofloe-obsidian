@@ -1022,6 +1022,26 @@ test('a saved compaction is reused only in the same conversation with matching a
   assert.equal(f.saved().autoCompact, false);
 });
 
+test('auto-scroll defaults on for older workspaces and a change while working survives reopening', async () => {
+  const f = fixture();
+  f.options.storage.load = async () => ({ prompt: 'Saved draft', result: 'Saved answer' });
+  await f.work.initialize();
+  assert.equal(f.work.autoScrollChat, true);
+
+  f.work.busy = true;
+  assert.equal(f.work.canChangeAutoScrollChat, true);
+  await f.work.setAutoScrollChat(false);
+  assert.equal(f.saved().autoScrollChat, false);
+
+  const reopened = new AiWorkspace({ ...f.options, storage: { ...f.options.storage, load: async () => f.saved() } });
+  await reopened.initialize();
+  assert.equal(reopened.autoScrollChat, false);
+  assert.equal(reopened.prompt, 'Saved draft');
+  assert.equal(reopened.result, 'Saved answer');
+  assert.equal(f.calls(), 0);
+  assert.equal(f.keyReads(), 0);
+});
+
 test('changing the attached document carries user directions into the next task and through a saved conversation', async () => {
   const f = fixture();
   const a = await f.host.create('Studies/First.md', 'First document');

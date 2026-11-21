@@ -1,13 +1,15 @@
-import { Menu, Platform, setIcon, setTooltip } from "obsidian";
+import { Menu, Modal, Platform, setIcon, setTooltip, type App } from "obsidian";
 import { modelCatalog } from "./ai-models";
 import type { AiModelOptions } from "./ai-session";
 import { EFFORT_LABELS, resolveEffort, supportedEfforts, type EffortSetting } from "./effort";
 import { SOURCE_MODES, supportsHostedTools, type SourceMode } from "./research";
+import { availableViewHeight } from "./view-bounds";
 import type { AiWorkspace } from "./workspace";
 
 const PICKER_LABEL = { model: "Model", effort: "Thinking depth", source: "Source mode" } as const;
 const SOURCE_LABELS: Record<SourceMode, string> = { expanded: "Expanded", provided: "Provided only" };
 type Picker = keyof typeof PICKER_LABEL;
+type PickerChoice = { label: string; current?: boolean; apply?: () => void | Promise<void>; custom?: boolean };
 const PROMPT_SELECTOR = ".y-ai-primary-prompt, .y-ai-follow-up-input";
 type Caret = { field: ".y-ai-primary-prompt" | ".y-ai-follow-up-input"; from: number; to: number };
 
@@ -15,18 +17,52 @@ function selectedEffort(model: Readonly<AiModelOptions>): EffortSetting {
   return model.effort ?? resolveEffort(model.model) ?? "default";
 }
 
+function fitMobilePicker(container: HTMLElement): () => void {
+  const doc = container.ownerDocument, win = doc.defaultView;
+  if (!win) return () => {};
+  const viewport = win.visualViewport;
+  const navbars = Array.from(doc.querySelectorAll<HTMLElement>(".mobile-navbar"));
+  const resize = () => {
+    const top = viewport?.offsetTop ?? 0, left = viewport?.offsetLeft ?? 0;
+    const height = viewport?.height ?? win.innerHeight;
+    const keyboard = parseFloat(win.getComputedStyle(doc.body).getPropertyValue("--keyboard-height")) || 0;
+    const bottom = top + height - (win.innerHeight - height > 80 ? 0 : keyboard);
+    const pane = { top, left, bottom, right: left + (viewport?.width ?? win.innerWidth) };
+    const overlays = navbars.filter(bar => {
+      const style = win.getComputedStyle(bar);
+      return style.display !== "none" && style.visibility === "visible" && Number(style.opacity) > 0;
+    }).map(bar => bar.getBoundingClientRect());
+    container.style.top = `${top}px`;
+    container.style.height = `${availableViewHeight(pane, bottom, bottom, overlays)}px`;
+  };
+  const styles = new win.MutationObserver(resize);
+  for (const el of [doc.body, doc.documentElement, ...navbars]) styles.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
+  const geometry = new win.ResizeObserver(resize);
+  for (const bar of navbars) geometry.observe(bar);
+  viewport?.addEventListener("resize", resize);
+  viewport?.addEventListener("scroll", resize);
+  win.addEventListener("resize", resize);
+  resize();
+  return () => {
+    styles.disconnect(); geometry.disconnect();
+    viewport?.removeEventListener("resize", resize);
+    viewport?.removeEventListener("scroll", resize);
+    win.removeEventListener("resize", resize);
+  };
+}
+
 export class ComposerOptions {
-  private openMenu: { menu: Menu; button: HTMLButtonElement } | null = null;
+  private openPicker: { close(): void; button: HTMLButtonElement; closed(): void } | null = null;
   private fitted: { group: HTMLElement; inputs: string } | null = null;
 
-  constructor(private readonly root: HTMLElement, private readonly getWork: () => AiWorkspace,
+  constructor(private readonly app: App, private readonly root: HTMLElement, private readonly getWork: () => AiWorkspace,
     private readonly openSettings: () => void, private readonly saveSourceMode: () => void) {}
 
   render(parent: HTMLElement): void {
     const group = parent.createDiv({ cls: "y-ai-composer-options", attr: { role: "group", "aria-label": "Request options" } });
     for (const kind of ["model", "effort", "source"] as const) {
       const button = group.createEl("button", { cls: "y-ai-option-picker", attr: {
-        type: "button", "data-composer-picker": kind, "aria-haspopup": "menu", "aria-expanded": "false",
+        type: "button", "data-composer-picker": kind, "aria-haspopup": Platform.isMobileApp ? "dialog" : "menu", "aria-expanded": "false",
       } });
       button.createSpan({ cls: "y-ai-picker-value" });
       setIcon(button.createSpan({ cls: "y-ai-picker-chevron", attr: { "aria-hidden": "true" } }), "chevron-down");
@@ -103,76 +139,110 @@ export class ComposerOptions {
   }
 
   close(): void {
-    const open = this.openMenu;
+    const open = this.openPicker;
     if (!open) return;
-    this.openMenu = null;
+    this.openPicker = null;
     open.button.setAttribute("aria-expanded", "false");
-    open.menu.hide();
+    open.close();
+  }
+
+  private choices(kind: Picker, work: AiWorkspace): PickerChoice[] {
+    const choices: PickerChoice[] = [];
+    if (kind === "model") {
+      const models = modelCatalog("openai").models;
+      for (const model of models) choices.push({ label: model.label, current: work.model.model === model.id, apply: () => work.setModel({ model: model.id }) });
+      if (work.model.model && !models.some(model => model.id === work.model.model))
+        choices.push({ label: `Custom · ${work.model.model}`, current: true, apply: () => {} });
+      if (work.model.model && !supportsHostedTools(work.model.model))
+        choices.push({ label: "Hosted web, analysis and image tools unavailable" });
+      choices.push({ label: "Custom model…", custom: true, apply: this.openSettings });
+    } else if (kind === "effort") {
+      const selected = selectedEffort(work.model);
+      const efforts: EffortSetting[] = ["default", ...supportedEfforts(work.model.model)];
+      for (const effort of efforts) choices.push({ label: EFFORT_LABELS[effort], current: effort === selected, apply: () => work.setModel({ ...work.model, effort }) });
+    } else {
+      for (const mode of ["expanded", "provided"] as const) choices.push({ label: SOURCE_LABELS[mode], current: work.sourceMode === mode, apply: () => {
+        work.setSourceMode(mode);
+        this.saveSourceMode();
+      } });
+    }
+    return choices;
   }
 
   private show(kind: Picker, button: HTMLButtonElement, caret: Caret | undefined): void {
     const work = this.getWork();
     if (!work.current || work.settingsLocked || work.modelSaving) return;
     this.close();
-    const menu = new Menu();
+    const doc = this.root.ownerDocument;
     const conversation = work.library.active;
-    let chosen = false;
     const restoreFocus = () => {
-      if (!this.root.isConnected || this.openMenu || this.getWork() !== work || work.library.active !== conversation) return;
+      if (!this.root.isConnected || this.openPicker || this.getWork() !== work || work.library.active !== conversation) return;
       const picker = this.root.querySelector<HTMLButtonElement>(`[data-composer-picker="${kind}"]`);
       const input = caret && this.root.querySelector<HTMLTextAreaElement>(caret.field);
-      const active = this.root.ownerDocument.activeElement;
-      if (active && active !== this.root.ownerDocument.body && active !== button && active !== picker && active !== input) return;
+      const active = doc.activeElement;
+      if (active && active !== doc.body && active !== button && active !== picker && active !== input) return;
       if (caret && input && !input.disabled) {
         input.focus({ preventScroll: true });
         input.setSelectionRange(caret.from, caret.to);
       } else if (picker && !picker.disabled) picker.focus({ preventScroll: true });
     };
-    const select = (label: string, current: boolean, apply: () => void | Promise<void>) => {
-      menu.addItem(item => item.setTitle(label).setChecked(current).onClick(() => {
-        chosen = true;
-        this.close();
-        if (current) restoreFocus();
-        else void Promise.resolve(apply()).then(restoreFocus);
-      }));
+    const choose = (choice: PickerChoice) => {
+      if (this.openPicker?.closed !== closed) return;
+      this.close();
+      if (choice.current) restoreFocus();
+      else if (choice.custom) void choice.apply?.();
+      else void Promise.resolve(choice.apply?.()).then(restoreFocus);
     };
-    if (kind === "model") {
-      const models = modelCatalog("openai").models;
-      for (const model of models) select(model.label, work.model.model === model.id, () => work.setModel({ model: model.id }));
-      if (work.model.model && !models.some(model => model.id === work.model.model))
-        select(`Custom · ${work.model.model}`, true, () => {});
-      if (work.model.model && !supportsHostedTools(work.model.model))
-        menu.addItem(item => item.setTitle("Hosted web, analysis and image tools unavailable").setDisabled(true));
-      menu.addSeparator();
-      menu.addItem(item => item.setTitle("Custom model…").onClick(() => {
-        chosen = true;
-        this.close();
-        this.openSettings();
-      }));
-    } else if (kind === "effort") {
-      const selected = selectedEffort(work.model);
-      const choices: EffortSetting[] = ["default", ...supportedEfforts(work.model.model)];
-      for (const effort of choices) select(EFFORT_LABELS[effort], effort === selected, () => work.setModel({ ...work.model, effort }));
-    } else {
-      for (const mode of ["expanded", "provided"] as const) select(SOURCE_LABELS[mode], work.sourceMode === mode, () => {
-        work.setSourceMode(mode);
-        this.saveSourceMode();
-      });
-    }
-    this.openMenu = { menu, button };
-    button.setAttribute("aria-expanded", "true");
-    menu.onHide(() => {
-      if (this.openMenu?.menu !== menu) return;
-      this.openMenu = null;
+    const closed = () => {
+      if (this.openPicker?.closed !== closed) return;
+      this.openPicker = null;
       button.setAttribute("aria-expanded", "false");
-      this.root.ownerDocument.defaultView?.requestAnimationFrame(() => { if (!chosen) restoreFocus(); });
-    });
-    if (Platform.isAndroidApp && caret) {
-      // Obsidian's mobile menu can extend beneath an open keyboard.
-      this.root.querySelector<HTMLTextAreaElement>(caret.field)?.blur();
-      button.focus({ preventScroll: true });
+      doc.defaultView?.requestAnimationFrame(restoreFocus);
+    };
+    const choices = this.choices(kind, work);
+    button.setAttribute("aria-expanded", "true");
+    if (Platform.isMobileApp) {
+      if (caret) {
+        this.root.querySelector<HTMLTextAreaElement>(caret.field)?.blur();
+        button.focus({ preventScroll: true });
+      }
+      this.showMobilePicker(kind, button, choices, choose, closed);
+    } else {
+      const menu = new Menu();
+      for (const choice of choices) {
+        if (choice.custom) menu.addSeparator();
+        menu.addItem(item => {
+          item.setTitle(choice.label);
+          if (choice.current !== undefined) item.setChecked(choice.current);
+          if (choice.apply) item.onClick(() => choose(choice));
+          else item.setDisabled(true);
+        });
+      }
+      this.openPicker = { close: () => menu.hide(), button, closed };
+      menu.onHide(closed);
+      const anchor = button.getBoundingClientRect();
+      menu.showAtPosition({ x: anchor.left, y: anchor.bottom }, doc);
     }
-    const anchor = button.getBoundingClientRect();
-    menu.showAtPosition({ x: anchor.left, y: anchor.bottom });
+  }
+
+  private showMobilePicker(kind: Picker, trigger: HTMLButtonElement, choices: PickerChoice[], choose: (choice: PickerChoice) => void, closed: () => void): void {
+    const modal = new Modal(this.app);
+    modal.setTitle(PICKER_LABEL[kind]);
+    modal.modalEl.setAttribute("aria-label", PICKER_LABEL[kind]);
+    modal.modalEl.classList.add("y-ai-picker-modal");
+    modal.containerEl.classList.add("y-ai-picker-container");
+    for (const choice of choices) {
+      if (!choice.apply) { modal.contentEl.createEl("p", { cls: "y-ai-picker-hint", text: choice.label }); continue; }
+      const option = modal.contentEl.createEl("button", { cls: "y-ai-picker-choice", attr: { type: "button" } });
+      option.createSpan({ text: choice.label });
+      if (choice.current !== undefined) option.setAttribute("aria-pressed", String(choice.current));
+      if (choice.current) setIcon(option.createSpan({ cls: "y-ai-picker-check", attr: { "aria-hidden": "true" } }), "check");
+      option.addEventListener("click", () => choose(choice));
+    }
+    this.openPicker = { close: () => modal.close(), button: trigger, closed };
+    let stopViewport = () => {};
+    modal.setCloseCallback(() => { stopViewport(); closed(); });
+    modal.open();
+    stopViewport = fitMobilePicker(modal.containerEl);
   }
 }
