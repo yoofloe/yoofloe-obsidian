@@ -12,7 +12,7 @@ const options = { absWorkingDir: fileURLToPath(new URL('.', import.meta.url)),
   // Keep the Node WebSocket entry behind the desktop-only dynamic import.
   alias: { ws: require.resolve('ws') },
   target: 'es2022', minify: !test, logLevel: 'warning' };
-if (test) options.entryPoints.push('src/device-records.ts', 'src/conversation-storage.ts', 'src/shared-conversations.ts');
+if (test) options.entryPoints.push('src/device-records.ts', 'src/conversation-storage.ts', 'src/shared-conversations.ts', 'src/composer-input.ts');
 const copyPayload = async () => {
   if (test) return;
   const css = await transform(await readFile(new URL('styles.css', import.meta.url), 'utf8'), { loader: 'css', minify: true, logLevel: 'silent' });

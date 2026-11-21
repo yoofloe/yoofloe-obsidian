@@ -1,4 +1,4 @@
-import { Component, ItemView, MarkdownRenderer, Modal, Notice, Platform, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, Menu, Modal, Notice, Platform, Scope, setIcon, setTooltip, type WorkspaceLeaf } from "obsidian";
 import { AiWorkspace } from "./workspace";
 import { MODE_LABELS, SCOPE_LABELS, WRITE_SCOPE_LABELS } from "./agent-policy";
 import { AREA_LABELS, PERIOD_LABELS } from "./question-query";
@@ -24,6 +24,7 @@ import { renderCalendarWorkspacePanel } from "./calendar-workspace-panel";
 import { renderChronoHudPanel } from "./chronohud-panel";
 import { ChatCopyControls } from "./chat-copy-view";
 import { ComposerOptions } from "./composer-options";
+import { sizeComposerInput, submitComposerShortcut } from "./composer-input";
 
 export const AI_VIEW = "yoofloe-ai";
 const CALENDAR_STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -72,6 +73,7 @@ export class YoofloeAiView extends ItemView {
   private chatVisible = 10;
   private followChat = true;
   private renderedReady = false;
+  private searchOpen = false;
   private chatQuery = "";
   private searchResults: ChatTurn[] = [];
   private searchNext: number | null = null;
@@ -88,6 +90,10 @@ export class YoofloeAiView extends ItemView {
   private readonly settingsId = `yoofloe-settings-${crypto.randomUUID()}`;
   constructor(leaf: WorkspaceLeaf, readonly work: AiWorkspace, private readonly options: ViewOptions) {
     super(leaf);
+    const scope = new Scope(this.app.scope);
+    this.scope = scope;
+    scope.register(["Ctrl"], "Enter", event => this.composerShortcut(event));
+    scope.register(["Meta"], "Enter", event => this.composerShortcut(event));
     this.chatCopy = new ChatCopyControls(() => this.work, this.contentEl,
       () => [...this.olderChats, ...this.searchResults, ...this.work.chat], () => this.render());
     this.composerOptions = new ComposerOptions(this.app, this.contentEl, () => this.work, () => this.options.settings(), () => this.saveSoon());
@@ -166,6 +172,12 @@ export class YoofloeAiView extends ItemView {
   private button(el: HTMLElement, text: string, action: () => void, disabled = false, cls = ""): HTMLButtonElement {
     const b = el.createEl("button", { text, cls, attr: { type: "button" } }); b.disabled = disabled; b.addEventListener("click", action); return b;
   }
+  private toolbarButton(parent: HTMLElement, label: string, icon: string): HTMLButtonElement {
+    const button = parent.createEl("button", { cls: "clickable-icon y-ai-tool-button", attr: { type: "button", "aria-label": label } });
+    setIcon(button, icon);
+    setTooltip(button, label);
+    return button;
+  }
   private details(el: HTMLElement, key: string, title: string): HTMLDetailsElement {
     const d = el.createEl("details", { cls: "y-ai-details", attr: { "data-section": key } }); d.open = this.openDetails.has(key); d.createEl("summary", { text: title });
     d.addEventListener("toggle", () => { if (!d.isConnected) return; if (d.open) this.openDetails.add(key); else this.openDetails.delete(key); }); return d;
@@ -213,6 +225,148 @@ export class YoofloeAiView extends ItemView {
       });
     }
   }
+  private workspaceHeader(parent: HTMLElement, chatId: string): void {
+    const w = this.work;
+    const header = parent.createDiv({ cls: "y-ai-header" });
+    this.viewTabs(header, chatId);
+    const fresh = this.toolbarButton(header, "New conversation", "square-pen");
+    fresh.classList.add("y-ai-new-conversation");
+    fresh.disabled = !w.canSwitchConversation || w.library.conversations.length >= MAX_CONVERSATIONS;
+    fresh.addEventListener("click", () => void this.createConversation());
+    const more = this.toolbarButton(header, "Conversation actions", "ellipsis");
+    more.setAttribute("aria-haspopup", "menu");
+    more.setAttribute("aria-expanded", "false");
+    more.addEventListener("click", () => {
+      const menu = new Menu();
+      if (!this.libraryOpen) menu.addItem(item => item.setTitle("Manage conversations").setIcon("messages-square").onClick(() => {
+        this.layout = "chat"; this.libraryOpen = true; this.render();
+        this.contentEl.querySelector<HTMLButtonElement>(".y-ai-library-toolbar button")?.focus({ preventScroll: true });
+      }));
+      if (!fresh.getClientRects().length) menu.addItem(item => item.setTitle("New conversation").setIcon("square-pen")
+        .setDisabled(fresh.disabled).onClick(() => void this.createConversation()));
+      menu.addItem(item => item.setTitle("Choose note").setIcon("file-text").setDisabled(w.settingsLocked).onClick(() => this.options.chooseNote()));
+      if (!this.settingsExpanded && !this.libraryOpen) {
+        if (w.source?.path && !parent.querySelector(".y-ai-connected-note")?.getClientRects().length) {
+          menu.addItem(item => item.setTitle("Connected note").setIcon("info").onClick(() => this.showNoteContext()));
+        }
+        const candidate = w.nextSource;
+        if (candidate && !parent.querySelector(".y-ai-use-opened")?.getClientRects().length) {
+          menu.addItem(item => item.setTitle(candidate.selection ? "Use selection" : "Use opened note").setIcon("file-input")
+            .setDisabled(w.settingsLocked).onClick(() => { w.attachNote(candidate); }));
+        }
+        const budget = this.contentEl.querySelector<HTMLButtonElement>(".y-ai-input-budget");
+        if (budget && !budget.getClientRects().length) menu.addItem(item => item.setTitle(budget.textContent || "Input size details")
+          .setIcon("calculator").setDisabled(!budget.onclick).onClick(() => budget.click()));
+        menu.addSeparator();
+        this.chatCopy.addMenuItems(menu);
+      }
+      menu.addSeparator();
+      menu.addItem(item => item.setTitle("Hide Yoofloe").setIcon("panel-right-close").onClick(() => this.options.hide()));
+      more.setAttribute("aria-expanded", "true");
+      menu.onHide(() => more.setAttribute("aria-expanded", "false"));
+      const rect = more.getBoundingClientRect();
+      menu.showAtPosition({ x: rect.left, y: rect.bottom }, more.ownerDocument);
+    });
+  }
+  private showNoteContext(): void {
+    const w = this.work, path = w.source?.path;
+    if (!path) { this.options.chooseNote(); return; }
+    const modal = new Modal(this.app);
+    modal.setTitle("Connected note");
+    modal.modalEl.setAttribute("aria-label", "Connected note");
+    modal.contentEl.createEl("p", { cls: "y-ai-note-path", text: path });
+    const candidate = w.nextSource;
+    if (candidate) {
+      modal.contentEl.createEl("strong", { text: "Opened note" });
+      modal.contentEl.createEl("p", { cls: "y-ai-note-path", text: candidate.path });
+    }
+    const actions = modal.contentEl.createDiv({ cls: "modal-button-container" });
+    this.button(actions, "Choose note", () => { modal.close(); this.options.chooseNote(); }, w.settingsLocked);
+    this.button(actions, "Done", () => modal.close());
+    modal.open();
+  }
+  private chatTools(parent: HTMLElement, messagesId: string): HTMLButtonElement {
+    const w = this.work;
+    const row = parent.createDiv({ cls: "y-ai-chat-tools", attr: { role: "group", "aria-label": "Conversation tools" } });
+    row.hidden = this.settingsExpanded || this.libraryOpen;
+    if (this.searchOpen) {
+      this.renderChatSearch(row);
+    } else {
+      const path = w.source?.path;
+      const title = w.source?.selection && w.readScope === "current" ? `Selected text · ${w.title}` : w.title;
+      const note = this.button(row, "", () => this.showNoteContext(), !path && w.settingsLocked, "y-ai-connected-note");
+      note.setAttribute("aria-haspopup", "dialog");
+      note.setAttribute("aria-label", path ? `Connected note, ${path}` : "Choose note");
+      setIcon(note.createSpan({ attr: { "aria-hidden": "true" } }), "file-text");
+      note.createSpan({ cls: "y-ai-note-name", text: title });
+      setTooltip(note, path ?? "Choose note");
+      const candidate = w.nextSource;
+      if (candidate) {
+        const label = candidate.selection ? "Use selection" : "Use opened note";
+        const use = this.button(row, "", () => w.attachNote(candidate), w.settingsLocked, "y-ai-use-opened");
+        use.setAttribute("aria-label", label);
+        setIcon(use.createSpan({ cls: "y-ai-use-symbol", attr: { "aria-hidden": "true" } }), candidate.selection ? "text-select" : "file-input");
+        use.createSpan({ cls: "y-ai-use-label", text: label });
+        setTooltip(use, w.settingsLocked ? "Finish or stop the current task before changing its note" : `${label} · ${candidate.path}`);
+      }
+      const search = this.toolbarButton(row, "Search conversations", "search");
+      search.classList.add("y-ai-search-trigger");
+      search.addEventListener("click", () => {
+        this.searchOpen = true;
+        this.render();
+        this.contentEl.querySelector<HTMLInputElement>(".y-ai-chat-search")?.focus({ preventScroll: true });
+      });
+    }
+    const slot = row.createDiv({ cls: "y-ai-jump-slot" });
+    slot.hidden = this.searchOpen;
+    const jump = this.toolbarButton(slot, "Jump to latest message", "arrow-down-to-line");
+    jump.classList.add("y-ai-jump-latest");
+    jump.setAttribute("aria-controls", messagesId);
+    jump.hidden = true;
+    return jump;
+  }
+  private renderChatSearch(row: HTMLElement): void {
+    const search = row.createEl("input", { value: this.chatQuery, cls: "y-ai-chat-search", attr: {
+      type: "search", placeholder: "Search conversations", "aria-label": "Search conversations", autocomplete: "off",
+    } });
+    search.maxLength = 200;
+    const win = row.ownerDocument.defaultView;
+    const schedule = () => {
+      if (this.chatQuery !== search.value) this.savedSearchScroll = 0;
+      this.chatQuery = search.value;
+      this.searchEpoch++;
+      win?.clearTimeout(this.searchTimer);
+      if (!this.composing) this.searchTimer = win?.setTimeout(() => void this.searchConversation(), 250);
+    };
+    search.addEventListener("input", schedule);
+    search.addEventListener("compositionstart", () => {
+      this.composing = true; this.searchEpoch++; win?.clearTimeout(this.searchTimer);
+    });
+    search.addEventListener("compositionend", () => {
+      this.composing = false; schedule();
+      if (this.pendingRender) this.render();
+    });
+    const closeSearch = () => {
+      this.resetSearch();
+      this.render();
+      this.contentEl.querySelector<HTMLButtonElement>(".y-ai-search-trigger")?.focus({ preventScroll: true });
+    };
+    this.toolbarButton(row, "Close search", "x").addEventListener("click", closeSearch);
+    search.addEventListener("keydown", event => {
+      if (event.key !== "Escape" || event.isComposing || this.composing) return;
+      event.preventDefault(); event.stopPropagation(); closeSearch();
+    });
+  }
+  private resetSearch(): void {
+    this.contentEl.ownerDocument.defaultView?.clearTimeout(this.searchTimer);
+    this.searchEpoch++;
+    this.searchOpen = false;
+    this.chatQuery = "";
+    this.searchResults = [];
+    this.searchNext = null;
+    this.searching = false;
+    this.savedSearchScroll = 0;
+  }
   private refreshLimitDisclosure(): void {
     const w = this.work, label = requestLimitLabel(w.maximum);
     this.contentEl.querySelectorAll<HTMLElement>(".y-ai-limit-caption").forEach(el => el.setText(label));
@@ -258,7 +412,6 @@ export class YoofloeAiView extends ItemView {
   private async searchConversation(more = false): Promise<void> {
     const query = this.chatQuery.trim(), epoch = ++this.searchEpoch;
     if (!query) { this.searchResults = []; this.searchNext = null; this.searching = false; this.render(); return; }
-    const focused = this.contentEl.ownerDocument.activeElement === this.contentEl.querySelector(".y-ai-chat-search");
     if (!more) this.searchResults = this.work.chat.filter(turn => chatMatches(turn, query)).map(turn => searchChatPreview(turn, query));
     this.searching = true;
     try {
@@ -272,7 +425,7 @@ export class YoofloeAiView extends ItemView {
       if (epoch === this.searchEpoch && this.work.current) {
         this.searching = false;
         if (this.selectingText || this.chatCopy.selection()) this.pendingRender = true;
-        else { this.render(); if (focused) { const input = this.contentEl.querySelector<HTMLInputElement>(".y-ai-chat-search"); input?.focus({ preventScroll: true }); input?.setSelectionRange(input.value.length, input.value.length); } }
+        else this.render();
       }
     }
   }
@@ -385,12 +538,12 @@ export class YoofloeAiView extends ItemView {
   private async chooseConversation(conversation: Conversation): Promise<void> {
     if (conversation.archived && !await this.work.changeConversation(conversation.id, { archived: false })) return;
     if (await this.work.openConversation(conversation.id)) {
-      this.layout = "chat"; this.libraryOpen = false; this.chatQuery = ""; this.searchEpoch++;
+      this.layout = "chat"; this.libraryOpen = false; this.resetSearch();
       this.render();
     }
   }
   private async createConversation(folderId: string | null = null): Promise<void> {
-    if (await this.work.createConversation(folderId)) { this.layout = "chat"; this.libraryOpen = false; this.chatQuery = ""; this.render(); }
+    if (await this.work.createConversation(folderId)) { this.layout = "chat"; this.libraryOpen = false; this.resetSearch(); this.render(); }
   }
   private libraryButton(el: HTMLElement, label: string, icon: string, action: () => void, disabled = false, iconOnly = false): HTMLButtonElement {
     const button = this.button(el, "", action, disabled, iconOnly ? "clickable-icon y-ai-library-icon" : "y-ai-library-button");
@@ -442,10 +595,7 @@ export class YoofloeAiView extends ItemView {
       modal.close();
       if (this.work === work) void work.deleteConversation(conversation.id).then(deleted => {
         if (!deleted || this.work !== work) return;
-        this.chatQuery = "";
-        this.searchEpoch++;
-        this.searchResults = [];
-        this.searchNext = null;
+        this.resetSearch();
         this.render();
       });
     }, !work.canSwitchConversation || !!conversation.shared?.stopping, "mod-warning");
@@ -474,8 +624,7 @@ export class YoofloeAiView extends ItemView {
     if (await this.work.openSyncedConversation(id, revision, preferredId)) {
       this.layout = "chat";
       this.libraryOpen = false;
-      this.chatQuery = "";
-      this.searchEpoch++;
+      this.resetSearch();
       this.render();
     }
   }
@@ -558,7 +707,6 @@ export class YoofloeAiView extends ItemView {
     const top = panel.createDiv({ cls: "y-ai-library-toolbar" });
     this.libraryButton(top, "Back to chat", "chevron-left", () => { this.libraryOpen = false; this.render(); }, false, true);
     top.createEl("h3", { text: "Conversations" });
-    this.libraryButton(top, "New conversation", "square-pen", () => void this.createConversation(), !w.canSwitchConversation || w.library.conversations.length >= MAX_CONVERSATIONS, true);
     this.libraryButton(top, "New folder", "folder-plus", () => this.editLibraryName("folder", null), !w.canSwitchConversation || w.library.folders.length >= MAX_FOLDERS, true);
     this.libraryNameEditor(panel);
     if (w.legacyConversationNotice) panel.createEl("p", { text: w.legacyConversationNotice, cls: "y-ai-hint" });
@@ -743,14 +891,16 @@ export class YoofloeAiView extends ItemView {
   private watchChatScroll(messages: HTMLElement, body: HTMLElement, jump: HTMLButtonElement, openAtLatest: boolean): void {
     const filtered = messages.hasAttribute("data-search-results");
     let scrollTop = messages.scrollTop;
+    const shouldFollow = () => !filtered && !this.chatQuery && !this.searchOpen && (openAtLatest || this.work.autoScrollChat && this.followChat);
+    const updateAnchoring = () => messages.classList.toggle("is-following-latest", shouldFollow());
     // Hold the initial position through late Markdown and image layout until someone starts reading or a task updates.
-    const stopOpeningFollow = () => { openAtLatest = false; };
+    const stopOpeningFollow = () => { openAtLatest = false; updateAnchoring(); };
     this.stopOpeningChatFollow = stopOpeningFollow;
     messages.addEventListener("pointerdown", stopOpeningFollow, { passive: true });
     messages.addEventListener("keydown", stopOpeningFollow);
     const updateButton = () => {
       const focused = jump.ownerDocument.activeElement === jump;
-      jump.hidden = filtered || !!this.chatQuery || messages.clientHeight < 52 || nearLatest(messages);
+      jump.hidden = this.searchOpen || filtered || !!this.chatQuery || !messages.clientHeight || nearLatest(messages);
       if (jump.hidden && focused) messages.focus({ preventScroll: true });
     };
     const move = (top: number) => {
@@ -764,6 +914,7 @@ export class YoofloeAiView extends ItemView {
     jump.addEventListener("click", () => {
       if (filtered || this.chatQuery) return;
       this.followChat = true;
+      updateAnchoring();
       goToLatest();
       updateButton();
     });
@@ -784,8 +935,9 @@ export class YoofloeAiView extends ItemView {
     }, { passive: true });
 
     const updateLayout = () => {
+      updateAnchoring();
       if (messages.clientHeight && !filtered && !this.chatQuery && !this.selectingText && !this.chatCopy.selection()) {
-        if (openAtLatest || this.work.autoScrollChat && this.followChat) goToLatest();
+        if (shouldFollow()) goToLatest();
         else if (this.savedChatScroll > scrollTop) move(this.savedChatScroll);
       }
       updateButton();
@@ -842,7 +994,13 @@ export class YoofloeAiView extends ItemView {
         const { label, icon } = COMPOSER_ACTIONS[action];
         run.dataset.action = action;
         run.setAttribute("aria-label", label);
-        setTooltip(run, label);
+        if (action === "send") {
+          setTooltip(run, Platform.isMacOS || Platform.isIosApp ? "Send (⌘+Enter)" : "Send (Ctrl+Enter)");
+          run.setAttribute("aria-keyshortcuts", "Control+Enter Meta+Enter");
+        } else {
+          setTooltip(run, label);
+          run.removeAttribute("aria-keyshortcuts");
+        }
         setIcon(run, icon);
       }
       run.disabled = w.busy ? !w.canStop : !this.actionReady();
@@ -882,7 +1040,7 @@ export class YoofloeAiView extends ItemView {
         if (focused) this.contentEl.querySelector<HTMLTextAreaElement>(".y-ai-primary-prompt")?.focus({ preventScroll: true });
         return;
       }
-      this.sizeComposerInput(input); this.refreshComposer(); this.saveSoon();
+      sizeComposerInput(input); this.refreshComposer(); this.saveSoon();
     };
     input.addEventListener("input", updateDraft);
     let afterComposition: FollowUpMode | undefined;
@@ -899,7 +1057,7 @@ export class YoofloeAiView extends ItemView {
         if (saved && !this.showFollowUp) this.render();
         else if (input.value !== w.followUpDraft) {
           input.value = w.followUpDraft;
-          this.sizeComposerInput(input);
+          sizeComposerInput(input);
         }
       });
     };
@@ -933,39 +1091,25 @@ export class YoofloeAiView extends ItemView {
     setTooltip(close, "Close additional message");
     setIcon(close, "x");
     input.addEventListener("keydown", event => {
-      if (event.isComposing || this.composing) return;
-      const action = w.followUpDefault === "steer" ? steer : queue;
-      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        if (!action.disabled) action.click();
-      } else if (event.key === "Escape" && !close.hidden && !close.disabled) {
+      if (event.key === "Escape" && !event.isComposing && !this.composing && !close.hidden && !close.disabled) {
         event.preventDefault();
         close.click();
       }
     });
   }
-  private sizeComposerInput(input: HTMLTextAreaElement): void {
-    const win = input.ownerDocument.defaultView;
-    if (!win || !input.offsetWidth) return;
-    const style = win.getComputedStyle(input);
-    const lineHeight = parseFloat(style.lineHeight);
-    if (!Number.isFinite(lineHeight)) return;
-    const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-    const border = input.offsetHeight - input.clientHeight;
-    const max = Math.ceil(lineHeight * 3 + padding + border);
-    const scroll = input.scrollTop;
-    input.style.removeProperty("height");
-    input.classList.remove("is-overflowing");
-    const natural = input.scrollHeight + border;
-    const overflow = natural > max;
-    input.setCssProps({ height: `${Math.min(natural, max)}px` });
-    input.classList.toggle("is-overflowing", overflow);
-    if (overflow) {
-      input.scrollTop = input.ownerDocument.activeElement === input && input.selectionEnd === input.value.length ? input.scrollHeight : scroll;
-    }
+  private composerShortcut(event: KeyboardEvent): false | undefined {
+    const root = this.contentEl;
+    const active = root.ownerDocument.activeElement;
+    if (!active || !root.contains(active) || !active.matches(".y-ai-primary-prompt, .y-ai-follow-up-input")) return;
+    const followUp = active.matches(".y-ai-follow-up-input");
+    const selector = followUp
+      ? `[data-follow-up="${this.work.followUpDefault}"]`
+      : '.y-ai-send[data-action="send"]';
+    const action = followUp || !this.work.settingsLocked ? root.querySelector<HTMLButtonElement>(selector) : null;
+    return submitComposerShortcut(event, active as HTMLTextAreaElement, this.composing, action);
   }
   private sizeComposerInputs(): void {
-    this.contentEl.querySelectorAll<HTMLTextAreaElement>(".y-ai-compose textarea").forEach(input => this.sizeComposerInput(input));
+    this.contentEl.querySelectorAll<HTMLTextAreaElement>(".y-ai-compose textarea").forEach(sizeComposerInput);
   }
   private apiDisclosureLabel(): string { return `OpenAI API, paid, ${this.apiLimit()}. Usage details`; }
   private apiDisclosure(dock: HTMLElement): void {
@@ -1112,7 +1256,7 @@ export class YoofloeAiView extends ItemView {
       this.savedChatScroll = 0; this.savedSearchScroll = 0; this.followChat = true;
     } else {
       this.readChatPosition?.();
-      if (previousChat?.clientHeight && previousChat.hasAttribute("data-search-results")) this.savedSearchScroll = previousChat.scrollTop;
+      if (this.chatQuery && previousChat?.clientHeight && previousChat.dataset.searchResults === this.chatQuery) this.savedSearchScroll = previousChat.scrollTop;
     }
     el.classList.toggle("y-ai-library-open", this.libraryOpen);
     const activeField = el.ownerDocument.activeElement;
@@ -1124,47 +1268,24 @@ export class YoofloeAiView extends ItemView {
     const settingsFocus = activeField && el.querySelector(".y-ai-scroll")?.contains(activeField) && activeField.matches("input,textarea,select") ? activeField.getAttribute("aria-label") : null;
     const selectionStart = settingsFocus && "selectionStart" in activeField! ? (activeField as HTMLInputElement).selectionStart : null;
     const selectionEnd = settingsFocus && "selectionEnd" in activeField! ? (activeField as HTMLInputElement).selectionEnd : null;
-    const oldSearch = el.querySelector<HTMLInputElement>(".y-ai-chat-search"), searchFocused = el.ownerDocument.activeElement === oldSearch, searchCursor = oldSearch?.selectionStart ?? this.chatQuery.length;
+    const oldSearch = el.querySelector<HTMLInputElement>(".y-ai-chat-search");
+    const searchSelection = oldSearch && activeField === oldSearch ? [oldSearch.selectionStart, oldSearch.selectionEnd] as const : null;
     this.composerOptions.close();
     this.rendering?.unload(); this.rendering = new Component(); this.rendering.load(); el.empty();
-    const header = el.createDiv({ cls: "y-ai-header" }), title = header.createDiv({ cls: "y-ai-heading" });
-    title.createEl("h2", { text: "Yoofloe" }); const noteContext = title.createEl("p", { text: `${w.source?.selection && w.readScope === "current" ? "Selected text · " : ""}${w.title}`, attr: { "aria-live": "polite" } });
-    if (w.source?.path) setTooltip(noteContext, w.source.path);
-    const note = this.button(header, "", () => this.options.chooseNote(), w.settingsLocked || !w.ready, "clickable-icon"); note.setAttribute("aria-label", "Choose note"); setTooltip(note, "Choose a note to read or edit"); setIcon(note, "paperclip");
-    const library = this.button(header, "", () => { this.layout = "chat"; this.libraryOpen = !this.libraryOpen; this.render(); }, false, "clickable-icon");
-    library.setAttribute("aria-label", "Manage conversations"); setTooltip(library, "Manage conversations"); library.setAttribute("aria-expanded", String(this.libraryOpen)); setIcon(library, "messages-square");
-    const fresh = this.button(header, "", () => void this.createConversation(), !w.canSwitchConversation || w.library.conversations.length >= MAX_CONVERSATIONS, "clickable-icon");
-    fresh.setAttribute("aria-label", "New conversation"); setTooltip(fresh, "New conversation"); setIcon(fresh, "square-pen");
     const chatId = `${this.settingsId}-chat`;
-    const hide = this.button(header, "", () => this.options.hide(), false, "clickable-icon"); hide.setAttribute("aria-label", "Hide Yoofloe"); setTooltip(hide, "Hide Yoofloe"); setIcon(hide, "panel-right-close");
-    this.viewTabs(el, chatId);
+    const messagesId = `${chatId}-messages`;
+    const toolbar = el.createDiv({ cls: "y-ai-workspace-toolbar" });
+    toolbar.classList.toggle("is-search-open", this.searchOpen && !this.settingsExpanded && !this.libraryOpen);
+    this.workspaceHeader(toolbar, chatId);
+    const jump = this.chatTools(toolbar, messagesId);
     const chatPanel = el.createEl("section", { cls: "y-ai-chat-panel", attr: { id: chatId, role: "tabpanel", "aria-labelledby": this.tabId("chat") } });
     chatPanel.hidden = this.settingsExpanded;
     if (this.libraryOpen) this.renderLibrary(chatPanel);
-    if (w.nextSource) {
-      const candidate = w.nextSource, context = chatPanel.createDiv({ cls: "y-ai-note-context" });
-      setTooltip(context.createSpan({ text: candidate.path.split("/").at(-1) ?? candidate.path }), candidate.path);
-      const attach = this.button(context, candidate.selection ? "Use selection" : "Use opened note", () => w.attachNote(candidate), w.settingsLocked, "mod-cta");
-      setTooltip(attach, w.settingsLocked ? "Finish or stop the current task before changing its note" : "Connect this note without clearing the conversation or draft");
-    }
-    const searchBar = chatPanel.createDiv({ cls: "y-ai-search-bar" }), searchIcon = searchBar.createSpan({ cls: "y-ai-search-icon" }); setIcon(searchIcon, "search");
-    const search = searchBar.createEl("input", { value: this.chatQuery, cls: "y-ai-chat-search", attr: { type: "search", placeholder: "Search conversations", "aria-label": "Search conversations", autocomplete: "off" } }); search.maxLength = 200;
-    search.addEventListener("input", () => { this.chatQuery = search.value; this.searchEpoch++; const win = el.ownerDocument.defaultView; win?.clearTimeout(this.searchTimer); this.searchTimer = win?.setTimeout(() => { void this.searchConversation(); }, 250); });
-    search.addEventListener("keydown", event => { if (event.key === "Escape") { this.chatQuery = ""; void this.searchConversation(); } });
-    if (this.chatQuery) { const clear = this.button(searchBar, "", () => { this.chatQuery = ""; void this.searchConversation(); }, false, "clickable-icon"); clear.setAttribute("aria-label", "Clear conversation search"); setIcon(clear, "x"); }
-    const conversationActions = searchBar.createEl("button", { cls: "clickable-icon", attr: { type: "button", "aria-label": "Conversation actions" } });
-    setIcon(conversationActions, "ellipsis"); setTooltip(conversationActions, "Conversation actions");
-    conversationActions.addEventListener("click", event => this.chatCopy.menu(event));
     this.chatCopy.renderToolbar(chatPanel);
     const transcript = chatPanel.createDiv({ cls: "y-ai-transcript" });
-    const messagesId = `${chatId}-messages`;
     const messages = transcript.createDiv({ cls: "y-ai-messages", attr: { id: messagesId, role: "region", "aria-label": "Scrollable conversation", tabindex: "0" } });
-    messages.toggleAttribute("data-search-results", !!this.chatQuery);
+    if (this.chatQuery) messages.dataset.searchResults = this.chatQuery;
     const transcriptBody = messages.createDiv({ cls: "y-ai-transcript-content" });
-    const jump = transcript.createEl("button", { cls: "y-ai-jump-latest", attr: { type: "button", "aria-label": "Jump to latest message", "aria-controls": messagesId } });
-    jump.hidden = true;
-    setIcon(jump, "arrow-down");
-    setTooltip(jump, "Jump to latest message");
     messages.addEventListener("pointerdown", event => {
       const target = event.target as HTMLElement;
       if (event.button === 0 && target.closest(".y-ai-chat") && !target.closest("button,input,summary,a")) {
@@ -1292,7 +1413,7 @@ export class YoofloeAiView extends ItemView {
       for (const file of selectedAttachments) { const chip = attachments.createDiv({ cls: "y-ai-attachment" }); const icon = chip.createSpan(); setIcon(icon, file.kind === "audio" ? "audio-lines" : file.kind === "image" ? "image" : "file-text"); setTooltip(chip.createSpan({ text: file.name, cls: "y-ai-attachment-name" }), `${file.name} · ${(file.bytes / 1024).toFixed(0)} KiB${file.kind === "audio" ? " · transcription charges apply" : ""}`); const remove = this.button(chip, "", () => w.removeAttachment(file.id, followUp), !w.canChangeReference || w.addingAttachments, "clickable-icon"); remove.setAttribute("aria-label", `Remove ${file.name} from this request`); setIcon(remove, "x"); }
     }
     const compose = dock.createDiv({ cls: "y-ai-compose" });
-    const prompt = compose.createEl("textarea", { text: w.prompt, cls: "y-ai-primary-prompt", attr: { rows: "1", "aria-label": "Ask", placeholder: "Ask…" } });
+    const prompt = compose.createEl("textarea", { text: w.prompt, cls: "y-ai-primary-prompt", attr: { rows: "2", "aria-label": "Ask", placeholder: "Ask…" } });
     prompt.disabled = w.settingsLocked && !w.addingAttachments; prompt.maxLength = 32000;
     const controls = dock.createDiv({ cls: `y-ai-row y-ai-composer-controls${followUp ? " y-ai-follow-up-controls" : ""}${w.busy ? " y-ai-running-controls" : ""}` });
     const picker = controls.createEl("input", { attr: { type: "file", multiple: "", "aria-label": "Choose attachments" } }); picker.hidden = true;
@@ -1324,7 +1445,7 @@ export class YoofloeAiView extends ItemView {
     budget.type = "button";
     this.scheduleBudget();
     this.refreshComposer();
-    prompt.addEventListener("input", () => { w.setPrompt(prompt.value); this.sizeComposerInput(prompt); run.disabled = !this.actionReady(); this.saveSoon(); });
+    prompt.addEventListener("input", () => { w.setPrompt(prompt.value); sizeComposerInput(prompt); run.disabled = !this.actionReady(); this.saveSoon(); });
     prompt.addEventListener("paste", event => {
       const text = event.clipboardData?.getData("text/plain");
       if (!text) return;
@@ -1336,10 +1457,9 @@ export class YoofloeAiView extends ItemView {
     });
     prompt.addEventListener("compositionstart", () => { this.composing = true; });
     prompt.addEventListener("compositionend", () => {
-      this.composing = false; w.setPrompt(prompt.value); this.sizeComposerInput(prompt); this.saveSoon();
+      this.composing = false; w.setPrompt(prompt.value); sizeComposerInput(prompt); this.saveSoon();
       if (this.pendingRender) this.render();
     });
-    prompt.addEventListener("keydown", event => { if (!event.isComposing && event.key === "Enter" && (event.ctrlKey || event.metaKey) && !run.disabled && !w.busy) { event.preventDefault(); run.click(); } });
     this.sizeComposerInputs();
     if (this.settingsExpanded) scroll.scrollTop = this.savedSettingsScroll;
     else if (!this.libraryOpen && this.chatQuery) messages.scrollTop = this.savedSearchScroll;
@@ -1348,13 +1468,16 @@ export class YoofloeAiView extends ItemView {
       const replacement = Array.from(scroll.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")).find(field => field.getAttribute("aria-label") === settingsFocus);
       if (replacement && !replacement.disabled) { replacement.focus({ preventScroll: true }); if (selectionStart !== null && selectionEnd !== null && "setSelectionRange" in replacement) replacement.setSelectionRange(selectionStart, selectionEnd); }
     }
-    if (searchFocused && !this.settingsExpanded) { search.focus({ preventScroll: true }); search.setSelectionRange(searchCursor, searchCursor); }
+    if (searchSelection && !this.settingsExpanded && !this.libraryOpen) {
+      const search = el.querySelector<HTMLInputElement>(".y-ai-chat-search");
+      search?.focus({ preventScroll: true }); search?.setSelectionRange(...searchSelection);
+    }
     if (promptSelection && !prompt.disabled && !followUp && !this.settingsExpanded) {
-      prompt.focus({ preventScroll: true }); prompt.setSelectionRange(...promptSelection); this.sizeComposerInput(prompt);
+      prompt.focus({ preventScroll: true }); prompt.setSelectionRange(...promptSelection); sizeComposerInput(prompt);
     }
     if (followUpSelection && followUp && !this.settingsExpanded) {
       const input = el.querySelector<HTMLTextAreaElement>(".y-ai-follow-up-input");
-      input?.focus({ preventScroll: true }); input?.setSelectionRange(...followUpSelection); if (input) this.sizeComposerInput(input);
+      input?.focus({ preventScroll: true }); input?.setSelectionRange(...followUpSelection); if (input) sizeComposerInput(input);
     }
     if (referenceFocused && !this.settingsExpanded) {
       const target = referenceButton.hidden ? compose.querySelector<HTMLElement>(followUp ? ".y-ai-follow-up-input" : ".y-ai-primary-prompt") : referenceButton;
@@ -1377,7 +1500,7 @@ export class YoofloeAiView extends ItemView {
       const height = `${available}px`; if (root.style.maxHeight !== height) root.style.maxHeight = height;
       root.classList.toggle("y-ai-compact", available < 340);
       root.classList.toggle("y-ai-short", available < 340 && !(keyboard > 50 || visual));
-      root.classList.toggle("y-ai-tiny", available < 190 && (keyboard > 50 || visual));
+      root.classList.toggle("y-ai-tiny", available < 240 && (keyboard > 50 || visual));
       this.sizeComposerInputs();
       this.composerOptions.fitLabels();
       if (root.classList.contains("y-ai-tiny")) root.scrollTop = 0;

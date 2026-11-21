@@ -20,6 +20,7 @@ iOS and physical tablet verification are not included in that evidence.
 4. Check **Allowed actions**, **Notes AI can read**, **Write target**, the working/output folder,
    model, thinking depth and maximum requests. **Preview data** previews the initial input locally.
 5. **Send** starts the task and authorizes its permitted reads and changes. The same fixed-size button becomes **Stop** during work.
+   In **Ask**, press **Ctrl+Enter** to send (**⌘+Enter** on Mac) or **Enter** for a new line. The input starts at two lines, grows to three, then scrolls.
    A task can make several paid API requests. Choose **1 request**, **Custom…**, or **No limit**.
    **No limit** is the new default; explicitly saved limits remain available as Custom. No-limit mode continues until completion, Stop or a technical stopping condition;
    API charges can accumulate. It does not remove provider context/rate/credit limits. There are no automatic retries.
@@ -33,14 +34,15 @@ On Android, long OpenAI replies use an HTTP stream. The plugin waits for the fin
 
 Opening the first note connects it to a conversation that has no note, even when an earlier answer or unsent draft is present.
 Once a note is connected, browsing another note offers **Use opened note** above the conversation; it never silently switches the active task.
-The header paperclip opens **Choose note**, including **Chat without a note**. Choosing a different note keeps the conversation, draft and permission settings.
+Tap the connected note to see its full path. **Conversation actions → Choose note** opens the note picker, including **Chat without a note**. Choosing a different note keeps the conversation, draft and permission settings.
 Running or paused tasks keep their original note.
 
 Use the **Chat** and **Settings** tabs at the top of Yoofloe to switch between two full-height views.
 The tabs preserve the conversation, draft and both scroll positions. With a tab focused, use the left and right arrow keys to switch.
 **Plugin settings** opens the global preferences. **Stop** is available in Settings while a task runs.
-Conversation search is local: it searches saved requests, answers and attachment names, highlights matches,
+The search icon beside the note opens local conversation search in the same toolbar. It searches saved requests, answers and attachment names, highlights matches,
 and pages through older archived conversations without an AI request. Previews remain bounded for mobile performance.
+Close search with **×** or **Esc** to return to the note. The down arrow at the end of the toolbar jumps to the latest message.
 Follow-ups in the same conversation retain recent user directions when you connect another document or change models.
 For example, after asking for Polish readings in parentheses, choose another note and ask to do the same there.
 The current note and Access settings govern the new task. Recent directions use a bounded local context budget.
