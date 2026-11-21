@@ -35,8 +35,8 @@ function fitMobilePicker(container: HTMLElement, unobscured: PickerViewport | nu
     const keyboard = keyboardInset(win, doc.body);
     const visibleBottom = top + height;
     // The layout and visual viewports may already stop above the keyboard.
-    const keyboardTop = keyboard && unobscured?.width === win.innerWidth ? unobscured.height - keyboard : visibleBottom;
-    const bottom = Math.min(visibleBottom, keyboardTop);
+    const layoutBottom = unobscured?.width === win.innerWidth ? unobscured.height : win.innerHeight;
+    const bottom = keyboard > 0 ? Math.min(visibleBottom, layoutBottom - keyboard) : visibleBottom;
     const pane = { top, left, bottom, right: left + width };
     const overlays = navbars.filter(bar => {
       const style = win.getComputedStyle(bar);
