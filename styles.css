@@ -304,9 +304,9 @@
 .yoofloe-ai .y-ai-folder-icon { display:flex; flex:0 0 16px; color:var(--text-muted); }
 .yoofloe-ai .y-ai-folder-icon svg { width:16px; height:16px; }
 .yoofloe-ai.y-ai-keyboard .y-ai-dock { margin-bottom:4px; }
-.yoofloe-ai.y-ai-keyboard.y-ai-compact .y-ai-workspace-toolbar:not(.is-search-open) { flex-direction:row; border-bottom:1px solid var(--background-modifier-border); }
+.yoofloe-ai.y-ai-keyboard.y-ai-compact .y-ai-workspace-toolbar:not(.is-search-open) { flex-flow:row wrap; border-bottom:1px solid var(--background-modifier-border); }
 .yoofloe-ai.y-ai-keyboard.y-ai-compact .y-ai-workspace-toolbar:not(.is-search-open) > div { border-bottom:0; }
-.yoofloe-ai.y-ai-keyboard.y-ai-compact .y-ai-header { flex:1; }
+.yoofloe-ai.y-ai-keyboard.y-ai-compact .y-ai-header { flex:1 0 auto; max-width:100%; }
 .yoofloe-ai.y-ai-keyboard.y-ai-compact .y-ai-chat-tools { padding-inline-start:0; }
 .yoofloe-ai.y-ai-keyboard.y-ai-compact :is(.y-ai-new-conversation,.y-ai-use-opened,.y-ai-note-name) { display:none; }
 .yoofloe-ai.y-ai-keyboard.y-ai-compact .y-ai-connected-note { flex:none; width:var(--y-ai-tool-size); justify-content:center; padding:0; }
@@ -467,7 +467,15 @@
 .yoofloe-ai .y-ai-calendar-proposal ol { padding-inline-start:1.5em; }
 .yoofloe-ai .y-ai-calendar-proposal-actions { display:flex; flex-wrap:wrap; gap:6px; }
 .is-mobile .yoofloe-ai .y-ai-calendar-proposal-actions button { min-height:36px; height:auto; white-space:normal; }
-.y-ai-diagnostic-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:var(--size-4-2); padding-block:var(--size-4-2); border-top:1px solid var(--background-modifier-border); }
-.y-ai-diagnostic-row div { font-size:var(--font-ui-small); }
+.y-ai-diagnostic-row { display:flex; align-items:center; gap:var(--size-4-2); padding-block:var(--size-4-2); border-top:1px solid var(--background-modifier-border); }
+.y-ai-diagnostic-row > div { flex:1; min-width:0; overflow-wrap:anywhere; font-size:var(--font-ui-small); }
 .y-ai-diagnostic-report { width:100%; box-sizing:border-box; font-family:var(--font-monospace); }
-.yoofloe-ai .y-ai-copy-diagnostics { margin-block:var(--size-4-1); }
+button.y-ai-copy-diagnostics {
+  display:inline-flex; flex:none; align-items:center; justify-content:center; width:26px; min-width:0; height:26px; min-height:0;
+  margin:0; padding:0; border:0; border-radius:var(--radius-s); background:transparent; box-shadow:none; color:var(--text-muted);
+}
+button.y-ai-copy-diagnostics svg { width:16px; height:16px; }
+button.y-ai-copy-diagnostics:hover { background:var(--background-modifier-hover); color:var(--text-normal); }
+button.y-ai-copy-diagnostics:focus-visible { outline:2px solid var(--interactive-accent); outline-offset:-2px; }
+.is-mobile button.y-ai-copy-diagnostics { width:32px; height:32px; }
+@media (any-pointer:coarse) { button.y-ai-copy-diagnostics { width:32px; height:32px; } }

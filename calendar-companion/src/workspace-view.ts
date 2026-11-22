@@ -25,7 +25,7 @@ import { renderChronoHudPanel } from "./chronohud-panel";
 import { ChatCopyControls } from "./chat-copy-view";
 import { ComposerOptions } from "./composer-options";
 import { sizeComposerInput, submitComposerShortcut } from "./composer-input";
-import { copyDiagnostics, RecentIssuesModal } from "./diagnostics-view";
+import { addCopyLogsButton, copyDiagnostics, RecentIssuesModal } from "./diagnostics-view";
 
 export const AI_VIEW = "yoofloe-ai";
 const CALENDAR_STORE = "https://play.google.com/store/apps/details?id=com.yoofloe.calendar";
@@ -263,16 +263,16 @@ export class YoofloeAiView extends ItemView {
         menu.addSeparator();
         this.chatCopy.addMenuItems(menu);
         const diagnostics = w.diagnostics;
-        if (diagnostics) menu.addItem(item => item.setTitle("Copy diagnostics").setIcon("clipboard-list").onClick(() =>
+        if (diagnostics) menu.addItem(item => item.setTitle("Copy logs").setIcon("clipboard-copy").onClick(() =>
           void copyDiagnostics(this.app, diagnostics, more.ownerDocument, { conversation: w.library.active })));
       }
-      menu.addSeparator();
-      menu.addItem(item => item.setTitle("Hide Yoofloe").setIcon("panel-right-close").onClick(() => this.options.hide()));
       more.setAttribute("aria-expanded", "true");
       menu.onHide(() => more.setAttribute("aria-expanded", "false"));
       const rect = more.getBoundingClientRect();
       menu.showAtPosition({ x: rect.left, y: rect.bottom }, more.ownerDocument);
     });
+    const hide = this.toolbarButton(header, "Hide Yoofloe", "panel-right-close");
+    hide.addEventListener("click", () => this.options.hide());
   }
   private addCompactAttachmentActions(menu: Menu): void {
     const dock = this.contentEl.querySelector(".y-ai-dock");
@@ -521,9 +521,7 @@ export class YoofloeAiView extends ItemView {
     this.updateWorkHeading(metadata, turn);
     const progress = metadata.createDiv({ cls: "y-ai-work-progress" });
     const diagnostics = w.diagnostics;
-    if (diagnostics) this.button(metadata, "Copy diagnostics", () => {
-      void copyDiagnostics(this.app, diagnostics, metadata.ownerDocument, { turn: turn.id });
-    }, false, "y-ai-copy-diagnostics");
+    if (diagnostics) addCopyLogsButton(metadata, this.app, diagnostics, { turn: turn.id });
     this.renderWorkDetails(progress, turn);
     for (const file of turn.attachments ?? []) metadata.createEl("p", { text: `Attached: ${file.name}`, cls: "y-ai-hint" });
     if (turn.actions.length) { const actions = metadata.createDiv({ cls: "y-ai-chat-actions" }); for (const action of turn.actions) actions.createEl("p", { text: `${labels[action.kind] ?? "Changed"}: ${action.path}${action.target ? ` → ${action.target}` : ""}`, cls: "y-ai-hint" }); }

@@ -1,15 +1,23 @@
-import { type App, Modal, Notice } from "obsidian";
+import { type App, Modal, Notice, setIcon, setTooltip } from "obsidian";
 import type { Diagnostics } from "./diagnostics";
 
 type DiagnosticSelection = { id?: string; conversation?: string; turn?: string };
 const names = { assistant: "AI task", conversation_sync: "Conversation sync", calendar: "Yoofloe Calendar", chronohud: "ChronoHUD" };
+
+export function addCopyLogsButton(parent: HTMLElement, app: App, diagnostics: Diagnostics, selection: DiagnosticSelection): void {
+  const label = "Copy logs";
+  const button = parent.createEl("button", { cls: "clickable-icon y-ai-copy-diagnostics", attr: { type: "button", "aria-label": label } });
+  setIcon(button, "clipboard-copy");
+  setTooltip(button, label);
+  button.addEventListener("click", () => void copyDiagnostics(app, diagnostics, button.ownerDocument, selection));
+}
 
 export async function copyDiagnostics(app: App, diagnostics: Diagnostics, document: Document, selection: DiagnosticSelection): Promise<void> {
   const text = await diagnostics.copyReport(selection);
   if (!text) { new Notice("No diagnostic report is available for this selection on this device."); return; }
   try {
     await document.defaultView!.navigator.clipboard.writeText(text);
-    new Notice("Diagnostics copied.");
+    new Notice("Logs copied.");
   } catch {
     const modal = new Modal(app);
     modal.setTitle("Diagnostics");
@@ -43,8 +51,7 @@ export class RecentIssuesModal extends Modal {
       const issue = report.lastFailure;
       label.createDiv({ text: [new Date(report.startedAt).toLocaleString(), issue?.stage.replaceAll("_", " "),
         issue?.reason?.replaceAll("_", " ") ?? report.outcome].filter(Boolean).join(" · ") });
-      const copy = row.createEl("button", { text: "Copy diagnostics", attr: { type: "button" } });
-      copy.addEventListener("click", () => void copyDiagnostics(this.app, this.diagnostics, row.ownerDocument, { id: report.id }));
+      addCopyLogsButton(row, this.app, this.diagnostics, { id: report.id });
     }
   }
 
