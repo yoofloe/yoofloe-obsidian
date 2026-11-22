@@ -53,7 +53,7 @@ Drag across conversation text and right-click **Copy** for a partial selection. 
 and the message selection controls. Full and selected message copies load their saved original text, including older messages.
 The conversation shows user requests, assistant answers, actual confirmed operations, sources and returned files.
 
-Use **Copy diagnostics** in a task's activity details or the conversation menu for a timeline and a structured report.
+Use **Copy logs** in a task's activity details or the conversation menu for a timeline and a structured report.
 **Settings → Diagnostics → Recent issues** finds reports from interrupted tasks, vault sync, Calendar and ChronoHUD on this device.
 Reports keep the last verified step, observed request and reply status, saved changes and recovery actions.
 Reports are available for seven days in an encrypted device archive capped at 2 MiB. The copied report contains diagnostic metadata and anonymous note or file references.
