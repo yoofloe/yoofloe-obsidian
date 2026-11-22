@@ -175,6 +175,18 @@ export class YoofloeAiView extends ItemView {
   private button(el: HTMLElement, text: string, action: () => void, disabled = false, cls = ""): HTMLButtonElement {
     const b = el.createEl("button", { text, cls, attr: { type: "button" } }); b.disabled = disabled; b.addEventListener("click", action); return b;
   }
+  private settingSwitch(parent: HTMLElement, label: string, checked: boolean, canChange: boolean, change: (value: boolean) => void): HTMLButtonElement {
+    // Keep focus on the switch while a setting saves and the panel redraws.
+    const toggle = this.button(parent, "", () => { if (canChange) change(!checked); }, false, "y-ai-setting-switch");
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("aria-label", label);
+    toggle.setAttribute("aria-checked", String(checked));
+    toggle.setAttribute("aria-disabled", String(!canChange));
+    toggle.createSpan({ text: label, cls: "y-ai-setting-switch-label" });
+    toggle.createSpan({ cls: "y-ai-setting-switch-state", text: checked ? "On" : "Off", attr: { "aria-hidden": "true" } });
+    toggle.createSpan({ cls: "y-ai-setting-switch-track", attr: { "aria-hidden": "true" } });
+    return toggle;
+  }
   private toolbarButton(parent: HTMLElement, label: string, icon: string): HTMLButtonElement {
     const button = parent.createEl("button", { cls: "clickable-icon y-ai-tool-button", attr: { type: "button", "aria-label": label } });
     setIcon(button, icon);
@@ -208,6 +220,15 @@ export class YoofloeAiView extends ItemView {
       this.render();
     }
     this.contentEl.querySelector<HTMLButtonElement>(`[data-view-layout="${section}"]`)?.focus({ preventScroll: true });
+  }
+  private showResponseRecoverySettings(): void {
+    this.openDetails.add("privacy");
+    this.showLayout("settings");
+    const privacy = this.contentEl.querySelector<HTMLDetailsElement>("details[data-section=privacy]");
+    if (privacy) privacy.open = true;
+    const toggle = privacy?.querySelector<HTMLButtonElement>(".y-ai-response-recovery-switch");
+    toggle?.scrollIntoView({ block: "nearest" });
+    toggle?.focus({ preventScroll: true });
   }
   private tabId(section: ViewLayout): string { return `${this.settingsId}-tab-${section}`; }
   private viewTabs(parent: HTMLElement, chatId: string): void {
@@ -889,6 +910,18 @@ export class YoofloeAiView extends ItemView {
     const latest = w.chat.at(-1);
     return latest && (taskFailure(latest) === feedback || latest.fileWarnings?.includes(feedback)) ? "" : feedback;
   }
+  private renderResponseRecoveryHint(panel: HTMLElement): void {
+    const existing = panel.querySelector(".y-ai-response-recovery-hint");
+    if (this.libraryOpen || !this.settingsExpanded && this.chatQuery || !this.work.suggestResponseRecovery) {
+      existing?.remove();
+      return;
+    }
+    if (existing) return;
+    const hint = panel.createDiv({ cls: "y-ai-response-recovery-hint" });
+    panel.querySelector(".y-ai-status")?.after(hint);
+    hint.createEl("p", { cls: "y-ai-hint", text: "Turn on recovery for future interruptions. OpenAI temporarily stores requests and replies." });
+    this.button(hint, "Recovery settings", () => this.showResponseRecoverySettings());
+  }
   private refreshProgress(): void {
     this.stopOpeningChatFollow?.();
     const el = this.contentEl, w = this.work, messages = el.querySelector<HTMLElement>(".y-ai-transcript-content");
@@ -916,6 +949,8 @@ export class YoofloeAiView extends ItemView {
     const feedback = this.statusFeedback();
     const status = el.querySelector<HTMLElement>(".y-ai-status");
     if (status && status.textContent !== feedback) status.setText(feedback);
+    const recoveryPanel = this.settingsExpanded ? el.querySelector<HTMLElement>(".y-ai-scroll") : messages;
+    if (recoveryPanel) this.renderResponseRecoveryHint(recoveryPanel);
     const queue = el.querySelector<HTMLElement>(".y-ai-queue");
     if (queue) this.updateQueue(queue);
     this.refreshComposer();
@@ -1297,7 +1332,8 @@ export class YoofloeAiView extends ItemView {
     const promptSelection = differentConversation ? null : this.composerOptions.selectionForRedraw(".y-ai-primary-prompt");
     const followUpSelection = differentConversation ? null : this.composerOptions.selectionForRedraw(".y-ai-follow-up-input");
     const referenceFocused = activeField?.matches(".y-ai-reference-trigger") && el.contains(activeField);
-    const settingsFocus = activeField && el.querySelector(".y-ai-scroll")?.contains(activeField) && activeField.matches("input,textarea,select") ? activeField.getAttribute("aria-label") : null;
+    const settingsFields = "input,textarea,select,button[role=switch]";
+    const settingsFocus = activeField && el.querySelector(".y-ai-scroll")?.contains(activeField) && activeField.matches(settingsFields) ? activeField.getAttribute("aria-label") : null;
     const selectionStart = settingsFocus && "selectionStart" in activeField! ? (activeField as HTMLInputElement).selectionStart : null;
     const selectionEnd = settingsFocus && "selectionEnd" in activeField! ? (activeField as HTMLInputElement).selectionEnd : null;
     const oldSearch = el.querySelector<HTMLInputElement>(".y-ai-chat-search");
@@ -1393,12 +1429,13 @@ export class YoofloeAiView extends ItemView {
     const data = this.details(secondarySettings, "privacy", "Privacy and data use");
     this.settingSummary(data, "Privacy", "", "shield-check");
     if (w.supportsResponseRecovery) {
-      const label = data.createEl("label", { cls: "y-ai-context-toggle" });
-      const recovery = label.createEl("input", { attr: { type: "checkbox", "aria-label": "Recover interrupted responses" } });
-      recovery.checked = w.recoverResponses; recovery.disabled = w.settingsLocked;
-      label.createSpan({ text: "Recover interrupted responses" });
-      data.createEl("p", { cls: "y-ai-hint", text: "OpenAI temporarily stores request and response data. Continue checks the accepted response by ID. This setting applies on this device." });
-      recovery.addEventListener("change", () => w.setResponseRecovery(recovery.checked));
+      const recovery = this.settingSwitch(data, "Recover interrupted responses", w.recoverResponses, w.canChangeResponseRecovery,
+        enabled => w.setResponseRecovery(enabled));
+      recovery.classList.add("y-ai-response-recovery-switch");
+      const info = `${this.settingsId}-response-recovery-info`;
+      recovery.setAttribute("aria-describedby", info);
+      data.createEl("p", { cls: "y-ai-hint y-ai-response-recovery-info", attr: { id: info },
+        text: "Applies to new tasks on this device. OpenAI temporarily stores requests and replies for recovery." });
     }
     const diagnostics = w.diagnostics;
     if (diagnostics) {
@@ -1409,13 +1446,8 @@ export class YoofloeAiView extends ItemView {
     for (const text of [DATA_FLOW_NOTICE, LOCAL_DATA_NOTICE, OPENAI_DATA_NOTICE, CONTROL_NOTICE]) data.createEl("p", { text, cls: "y-ai-hint" });
     data.createEl("a", { text: "Privacy and local data controls ↗", href: PRIVACY_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
     data.createEl("p").createEl("a", { text: "OpenAI data policy ↗", href: OPENAI_DATA_URL, attr: { target: "_blank", rel: "noopener noreferrer" } });
-    const autoScrollLabel = scroll.createEl("label", { cls: "y-ai-context-toggle y-ai-auto-scroll" });
-    const autoScroll = autoScrollLabel.createEl("input", { attr: { type: "checkbox", "aria-label": "Auto-scroll while working" } });
-    autoScroll.checked = w.autoScrollChatChecked;
-    autoScroll.disabled = !w.canChangeAutoScrollChat;
-    autoScrollLabel.createSpan({ text: "Auto-scroll while working" });
-    autoScroll.addEventListener("change", () => {
-      void w.setAutoScrollChat(autoScroll.checked).catch(() => new Notice("The auto-scroll setting could not be saved on this device."));
+    this.settingSwitch(scroll, "Auto-scroll while working", w.autoScrollChatChecked, w.canChangeAutoScrollChat, enabled => {
+      void w.setAutoScrollChat(enabled).catch(() => new Notice("The auto-scroll setting could not be saved on this device."));
     });
     this.appContext(scroll);
     scroll.append(secondarySettings);
@@ -1430,6 +1462,7 @@ export class YoofloeAiView extends ItemView {
       const status = (this.settingsExpanded ? scroll : transcriptBody).createEl("p", { text: feedback, cls: this.settingsExpanded ? "y-ai-status y-ai-settings-status" : "y-ai-status", attr: { role: "status", "aria-live": "polite" } });
       if (this.settingsExpanded) scroll.prepend(status);
     }
+    this.renderResponseRecoveryHint(this.settingsExpanded ? scroll : transcriptBody);
     if (w.agent?.pendingTrash.length) {
       const trash = scroll.createDiv({ cls: "y-ai-card" }); trash.createEl("strong", { text: "Review before moving to trash" });
       for (const item of w.agent.pendingTrash) trash.createEl("p", { text: item.title });
@@ -1512,7 +1545,7 @@ export class YoofloeAiView extends ItemView {
     else if (!this.libraryOpen && this.chatQuery) messages.scrollTop = this.savedSearchScroll;
     this.watchChatScroll(messages, transcriptBody, jump, openAtLatest);
     if (settingsFocus && this.settingsExpanded) {
-      const replacement = Array.from(scroll.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")).find(field => field.getAttribute("aria-label") === settingsFocus);
+      const replacement = Array.from(scroll.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>(settingsFields)).find(field => field.getAttribute("aria-label") === settingsFocus);
       if (replacement && !replacement.disabled) { replacement.focus({ preventScroll: true }); if (selectionStart !== null && selectionEnd !== null && "setSelectionRange" in replacement) replacement.setSelectionRange(selectionStart, selectionEnd); }
     }
     if (!this.settingsExpanded && !this.libraryOpen) {

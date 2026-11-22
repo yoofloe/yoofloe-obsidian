@@ -227,6 +227,14 @@ export class AiWorkspace {
   get autoScrollChatChecked(): boolean { return this.pendingAutoScrollChat ?? this.autoScrollChat; }
   get canChangeAutoScrollChat(): boolean { return this.current && this.ready && !this.restoreFailed && this.pendingAutoScrollChat === null; }
   get supportsResponseRecovery(): boolean { return !!this.options.androidRecovery; }
+  get canChangeResponseRecovery(): boolean {
+    return this.supportsResponseRecovery && this.current && this.ready && !this.restoreFailed && !this.switchingConversation && !this.busy;
+  }
+  get suggestResponseRecovery(): boolean {
+    const reason = this.task?.connectionPauseReason;
+    return this.canChangeResponseRecovery && !this.recoverResponses && this.canContinue &&
+      (reason === "response_unconfirmed" || reason === "stream_incomplete" || reason === "connection_reset" || reason === "timeout" || reason === "aborted");
+  }
   get supportsCalendarChanges() { return !!this.options.calendarChange; }
   get diagnostics() { return this.options.diagnostics; }
   get canChangeReference() { return this.current && this.ready && !this.restoreFailed && !this.switchingConversation && !this.followUpSaving; }
@@ -471,7 +479,7 @@ export class AiWorkspace {
   }
   setResponseRecovery(enabled: boolean): void {
     const recovery = this.options.androidRecovery;
-    if (!recovery || !this.current || this.settingsLocked) return;
+    if (!recovery || !this.canChangeResponseRecovery) return;
     try {
       recovery.setEnabled(enabled);
       if (recovery.enabled() !== enabled) throw Error();
