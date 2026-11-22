@@ -1141,6 +1141,7 @@ export class AiWorkspace {
           await this.options.storage.saveChat?.(turn);
           if (!ownsTurn()) throw Error("The task changed.");
           await this.persist();
+          if (!ownsTurn()) throw Error("The task changed.");
         },
       } : {}),
       appVisible: this.options.appVisible, holdScreen: this.options.holdScreen, steerStatus: (note, status) => this.updateSteer(note, status),

@@ -210,6 +210,9 @@ export class AgentTask {
   dispose(): void {
     const pending = this.pendingResponse;
     this.preserveResponseOnUnload = !!pending && (pending.recorded || !!pending.recording);
+    if (pending && !pending.recorded && pending.recording) void pending.recording.catch(() => {
+      if (!pending.recorded && this.pendingResponse === pending) this.cancelResponse();
+    });
     this.stop(this.preserveResponseOnUnload); this.live?.close(); this.directLifetime?.abort();
   }
   confirmResponseSaved(id: string): void {
@@ -664,9 +667,10 @@ export class AgentTask {
     this.pendingResponse = undefined;
     this.lookupAbort?.abort();
     const info = { transport: "openai_background" as const, action: "stop", requestNumber: job.number };
-    const cancellation = this.rememberAcceptedResponse(job).catch(() => {
-      this.diagnostics?.event("conversation_save", "failed", { reason: "storage", requestNumber: job.number });
-    }).then(() => observeHttp(this.diagnostics, "response_cancel", info, job.cancel)).then(http => {
+    const cancellation = this.rememberAcceptedResponse(job)
+      .catch(() => this.rememberAcceptedResponse(job))
+      .catch(() => { this.diagnostics?.event("conversation_save", "failed", { reason: "storage", requestNumber: job.number }); })
+      .then(() => observeHttp(this.diagnostics, "response_cancel", info, job.cancel)).then(http => {
       if (http.status < 200 || http.status >= 300) throw Error("Cancellation is unconfirmed.");
       const { status } = backgroundEnvelope(http.text, job.id);
       if (status !== "cancelled" && status !== "failed") throw Error("Cancellation is unconfirmed.");

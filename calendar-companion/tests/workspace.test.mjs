@@ -1505,9 +1505,16 @@ test('a receipt saved by the pause save survives closing the vault after a trans
 
 test('a late accepted response survives Stop when the service already completed it', async () => {
   const f = recoveryFixture(), sent = deferred(), delivered = deferred();
+  const save = f.options.storage.save;
+  let failed = false;
+  f.options.storage.save = async state => {
+    if (state.backgroundResponseReceipts?.length && !failed) { failed = true; throw Error('Transient storage error'); }
+    await save(state);
+  };
   f.options.transport = async req => { f.posts.push(req.method); sent.resolve(); return delivered.promise; };
   f.access.cancel = async id => {
     f.cancellations.push(id);
+    assert.equal(failed, true);
     assert.equal(f.saved().backgroundResponseReceipts[0].responseId, receiptId);
     return backgroundReply('completed', [...backgroundText('Late answer.'), ...backgroundCreate]);
   };
@@ -1543,4 +1550,20 @@ test('an active lookup that returns 404 keeps the same response reference and mo
   await f.work.continueTask();
   assert.equal(f.work.result, 'Retrieved.'); assert.equal(f.posts.length, 1);
   assert.deepEqual(f.lookups, [receiptId, receiptId]);
+});
+
+test('closing the workspace before the receipt can be saved never treats it as durable', { timeout: 5000 }, async () => {
+  const f = recoveryFixture(), saving = deferred(), releaseSave = deferred(), cancelled = deferred();
+  f.options.storage.saveChat = async () => { saving.resolve(); await releaseSave.promise; };
+  f.access.cancel = async id => { f.cancellations.push(id); cancelled.resolve(); return backgroundReply('cancelled'); };
+  await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.work.setPrompt('Wait for the device save.');
+  const run = f.work.run();
+  await saving.promise;
+  f.work.dispose();
+  releaseSave.resolve();
+  await cancelled.promise; await run;
+  assert.deepEqual(f.cancellations, [receiptId]);
+  assert.equal(f.saved().backgroundResponseReceipts, undefined);
+  assert.equal(f.posts.length, 1); assert.equal(f.lookups.length, 0);
 });
