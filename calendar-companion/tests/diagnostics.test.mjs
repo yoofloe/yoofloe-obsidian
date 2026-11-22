@@ -213,6 +213,43 @@ test('automatic compaction of a large input keeps tool results and logs the redu
   diagnostics.dispose();
 });
 
+test('diagnostics distinguish a missing compaction item from one rejected by local validation', async () => {
+  const invalid = { type: 'compaction', encrypted_content: '<private malformed item>' };
+  const valid = { type: 'compaction', id: 'cmp_ambiguous', encrypted_content: 'opaque-ambiguous-index' };
+  const oversized = { type: 'compaction', id: 'cmp_large', encrypted_content: 'x'.repeat(513 * 1024) };
+  for (const [compaction, reason, streamed, conflicting] of [[null, 'compaction_not_returned'],
+    [invalid, 'response_invalid'], [invalid, 'response_invalid', true], [valid, 'response_invalid', true, true],
+    [oversized, 'stream_item_not_checked', true]]) {
+    const { diagnostics } = diagnosticFixture();
+    const run = diagnostics.start('assistant', 'inbox');
+    const message = { type: 'message', id: 'msg_terminal', role: 'assistant', content: [{ type: 'output_text', text: 'Result.' }] };
+    const output = [message];
+    if (compaction && !streamed) output.unshift(compaction);
+    const completed = { status: 'completed', output, usage: { input_tokens: 34719 } };
+    const encodeEvent = (type, data) => 'event: ' + type + '\ndata: ' + JSON.stringify({ type, ...data }) + '\n\n';
+    const prefix = conflicting ? encodeEvent('response.output_item.added', { output_index: 0, item: compaction }) +
+      encodeEvent('response.output_item.added', { output_index: 2, item: message }) : '';
+    const body = streamed
+      ? prefix + encodeEvent('response.output_item.done', { output_index: 1, item: compaction }) + encodeEvent('response.completed', { response: completed })
+      : JSON.stringify(completed);
+    const task = new AgentTask({ current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false },
+      streamResponses: streamed, diagnostics: run, executor: { execute: async () => assert.fail('No tool requested') },
+      transport: async () => ({ status: 200, text: body }),
+    });
+    await task.run('Read', { model: 'gpt-6.2-sol' }, 'ask', 'none', undefined, undefined, { autoCompact: true, items: [] });
+    run.finish('completed','none');
+    const copied = await diagnostics.copyReport({ id: run.id });
+    const report = exportedReport(copied);
+    assert.equal(report.lastFailure.reason, reason);
+    assert.equal(report.lastFailure.inputTokens, 34719);
+    assert.equal(report.lastFailure.thresholdTokens, 32000);
+    assert.doesNotMatch(copied, /private malformed item|opaque-ambiguous-index/);
+    assert.equal(task.compaction, null);
+    assert.equal(task.state, 'completed');
+    await diagnostics.dispose();
+  }
+});
+
 test('an HTTP 200 with an incomplete Android stream is distinguished from an unobserved response', async () => {
   const { diagnostics } = diagnosticFixture();
   const run = diagnostics.start('assistant', 'inbox');

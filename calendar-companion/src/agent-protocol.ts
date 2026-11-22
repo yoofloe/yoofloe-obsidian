@@ -6,7 +6,7 @@ import type { PendingGeneratedFile } from "./generated-files";
 import { readCompaction } from "./conversation-context";
 import { workText } from "./work-activity";
 export interface AgentCall { id: string; name: string; arguments: string }
-export interface AgentReply { output: Record<string, unknown>[]; calls: AgentCall[]; text: string; summaries: string[]; incomplete: boolean; sources: WebSource[]; citations: WebSource[]; generated: PendingGeneratedFile[]; online: OnlineUsage; usage: { input: number; output: number; reasoning: number } }
+export interface AgentReply { output: Record<string, unknown>[]; calls: AgentCall[]; text: string; summaries: string[]; incomplete: boolean; compactionReported: boolean; streamItemSkipped?: boolean; sources: WebSource[]; citations: WebSource[]; generated: PendingGeneratedFile[]; online: OnlineUsage; usage: { input: number; output: number; reasoning: number } }
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const num = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0 ? v as number : 0;
 export function parseAgentReply(status: number, raw: string, superseded = false): AgentReply {
@@ -70,7 +70,7 @@ export function parseAgentReply(status: number, raw: string, superseded = false)
     return ["message", "reasoning", "function_call", "web_search_call", "code_interpreter_call", "image_generation_call"].includes(String(item.type))
       ? [item.type === "image_generation_call" ? { ...item, result: null } : item] : [];
   });
-  return { output: replay, calls,
+  return { output: replay, calls, compactionReported: output.some(item => item.type === "compaction"),
     text: texts.length ? withSources(texts.join("\n\n"), cited) : "", summaries, incomplete: data.status === "incomplete", sources, citations: cited, generated: [...generated.values()], online,
     usage: { input: num(usage.input_tokens), output: num(usage.output_tokens), reasoning: num(details.reasoning_tokens) } };
 }

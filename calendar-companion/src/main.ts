@@ -10,6 +10,7 @@ import { ChronoHudLookupSession } from "./chronohud-lookup-session";
 import { CHRONOHUD_ACTION, CHRONOHUD_INBOX } from "./chronohud-protocol";
 import { AiPreferences, localSecretBinding } from "./ai-preferences";
 import { OPENAI_ADAPTER } from "./openai";
+import { holdRequestScreen } from "./openai-request";
 import { AiSession } from "./ai-session";
 import { AiSettingsModal, type AiContext } from "./ai-modals";
 import { AiWorkspace, type WorkspaceSource } from "./workspace";
@@ -394,7 +395,11 @@ export default class YoofloeAiPlugin extends Plugin {
     });
     this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
       ...(Platform.isDesktopApp ? { liveResponse: openDesktopResponse } : {}),
-      streamResponses: Platform.isAndroidApp,
+      ...(Platform.isAndroidApp ? {
+        streamResponses: true,
+        appVisible: () => document.visibilityState === "visible",
+        holdScreen: () => holdRequestScreen(viewWindow.navigator.wakeLock),
+      } : {}),
       generated: generatedStore({ ...localFiles, download: provider.download }),
       attachments: attachmentStore({
         configDir: owner.configDir, exists: path => Promise.resolve(path === root + "/attachments"),
