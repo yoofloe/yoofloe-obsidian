@@ -1,3 +1,4 @@
+import { OpenAiStreamLimitError } from "./openai-stream";
 import { networkErrorCodes, type DiagnosticDetail, type DiagnosticRun, type DiagnosticStage, type DiagnosticReason } from "./diagnostics";
 
 function fields(error: unknown): Record<string, unknown> {
@@ -15,14 +16,15 @@ const aliases: readonly [RegExp, NonNullable<DiagnosticDetail["errorCode"]>][] =
   [/\b(?:SSLHandshakeException|ERR_SSL_[A-Z_]+)\b/i, "TLS_HANDSHAKE"],
   [/\b(?:SSLPeerUnverifiedException|ERR_CERT_[A-Z_]+|certificate verify failed)\b/i, "TLS_CERTIFICATE"],
   [/\b(?:AbortError|cancelled|canceled)\b/i, "ABORTED"],
-  [/\b(?:connection reset|broken pipe|unexpected end of stream)\b/i, "ECONNRESET"],
+  [/\b(?:EOFException|unexpected end of stream)\b/i, "UNEXPECTED_EOF"],
+  [/\b(?:connection reset|broken pipe)\b/i, "ECONNRESET"],
   [/\bnetwork is unreachable\b/i, "ENETUNREACH"],
   [/\bconnection refused\b/i, "ECONNREFUSED"],
 ];
 const reasonByCode: Record<NonNullable<DiagnosticDetail["errorCode"]>, DiagnosticReason> = {
   UNKNOWN_HOST: "dns", ENOTFOUND: "dns", EAI_AGAIN: "dns", ERR_NAME_NOT_RESOLVED: "dns",
   ETIMEDOUT: "timeout", ESOCKETTIMEDOUT: "timeout", ERR_TIMED_OUT: "timeout", ERR_CONNECTION_TIMED_OUT: "timeout", SOCKET_TIMEOUT: "timeout",
-  TLS_HANDSHAKE: "tls", TLS_CERTIFICATE: "tls", ECONNREFUSED: "unreachable", ENETUNREACH: "unreachable", EHOSTUNREACH: "unreachable",
+  UNEXPECTED_EOF: "stream_incomplete", TLS_HANDSHAKE: "tls", TLS_CERTIFICATE: "tls", ECONNREFUSED: "unreachable", ENETUNREACH: "unreachable", EHOSTUNREACH: "unreachable",
   ERR_CONNECTION_REFUSED: "unreachable", ERR_ADDRESS_UNREACHABLE: "unreachable", ERR_INTERNET_DISCONNECTED: "offline",
   ECONNRESET: "connection_reset", EPIPE: "connection_reset", ERR_CONNECTION_RESET: "connection_reset",
   ERR_CONNECTION_ABORTED: "connection_reset", ERR_CONNECTION_CLOSED: "connection_reset", ERR_NETWORK_CHANGED: "connection_reset",
@@ -31,6 +33,7 @@ const reasonByCode: Record<NonNullable<DiagnosticDetail["errorCode"]>, Diagnosti
 
 /** Read known error shapes privately. Only fixed codes and numeric status leave this function. */
 export function diagnoseTransport(error: unknown): DiagnosticDetail {
+  if (error instanceof OpenAiStreamLimitError) return { reason: "response_invalid", evidence: "runtime_error" };
   try {
     let current = error, observed: DiagnosticDetail | undefined;
     for (let depth = 0; depth < 4 && current; depth++) {
@@ -83,7 +86,7 @@ export async function observeHttp<T extends { status: number; headers?: Readonly
     return response;
   } catch (error) {
     const diagnosis = diagnoseTransport(error);
-    const httpUnconfirmed = info.transport === "obsidian_http_stream" &&
+    const httpUnconfirmed = (info.transport === "obsidian_http_stream" || info.transport === "android_webview_stream" || info.transport === "openai_background") &&
       (diagnosis.reason === "unknown" || diagnosis.reason === "response_unconfirmed");
     const after = run.sampleDevice();
     const appHiddenDuringRequest = stage === "model_request" && (before?.visible === false || after?.visible === false ||

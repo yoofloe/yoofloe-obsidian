@@ -31,9 +31,13 @@ ends continuation without sending another request. Continuation is available whi
 closing/restarting the app keeps saved answers and completed changes but does not automatically resume requests.
 If an OpenAI host lookup failure pauses the task, restore the connection and choose **Continue** in that vault session.
 On Android, long OpenAI replies use an HTTP stream. The plugin waits for the final response before executing any returned note edits.
-When supported by the device, Yoofloe keeps the screen awake during the model request. It pauses before sending the next request if Obsidian is hidden.
+On supported Android WebViews, Yoofloe reads the final event directly from OpenAI as it arrives.
+The screen can stay awake during preparation, input checks and generation. If Obsidian is hidden before generation, the task pauses.
+Continue reuses a verified input count when the prepared request is identical.
 If the Android transport fails before returning a usable response, keep Obsidian visible and choose **Continue** to send a new request from the last confirmed step in the same vault session.
 The earlier request still counts toward the total and may incur charges. With a finite hosted-tool limit, an unconfirmed request that included hosted tools pauses those tools for the task.
+
+Android users can opt in to **Settings → Privacy → Recover interrupted responses** on this device. OpenAI temporarily stores request and response data for retrieval. Once OpenAI returns a response ID, **Continue** checks that same response, including at the task's request limit. The device saves the ID in its encrypted conversation state. After reopening Obsidian, **Retrieve saved response** checks the result for the original message. File actions from a closed session require a new task. [OpenAI background mode](https://developers.openai.com/api/docs/guides/background)
 
 Opening the first note connects it to a conversation that has no note, even when an earlier answer or unsent draft is present.
 Once a note is connected, browsing another note offers **Use opened note** above the conversation; it never silently switches the active task.
@@ -167,8 +171,7 @@ No plugin output-token cap is sent. OpenAI's own limits still apply.
 
 ### Recovery and continued work
 
-Hiding the workspace keeps the task running and retains its answer. **Stop** prevents future requests and file actions;
-it cannot recall an in-flight request or its charges. Its returned text is retained.
+Hiding the workspace panel keeps the task running. **Stop** prevents further model requests and file actions. With Android response recovery enabled, Stop also requests cancellation of an accepted background response. OpenAI may charge for processing already performed.
 Drafts, the latest result, and bounded previous answers are saved locally in the plugin's configuration folder.
 A new task keeps up to two bounded prior turns as context. Opening another note does not silently retarget a task.
 

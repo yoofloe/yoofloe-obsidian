@@ -1,5 +1,6 @@
 import { AgentTask, AGENT_INSTRUCTION, type AgentExecutor, type CalendarDraftTool, type SteerStatus } from "./agent-task";
 import { agentFileAt, VaultAgent, type AgentHost, type WorkJournal } from "./vault-agent";
+import { observeHttp } from "./diagnostic-network";
 import { diagnoseLocal, type DiagnosticRun, type Diagnostics } from "./diagnostics";
 import { allowedPath, validTaskPath, containsCredential, safeOutbound, vaultPath, type TaskPolicy, type WorkMode, type WorkScope, type WriteScope } from "./agent-policy";
 import type { AiPreferences } from "./ai-preferences";
@@ -17,13 +18,15 @@ import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_MIB, PASTED_TEXT_
 
 import { FOLLOW_UP_LIMIT, FOLLOW_UP_TEXT_LIMIT, followUpMode, readFollowUpContext, readFollowUps, type FollowUp, type FollowUpAccess, type FollowUpMode, type FollowUpContext } from "./follow-ups";
 import type { OpenLiveResponse } from "./responses-socket";
+import type { AndroidModelStream } from "./android-model-stream";
 import type { SteerNote } from "./work-activity";
 import { conversationName, newConversationRecord, readLibrary, turnConversation, MAX_CONVERSATIONS, MAX_FOLDERS, type Conversation, type ConversationLibrary } from "./conversation-library";
 import { conversationContext, readCheckpoint, validContextScope, type ConversationCheckpoint } from "./conversation-context";
 import { findOpenAiModel } from "./openai-models";
 import { captureSelectionReference, readSelectionReference, sameReference, selectionText, type ReferenceSnapshot, type SelectionReference } from "./selection-reference";
 import { estimateInput, type InputBudget } from "./input-budget";
-import { agentTools } from "./agent-protocol";
+import { agentTools, parseAgentReply } from "./agent-protocol";
+import { backgroundEnvelope, isBackgroundPending, readResponseReceipts, type AndroidRecovery, type SavedResponseReceipt } from "./background-response";
 import { CalendarChangeController } from "./calendar-change-controller";
 import type { CalendarChangeSession } from "./calendar-change-session";
 import { CALENDAR_DRAFT_TOOL, prepareCalendarChangeDraft } from "./calendar-change-draft";
@@ -63,6 +66,8 @@ export class AiWorkspace {
   prompt = "";
   library = readLibrary(null);
   autoCompact = true;
+  recoverResponses = false;
+  private responseReceipts: SavedResponseReceipt[] = [];
   autoScrollChat = true;
   private pendingAutoScrollChat: boolean | null = null;
   librarySaving = false;
@@ -145,7 +150,7 @@ export class AiWorkspace {
   readonly workspaceCalendarChanges: CalendarChangeController<CalendarWorkspaceChangeDraft, CalendarWorkspaceChangeReply>;
   constructor(private readonly options: {
     current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; generated?: GeneratedStore; attachments?: AttachmentStore;
-    appVisible?: () => boolean; holdScreen?: () => (() => void) | undefined;
+    appVisible?: () => boolean; holdScreen?: () => (() => void) | undefined; directStream?: AndroidModelStream; androidRecovery?: AndroidRecovery;
     streamResponses?: boolean; gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; sharing?: SharedConversations; calendar?: () => CalendarSession;
     diagnostics?: Diagnostics;
     calendarChange?: () => CalendarChangeSession; inboxHint(): string;
@@ -221,6 +226,7 @@ export class AiWorkspace {
   get settingsLocked() { return this.switchingConversation || !this.ready || this.restoreFailed || this.busy || this.canContinue || this.addingAttachments || this.calendarChanges.busy || this.workspaceCalendar?.busy === true || this.chronoHud?.busy === true || this.workspaceCalendarChanges.busy; }
   get autoScrollChatChecked(): boolean { return this.pendingAutoScrollChat ?? this.autoScrollChat; }
   get canChangeAutoScrollChat(): boolean { return this.current && this.ready && !this.restoreFailed && this.pendingAutoScrollChat === null; }
+  get supportsResponseRecovery(): boolean { return !!this.options.androidRecovery; }
   get supportsCalendarChanges() { return !!this.options.calendarChange; }
   get diagnostics() { return this.options.diagnostics; }
   get canChangeReference() { return this.current && this.ready && !this.restoreFailed && !this.switchingConversation && !this.followUpSaving; }
@@ -237,7 +243,7 @@ export class AiWorkspace {
     if (this.customMaximum !== null && customRequestLimit(this.customMaximum) === null) return "Enter a positive whole number, or choose no request-count limit.";
     try { requestLimit(this.maximum); return ""; } catch { return "Choose a positive whole number or no request-count limit."; }
   }
-  get canResumeWithLimit() { return this.canContinue && !this.limitProblem && (this.maximum === "none" || this.maximum > (this.task?.requests ?? 0)); }
+  get canResumeWithLimit() { return this.canContinue && !this.limitProblem && (this.task?.hasPendingResponse || this.maximum === "none" || this.maximum > (this.task?.requests ?? 0)); }
   get calendarDraftActive(): boolean {
     return this.calendarChanges.enabled || this.workspaceCalendarChanges.enabled || !!this.task?.draftingCalendar && (this.busy || this.canContinue);
   }
@@ -260,6 +266,7 @@ export class AiWorkspace {
   }
   private async load(): Promise<void> {
     if (this.ready) return;
+    try { this.recoverResponses = this.options.androidRecovery?.enabled() === true; } catch { this.recoverResponses = false; }
     try {
       const raw = await this.options.storage.load(); if (!this.current) return;
       if (raw !== null && raw !== undefined && (typeof raw !== "object" || Array.isArray(raw))) throw Error("Invalid saved workspace");
@@ -363,6 +370,7 @@ export class AiWorkspace {
   }
   private async applyConversation(saved: Record<string, unknown>, id = this.library.active): Promise<void> {
     this.userDirections = readUserDirections(saved.userDirections);
+    this.responseReceipts = readResponseReceipts(saved.backgroundResponseReceipts);
     await this.calendarChanges.restore(saved.calendarChange);
     await this.workspaceCalendarChanges.restore(saved.workspaceCalendarChange);
     await this.workspaceCalendar?.clear(true);
@@ -414,7 +422,8 @@ export class AiWorkspace {
         this.task.sources = sourceList(summary.sources); this.task.citedSources = sourceList(summary.citedSources); this.task.generated = readGeneratedFiles(summary.generated);
         if (typeof summary.transcriptions === "number" && Number.isSafeInteger(summary.transcriptions) && summary.transcriptions >= 0) this.task.transcriptions = summary.transcriptions;
         if (summary.online && typeof summary.online === "object") for (const key of ["search", "analysis", "image"] as const) { const value = (summary.online as Record<string, unknown>)[key]; if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) this.task.online[key] = value; }
-        if (summary.state === "paused" || summary.state === "running") this.message = "The previous task ended when the vault session closed. Saved answers and completed changes are kept. Start a focused follow-up; no request resumed automatically.";
+        if (summary.state === "paused" || summary.state === "running") this.message = this.responseReceipts.length ?
+          "Open the original message and choose Retrieve saved response to check its result." : "The previous task ended when the vault session closed. Saved answers and completed changes are kept. Start a focused follow-up; no request resumed automatically.";
       }
     }
     if (Array.isArray(saved.chat)) this.chat = saved.chat.map(readChat).filter((turn): turn is ChatTurn => !!turn && turnConversation(turn.conversationId) === id).slice(-CHAT_HISTORY_LIMIT).map(turn => ({ ...turn, status: turn.status === "running" || turn.status === "paused" ? "stopped" : turn.status }));
@@ -434,6 +443,7 @@ export class AiWorkspace {
   private conversationState(): Record<string, unknown> {
     return {
       ...(this.userDirections.length ? { userDirections: this.userDirections } : {}),
+      ...(this.responseReceipts.length ? { backgroundResponseReceipts: [...this.responseReceipts] } : {}),
       ...(this.calendarChanges.state ? { calendarChange: this.calendarChanges.state } : {}),
       ...(this.workspaceCalendarChanges.state ? { workspaceCalendarChange: this.workspaceCalendarChanges.state } : {}),
       prompt: this.prompt, lastRequest: this.lastRequest, source: this.source?.path ?? null,
@@ -458,6 +468,16 @@ export class AiWorkspace {
   private touchConversation(name: string): void {
     this.library = { ...this.library, conversations: this.library.conversations.map(item =>
       item.id === this.library.active ? { ...item, name: item.name || name, updatedAt: Date.now() } : item) };
+  }
+  setResponseRecovery(enabled: boolean): void {
+    const recovery = this.options.androidRecovery;
+    if (!recovery || !this.current || this.settingsLocked) return;
+    try {
+      recovery.setEnabled(enabled);
+      if (recovery.enabled() !== enabled) throw Error();
+      this.recoverResponses = enabled;
+    } catch { this.recoverResponses = false; this.message = "Response recovery is off in this session. The device setting could not be saved."; }
+    this.changed();
   }
   setAutoCompact(enabled: boolean): void {
     if (this.settingsLocked || !this.current) return;
@@ -1108,8 +1128,20 @@ export class AiWorkspace {
       configDir: this.options.configDir, excluded };
   }
   private createTask(executor: AgentExecutor, current = () => this.current, writeScope = this.writeScope, attachments: Attachment[] = [], pastedTextIsRequest = false, calendarDraft?: CalendarDraftTool, diagnostics?: DiagnosticRun): AgentTask {
+    const conversation = this.library.active;
     return new AgentTask({ current, preserve: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate, generated: this.options.generated, writeScope,
-      liveResponse: this.options.liveResponse, streamResponses: this.options.streamResponses,
+      liveResponse: this.options.liveResponse, streamResponses: this.options.streamResponses, directStream: this.options.directStream,
+      ...(this.recoverResponses && this.options.androidRecovery ? {
+        background: this.options.androidRecovery.access,
+        rememberResponse: async (responseId: string, requestNumber: number) => {
+          const turnId = this.activeChatId, turn = this.chat.find(item => item.id === turnId);
+          if (!current() || this.library.active !== conversation || !turnId || !turn) throw Error("The task changed.");
+          this.responseReceipts = [...this.responseReceipts.filter(item => item.turnId !== turnId), { turnId, responseId, requestNumber }];
+          await this.options.storage.saveChat?.(turn);
+          await this.persist();
+          if (!current() || this.library.active !== conversation || this.activeChatId !== turnId) throw Error("The task changed.");
+        },
+      } : {}),
       appVisible: this.options.appVisible, holdScreen: this.options.holdScreen, steerStatus: (note, status) => this.updateSteer(note, status),
        attachmentStore: this.options.attachments, countTokens: this.options.countTokens, calendarDraft, diagnostics,
        ...(attachments.length && this.options.attachments ? { attachments: this.options.attachments.forTask(attachments, pastedTextIsRequest, diagnostics) } : {}) });
@@ -1622,14 +1654,14 @@ export class AiWorkspace {
       }
       this.changed();
       if (task?.state === "stopped" && task.cleanupPending) await this.saveStoppedTask(task);
-      else await this.persist();
+      else await this.persistResolvedResponse(task);
       diagnostic?.event("conversation_save", "ok");
       if (!paused) {
         const turn = this.chat.find(item => item.id === this.activeChatId);
         if (turn && (turn.status === "completed" || turn.status === "stopped" || turn.status === "failed"))
           await this.publishChange(this.activeConversation, [turn]);
       }
-      if (paused) diagnostic?.finish("paused", this.canResumeWithLimit ? "continue" : "raise_limit", {
+      if (paused) diagnostic?.finish("paused", task?.hasPendingResponse ? "check_response" : this.canResumeWithLimit ? "continue" : "raise_limit", {
         requestNumber: task?.requests || undefined,
         reason: task?.connectionPauseReason ?? (task?.pausedForInput ? "input_budget" : "request_limit"),
       });
@@ -1638,7 +1670,8 @@ export class AiWorkspace {
       return completed;
     } catch {
       diagnostic?.event("conversation_save", "failed", { reason: "storage" });
-      diagnostic?.finish(paused ? "paused" : "unconfirmed", paused && this.canResumeWithLimit ? "continue" : paused ? "raise_limit" : "review");
+      diagnostic?.finish(paused ? "paused" : "unconfirmed", paused && task?.hasPendingResponse ? "check_response" :
+        paused && this.canResumeWithLimit ? "continue" : paused ? "raise_limit" : "review");
       if (completed && entry) this.followUps = [{ ...entry, status: "review" }, ...this.followUps];
       this.holdQueue("Local saving could not be confirmed. Review the queue before sending again.");
       this.message += " Local saving could not be confirmed.";
@@ -1649,6 +1682,77 @@ export class AiWorkspace {
       this.busy = false; this.changed();
     }
   }
+  private async persistResolvedResponse(task: AgentTask | null): Promise<void> {
+    const before = this.responseReceipts;
+    if (task?.resolvedResponseId) this.responseReceipts = before.filter(item =>
+      item.turnId !== this.activeChatId || item.responseId !== task.resolvedResponseId);
+    try { await this.persist(); } catch (error) { this.responseReceipts = before; throw error; }
+  }
+
+  hasSavedResponse(turnId: string, conversation: string): boolean {
+    return this.supportsResponseRecovery && conversation === this.library.active &&
+      !(turnId === this.activeChatId && (this.busy || this.canContinue)) && this.responseReceipts.some(item => item.turnId === turnId);
+  }
+  async retrieveSavedResponse(turnId: string, conversation: string): Promise<void> {
+    const access = this.options.androidRecovery?.access;
+    const receipt = this.responseReceipts.find(item => item.turnId === turnId);
+    if (!access || !receipt || !this.current || this.settingsLocked || conversation !== this.library.active) return;
+    this.busy = true; this.changed();
+    const current = () => this.current && this.library.active === conversation && this.responseReceipts.includes(receipt);
+    const diagnostic = this.diagnostics?.start("assistant", conversation, { action: "status", transport: "openai_background" });
+    diagnostic?.relateTurn(turnId);
+    try {
+      const key = await this.options.preferences.key("openai");
+      if (!key || !current()) throw Error("The OpenAI key or device conversation is unavailable.");
+      const info = { requestNumber: receipt.requestNumber, transport: "openai_background" as const };
+      const http = await observeHttp(diagnostic, "response_lookup", info, () => access.retrieve(receipt.responseId, key));
+      if (!current()) return;
+      let recoveredTurn: ChatTurn | undefined;
+      let outcome: "completed" | "stopped" | "failed" = "stopped";
+      if (http.status === 404) {
+        this.message = "This response is unavailable with the current key. It may have expired.";
+        diagnostic?.finish("failed", "review"); return;
+      } else if (http.status === 410) {
+        this.message = "The saved OpenAI response has expired.";
+        outcome = "failed";
+      } else {
+        if (http.status < 200 || http.status >= 300) throw Error(`OpenAI returned HTTP ${http.status} during lookup.`);
+        const envelope = backgroundEnvelope(http.text, receipt.responseId);
+        if (isBackgroundPending(envelope.status)) {
+          this.message = "OpenAI is still working. Use Retrieve saved response to check again.";
+          diagnostic?.finish("waiting", "check_result"); return;
+        }
+        if (envelope.status === "completed" || envelope.status === "incomplete") {
+          const reply = parseAgentReply(http.status, http.text);
+          const turn = await this.fullChat(turnId, conversation);
+          if (!turn || !current()) throw Error("The original local message is unavailable.");
+          const append = reply.text && turn.answer && turn.answer !== reply.text && !turn.answer.endsWith("\n\n" + reply.text);
+          const answer = append ? turn.answer + "\n\n" + reply.text : turn.answer || reply.text;
+          const recovered: ChatTurn = { ...turn, status: "stopped", answer, pausedForConnection: undefined,
+            requests: Math.max(turn.requests, receipt.requestNumber) };
+          await this.options.storage.saveChat?.(recovered);
+          if (!current()) return;
+          this.chat = this.chat.map(item => item.id === turnId ? chatPreview(recovered) : item);
+          recoveredTurn = recovered;
+          this.message = reply.calls.length ? "Response retrieved. Review any remaining file actions in a new task." :
+            reply.incomplete ? "OpenAI returned a partial answer. It is saved in the local conversation." : "Response retrieved into the local conversation.";
+          outcome = "completed";
+        } else {
+          outcome = envelope.status === "cancelled" ? "stopped" : "failed";
+          this.message = outcome === "stopped" ? "OpenAI confirmed cancellation." : "OpenAI reported that the background request failed.";
+        }
+      }
+      this.responseReceipts = this.responseReceipts.filter(item => item !== receipt);
+      try { await this.persist(); } catch (error) { this.responseReceipts.push(receipt); throw error; }
+      if (recoveredTurn) await this.publishChange(this.activeConversation, [recoveredTurn]);
+      diagnostic?.finish(outcome, recoveredTurn ? "none" : "review");
+    } catch {
+      if (!this.current) return;
+      this.message = "The saved response could not be retrieved or saved. Check the same response again.";
+      diagnostic?.finish("unconfirmed", "check_result");
+    } finally { this.busy = false; this.changed(); }
+  }
+
   private watchTask(task: AgentTask): () => void {
     return task.subscribe(() => {
       if (this.agent) this.captureChat(task, this.agent);
@@ -1725,8 +1829,9 @@ export class AiWorkspace {
     if (this.busy || !this.canContinue || !this.task || !this.agent) return;
     if (!this.canResumeWithLimit) { this.message = this.limitProblem || "Choose a total limit above requests already used, or no request-count limit."; this.changed(); return; }
     const task = this.task, agent = this.agent;
-    task.diagnostics?.resume({ contextReused: true, requestNumber: task.requests + 1, requestLimit: this.maximum, evidence: "user_action" });
-    this.busy = true; this.running = true; this.stopRequested = false; this.message = "Continuing the original task with its original model and scopes."; this.changed();
+    task.diagnostics?.resume({ contextReused: true, requestNumber: task.hasPendingResponse ? task.requests : task.requests + 1, requestLimit: this.maximum, evidence: "user_action" });
+    this.busy = true; this.running = true; this.stopRequested = false;
+    this.message = task.hasPendingResponse ? "Checking the existing OpenAI response." : "Continuing the original task with its original model and scopes."; this.changed();
     const unsubscribe = this.watchTask(task);
     let completed = false;
     try {
@@ -1766,13 +1871,13 @@ export class AiWorkspace {
       if (this.agent) this.captureChat(task, this.agent);
       const turn = this.chat.find(item => item.id === this.activeChatId);
       this.changed("progress");
-      const [workspace] = await Promise.allSettled([this.persist(), turn && this.archiveChat(turn)]);
+      const [workspace] = await Promise.allSettled([this.persistResolvedResponse(task), turn && this.archiveChat(turn)]);
       if (workspace.status === "rejected") throw workspace.reason;
     };
     const pendingWarning = task.uploadCleanupWarning;
     const removeUploads = async () => {
       await task.cleanupFiles();
-      if (task.uploadCleanupWarning !== pendingWarning) await save();
+      if (task.uploadCleanupWarning !== pendingWarning || this.responseReceipts.some(item => item.responseId === task.resolvedResponseId)) await save();
     };
     try { await save(); }
     catch (error) {

@@ -71,11 +71,12 @@ test('Android reuses a finalized compaction item that is missing from the termin
 });
 
 test('Android holds the next model request while hidden and keeps the task available to continue', async () => {
- let visible=false, counts=0, requests=0;
+ let visible=false, counts=0, requests=0, held=false;
  const task=new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},streamResponses:true,
-  appVisible:()=>visible,
+  appVisible:()=>visible,holdScreen:()=>{assert.equal(held,false);held=true;return ()=>{held=false;};},
   executor:{execute:async()=>assert.fail('No tool request is expected')},
   countTokens:async()=>{
+   assert.equal(held,true, 'The screen lock also covers token counting');
    if(++counts===1) visible=false;
    return {status:200,text:JSON.stringify({object:'response.input_tokens',input_tokens:35000})};
   },
@@ -99,6 +100,32 @@ test('Android holds the next model request while hidden and keeps the task avail
  await task.resume(2);
  assert.equal(task.state,'completed');
  assert.equal(requests,1);
+ assert.equal(counts,1, 'Continue reuses the count for the identical unsent request');
+ assert.equal(held,false);
+});
+
+test('Android rechecks a paused count after an instruction change, a credential change or the upload expiry window', async t => {
+ let now=Date.now();
+ t.mock.method(Date,'now',()=>now);
+ for(const change of ['steer','credential','expired-file']) {
+  let visible=true, counts=0, key='sk-synthetic-agent-key', sent=0;
+  const attachments=change==='expired-file' ? {hasUploads:true,prepare:async()=>({parts:[{type:'input_image',file_id:'file-fixture'}],fileIds:['file-fixture']}),cleanup:async()=>true} : undefined;
+  const task=new AgentTask({current:()=>true,appVisible:()=>visible,key:async()=>key,gate:{busy:false},streamResponses:true,attachments,
+   countTokens:async()=>{if(++counts===1)visible=false;return {status:200,text:JSON.stringify({object:'response.input_tokens',input_tokens:35555})}},
+   executor:{execute:async()=>assert.fail('No tools expected')},
+   transport:async()=>{sent++;return stream({type:'response.completed',response:JSON.parse(reply([text('Done')]).text)})},
+  });
+  await task.run('Read',{model:'gpt-6.2-sol'},'ask',2,undefined,undefined,{autoCompact:true,items:[{role:'user',content:'Long test context '.repeat(7000)}]});
+  assert.equal(task.canResume,true);
+  if(change==='steer')assert(task.addSteer({id:crypto.randomUUID(),text:'Additional instruction',at:Date.now()}));
+  else if(change==='credential')key='sk-synthetic-replacement';
+  else now+=61*60*1000;
+  visible=true;
+  await task.resume(2);
+  assert.equal(sent,1);
+  assert.equal(counts,2,change);
+  assert.equal(task.state,'completed');
+ }
 });
 
 test('Android releases a screen lock when a request ends before the lock is acquired', async () => {
@@ -113,6 +140,24 @@ test('Android releases a screen lock when a request ends before the lock is acqu
  await new Promise(resolve=>setImmediate(resolve));
  release();
  assert.equal(releases,1);
+});
+
+test('a task screen lock follows visibility during preparation and releases on finish', async () => {
+ const owner=new EventTarget();owner.visibilityState='visible';
+ const locks=[];
+ const wakeLock={request:async()=>{const lock={released:false,release:async()=>{lock.released=true}};locks.push(lock);return lock}};
+ const release=holdRequestScreen(wakeLock,owner);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(locks.length,1);
+ owner.visibilityState='hidden';owner.dispatchEvent(new Event('visibilitychange'));
+ assert.equal(locks[0].released,true);
+ owner.visibilityState='visible';owner.dispatchEvent(new Event('visibilitychange'));
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(locks.length,2);
+ release();
+ owner.dispatchEvent(new Event('visibilitychange'));
+ assert.equal(locks[1].released,true);
+ assert.equal(locks.length,2);
 });
 
 test('Android keeps a confirmed incomplete answer and never executes a partial or cut-off tool', async () => {

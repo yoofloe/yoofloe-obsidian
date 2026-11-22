@@ -13,7 +13,7 @@ const decoder = new TextDecoder("utf-8", { fatal: true });
 
 const areas = ["assistant", "conversation_sync", "calendar", "chronohud"] as const;
 const stages = [
-  "start", "prepare", "context", "compaction", "input_tokens", "model_request", "stream", "provider_reply",
+  "start", "prepare", "context", "compaction", "input_tokens", "model_request", "stream", "provider_reply", "response_lookup", "response_cancel",
   "attachment_read", "upload", "transcription", "download", "delete_upload",
   "tool", "vault_write", "journal_save", "conversation_save", "undo",
   "continue", "queue", "steer", "stop", "finish", "session", "network", "visibility",
@@ -23,7 +23,7 @@ const stages = [
 const outcomes = ["started", "received", "ok", "failed", "waiting", "skipped", "paused", "stopped", "interrupted", "unconfirmed", "completed"] as const;
 const reasons = [
   "unknown", "dns", "tls", "timeout", "connection_reset", "offline", "unreachable", "aborted", "http",
-  "stream_incomplete", "response_invalid", "response_unconfirmed", "compaction_not_returned", "stream_item_not_checked", "input_budget", "request_limit", "missing_key", "scope", "app_hidden",
+  "stream_incomplete", "response_invalid", "response_unconfirmed", "response_pending", "compaction_not_returned", "stream_item_not_checked", "input_budget", "request_limit", "missing_key", "scope", "app_hidden",
   "tool_arguments", "note_reference_unavailable", "read_range",
   "version_conflict", "superseded", "already_executed", "storage", "vault_changed", "user_action",
   "no_verified_reply", "invalid_reply", "expired", "conflict", "not_found", "cancelled", "rejected",
@@ -36,11 +36,11 @@ const actions = [
   "create_note", "create_folder", "rename_note", "update_properties", "propose_trash", "save_generated_file",
   "draft_calendar_changes", "draft_calendar_workspace_changes", "edit", "create", "rename", "trash", "folder", "asset",
 ] as const;
-const transports = ["obsidian_http", "obsidian_http_stream", "responses_websocket", "fetch", "vault_files", "app_handoff"] as const;
+const transports = ["obsidian_http", "obsidian_http_stream", "android_webview_stream", "openai_background", "responses_websocket", "fetch", "vault_files", "app_handoff"] as const;
 const evidence = ["runtime_error", "http_response", "observation_unavailable", "verified_reply", "local_journal", "user_action"] as const;
 export const networkErrorCodes = [
   "UNKNOWN_HOST", "ENOTFOUND", "EAI_AGAIN", "ERR_NAME_NOT_RESOLVED", "ETIMEDOUT", "ESOCKETTIMEDOUT",
-  "ERR_TIMED_OUT", "ERR_CONNECTION_TIMED_OUT", "SOCKET_TIMEOUT", "TLS_HANDSHAKE", "TLS_CERTIFICATE",
+  "ERR_TIMED_OUT", "ERR_CONNECTION_TIMED_OUT", "SOCKET_TIMEOUT", "TLS_HANDSHAKE", "TLS_CERTIFICATE", "UNEXPECTED_EOF",
   "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ERR_CONNECTION_REFUSED", "ERR_ADDRESS_UNREACHABLE",
   "ERR_INTERNET_DISCONNECTED", "ECONNRESET", "EPIPE", "ERR_CONNECTION_RESET", "ERR_CONNECTION_ABORTED",
   "ERR_CONNECTION_CLOSED", "ERR_NETWORK_CHANGED", "ERR_ABORTED", "ECANCELED", "ABORTED",
@@ -104,7 +104,7 @@ export interface DiagnosticReport {
   updatedAt: number;
   environment: DiagnosticEnvironment;
   outcome: DiagnosticOutcome;
-  nextAction: "wait" | "continue" | "raise_limit" | "review" | "check_result" | "none";
+  nextAction: "wait" | "continue" | "check_response" | "raise_limit" | "review" | "check_result" | "none";
   events: DiagnosticEvent[];
   omitted: number;
   startEvent?: DiagnosticEvent;
@@ -131,7 +131,7 @@ export interface DiagnosticStorage {
 }
 
 const emptyChanges = (): ChangeSummary => ({ confirmed: 0, pending: 0, reverted: 0 });
-const nextActions = ["wait", "continue", "raise_limit", "review", "check_result", "none"] as const;
+const nextActions = ["wait", "continue", "check_response", "raise_limit", "review", "check_result", "none"] as const;
 const platforms = ["android", "ios", "windows", "macos", "linux", "other"] as const;
 const isIssue = (value: DiagnosticOutcome) => value === "failed" || value === "unconfirmed" || value === "interrupted" || value === "paused";
 const isActive = (value: DiagnosticOutcome) => value === "started" || value === "waiting";
@@ -446,6 +446,7 @@ const human = (value: string) => value.replaceAll("_", " ");
 const nextLabel: Record<DiagnosticReport["nextAction"], string> = {
   wait: "Wait for the running task or the app reply.",
   continue: "Use Continue in the same active task.",
+  check_response: "Choose Continue to retrieve the existing OpenAI response.",
   raise_limit: "Increase the total request limit, then use Continue in the same task.",
   review: "Review the task status and saved changes before sending again.",
   check_result: "Reopen the conversation or check the originating app for a saved result.",

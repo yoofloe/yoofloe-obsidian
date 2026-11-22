@@ -4,6 +4,7 @@ import { openAiErrorCodes, parseOpenAiDraft } from "./openai";
 import { emptyOnlineUsage, sourceList, sourceLink, publicUrl, withSources, type WebSource, type OnlineUsage } from "./research";
 import type { PendingGeneratedFile } from "./generated-files";
 import { readCompaction } from "./conversation-context";
+import { MAX_RESPONSE_BYTES } from "./openai-stream";
 import { workText } from "./work-activity";
 export interface AgentCall { id: string; name: string; arguments: string }
 export interface AgentReply { output: Record<string, unknown>[]; calls: AgentCall[]; text: string; summaries: string[]; incomplete: boolean; compactionReported: boolean; streamItemSkipped?: boolean; sources: WebSource[]; citations: WebSource[]; generated: PendingGeneratedFile[]; online: OnlineUsage; usage: { input: number; output: number; reasoning: number } }
@@ -11,7 +12,7 @@ const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "o
 const num = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0 ? v as number : 0;
 export function parseAgentReply(status: number, raw: string, superseded = false): AgentReply {
   if (status < 200 || status >= 300) { parseOpenAiDraft(status, raw, false); throw Error("OpenAI did not return a usable response."); }
-  if (new TextEncoder().encode(raw).length > 32 * 1024 * 1024) throw Error("The response is too large for this device.");
+  if (new TextEncoder().encode(raw).length > MAX_RESPONSE_BYTES) throw Error("The response is too large for this device.");
   let data: unknown;
   try { data = JSON.parse(raw); } catch { throw Error("OpenAI returned an unreadable response. No retry was made."); }
   if (obj(data) && data.status === "failed") {

@@ -18,6 +18,8 @@ test('transport observations keep the available evidence without copying excepti
     clientId, transport: 'obsidian_http_stream', prompt: 'private prompt' }, async () => { throw error; }), value => value === error);
   assert.deepEqual(diagnoseTransport({ message: 'Generic rejection', headers: { Authorization: 'secret' } }),
     { reason: 'unknown', evidence: 'observation_unavailable' });
+  assert.deepEqual(diagnoseTransport(Error('Request Failed. EOFException null')),
+    { reason: 'stream_incomplete', evidence: 'runtime_error', errorCode: 'UNEXPECTED_EOF' });
   assert.deepEqual(diagnoseTransport({ cause: { response: { status: 502 } } }),
     { reason: 'http', evidence: 'http_response', httpStatus: 502 });
   run.finish('paused', 'continue');

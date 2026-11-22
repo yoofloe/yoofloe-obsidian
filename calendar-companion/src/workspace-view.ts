@@ -530,6 +530,8 @@ export class YoofloeAiView extends ItemView {
     else if (!turn.actions.length && turn.status === "completed" && turn.actionsKnown) metadata.createEl("p", { text: "No file changes were recorded for this task.", cls: "y-ai-hint" });
     if (turn.answer) this.markdown(assistant, turn.answer, turn.sourcePath ?? "");
     if (turn.sources?.length) { const sources = this.details(assistant, "sources-" + turn.id, `Sources · ${turn.sources.length}`); for (const source of turn.sources) sources.createEl("p").createEl("a", { text: source.title || source.url, href: source.url, attr: { target: "_blank", rel: "noopener noreferrer" } }); }
+    const savedConversation = turnConversation(turn.conversationId);
+    if (w.hasSavedResponse(turn.id, savedConversation)) this.button(assistant, "Retrieve saved response", () => void w.retrieveSavedResponse(turn.id, savedConversation), w.settingsLocked);
     const failure = taskFailure(turn);
     if (failure) assistant.createEl("p", { text: failure, cls: "y-ai-task-error" });
     const warnings = new Set(turn.fileWarnings);
@@ -1337,7 +1339,7 @@ export class YoofloeAiView extends ItemView {
     const primarySettings = scroll.createDiv({ cls: "y-ai-settings-grid" }), secondarySettings = scroll.createDiv({ cls: "y-ai-settings-secondary" });
     if (w.canContinue) {
       const pause = scroll.createDiv({ cls: "y-ai-card" }); pause.createEl("strong", { text: `Paused · ${w.task?.requests ?? 0} request(s) used` });
-      pause.createEl("p", { text: `Continue with the original model (${w.task?.modelId ?? w.model.model}) and original data/change scopes. Earlier tool results and completed changes are reused, not replayed. Continuation is available while this vault session stays open.`, cls: "y-ai-hint" });
+      pause.createEl("p", { text: w.task?.hasPendingResponse ? "Choose Continue to check the accepted OpenAI response by ID. Checking its status uses no additional model request." : `Continue with the original model (${w.task?.modelId ?? w.model.model}) and original data/change scopes. Earlier tool results and completed changes are reused, not replayed. Continuation is available while this vault session stays open.`, cls: "y-ai-hint" });
       this.limitControl(pause); this.onlineLimitControl(pause); this.button(pause, "Finish here", () => void w.finishHere(), w.busy); this.button(pause, "New task", () => void w.newTask(), w.busy);
     }
     const scope = this.details(primarySettings, "scope", "Permissions");
@@ -1390,6 +1392,14 @@ export class YoofloeAiView extends ItemView {
     contextSettings.createEl("p", { cls: "y-ai-hint", text: `Supported models can compact the active context at ${AUTO_COMPACT_TOKENS.toLocaleString()} tokens. Full messages remain in the local conversation.` });
     const data = this.details(secondarySettings, "privacy", "Privacy and data use");
     this.settingSummary(data, "Privacy", "", "shield-check");
+    if (w.supportsResponseRecovery) {
+      const label = data.createEl("label", { cls: "y-ai-context-toggle" });
+      const recovery = label.createEl("input", { attr: { type: "checkbox", "aria-label": "Recover interrupted responses" } });
+      recovery.checked = w.recoverResponses; recovery.disabled = w.settingsLocked;
+      label.createSpan({ text: "Recover interrupted responses" });
+      data.createEl("p", { cls: "y-ai-hint", text: "OpenAI temporarily stores request and response data. Continue checks the accepted response by ID. This setting applies on this device." });
+      recovery.addEventListener("change", () => w.setResponseRecovery(recovery.checked));
+    }
     const diagnostics = w.diagnostics;
     if (diagnostics) {
       const section = this.details(secondarySettings, "diagnostics", "Diagnostics");

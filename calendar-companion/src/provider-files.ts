@@ -1,4 +1,4 @@
-import type { Attachment } from "./attachments";
+import { OPENAI_UPLOAD_EXPIRY_SECONDS, type Attachment } from "./attachments";
 import { MAX_GENERATED_BYTES } from "./generated-files";
 import type { DiagnosticFile, DiagnosticStage } from "./diagnostics";
 import { diagnoseTransport, observeHttp } from "./diagnostic-network";
@@ -62,7 +62,7 @@ export function providerFiles(request:FileHttp, stream?: FileDownload) {
       () => request(input), accepted);
   return {
     async upload(this: void, file:Attachment,data:ArrayBuffer,key:string,current:()=>boolean, diagnostics?: DiagnosticFile):Promise<string> {
-      const payload=await multipart(file,data,{purpose:file.kind==="image"?"vision":"user_data","expires_after[anchor]":"created_at","expires_after[seconds]":"3600"});
+      const payload=await multipart(file,data,{purpose:file.kind==="image"?"vision":"user_data","expires_after[anchor]":"created_at","expires_after[seconds]":String(OPENAI_UPLOAD_EXPIRY_SECONDS)});
       if(!current())throw Error("Stopped before uploading attachments.");
       const response=await observed("upload", {url:ROOT+"/files",method:"POST",headers:{Authorization:`Bearer ${key}`},...payload,throw:false}, diagnostics);check(response.status,"File upload");
       const id = verifyFileReply(diagnostics, "upload", response.status, () => {

@@ -1295,3 +1295,191 @@ for (const scope of ["folder", "vault"]) {
     assert.equal(f.work.chat.at(-1).sourcePath, "");
   });
 }
+
+const receiptId = 'resp_accepted_android_fixture';
+const backgroundReply = (status, output, id = receiptId) => ({
+  status: 200, text: JSON.stringify({ object: 'response', id, status, output }),
+});
+const backgroundText = text => [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }];
+const backgroundCreate = [{ type: 'function_call', name: 'create_note', call_id: 'save-once',
+  arguments: JSON.stringify({ path: 'Recovered.md', markdown: 'Recovered exactly once.' }) }];
+
+function recoveryFixture() {
+  const f = fixture(), turns = new Map(), posts = [], lookups = [], cancellations = [];
+  let enabled = false;
+  f.options.appVisible = () => true;
+  f.options.storage.saveChat = async turn => { turns.set(turn.id, structuredClone(turn)); };
+  f.options.storage.loadChat = async id => structuredClone(turns.get(id));
+  f.options.storage.load = async () => f.saved() ?? null;
+  f.options.androidRecovery = { enabled: () => enabled, setEnabled: value => { enabled = value; }, access: {
+    wait: async () => {},
+    retrieve: async id => { lookups.push(id); throw Error('Controlled interruption'); },
+    cancel: async id => { cancellations.push(id); return backgroundReply('cancelled'); },
+  } };
+  f.options.transport = async req => {
+    const body = JSON.parse(req.body); posts.push(body);
+    assert.equal(body.store, false);
+    if (body.background) {
+      assert.equal(body.stream, false);
+      return backgroundReply('queued');
+    }
+    return response(backgroundText('Regular mode.'));
+  };
+  return { ...f, turns, posts, lookups, cancellations, access: f.options.androidRecovery.access };
+}
+
+test('Android recovery is an explicit device preference and startup never looks up an answer', async () => {
+  const f = recoveryFixture();
+  await f.work.initialize();
+  assert.equal(f.work.recoverResponses, false);
+  f.work.setPrompt('Plain'); await f.work.run();
+  assert.equal(f.work.result, 'Regular mode.');
+  assert.equal(f.posts.length, 1);
+  assert.equal('background' in f.posts[0], false);
+  f.work.setResponseRecovery(true);
+  assert.equal(f.work.recoverResponses, true);
+  assert.equal('recoverResponses' in f.saved(), false);
+  const second = new AiWorkspace(f.options); await second.initialize();
+  assert.equal(second.recoverResponses, true);
+  second.setResponseRecovery(false);
+  assert.equal(f.options.androidRecovery.enabled(), false);
+  const other = new AiWorkspace({ ...f.options, androidRecovery: undefined });
+  await other.initialize(); assert.equal(other.supportsResponseRecovery, false);
+  assert.deepEqual(f.lookups, []); assert.equal(f.posts.length, 1);
+});
+
+test('Continue retrieves only the accepted ID at the request limit and applies a validated tool once', async () => {
+  const f = recoveryFixture();
+  const { diagnostics } = diagnosticFixture(); f.options.diagnostics = diagnostics;
+  await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.work.writeScope = 'new'; f.work.maximum = 1; f.work.setPrompt('Create the synthetic recovery note.');
+  await f.work.run();
+  const turn = f.work.chat.at(-1);
+  assert.deepEqual(f.saved().backgroundResponseReceipts, [{ turnId: turn.id, responseId: receiptId, requestNumber: 1 }]);
+  assert.equal(f.work.task.state, 'paused'); assert.equal(f.work.canResumeWithLimit, true);
+  assert.equal(exportedReport(await diagnostics.copyReport({ turn: turn.id })).nextAction, 'check_response');
+  assert.equal(f.lookups.length, 1);
+  const originalKey = f.options.preferences.key;
+  f.options.preferences.key = async () => 'sk-synthetic-other-agent-key';
+  await f.work.continueTask(); assert.equal(f.lookups.length, 1);
+  f.options.preferences.key = originalKey;
+  const gate = deferred(), entered = deferred();
+  f.access.retrieve = async id => { f.lookups.push(id); entered.resolve(); return gate.promise; };
+  const firstPlay = f.work.continueTask(); await entered.promise;
+  await f.work.continueTask();
+  gate.resolve(backgroundReply('completed', backgroundCreate, 'resp_other_job'));
+  await firstPlay;
+  assert.equal(f.files.size, 0); assert.equal(f.work.canResumeWithLimit, true);
+  f.access.retrieve = async id => { f.lookups.push(id); return backgroundReply('completed', []); };
+  await f.work.continueTask();
+  assert.equal(f.work.task.hasPendingResponse, true); assert.equal(f.files.size, 0);
+  f.access.retrieve = async id => { f.lookups.push(id); return backgroundReply('completed', backgroundCreate); };
+  await f.work.continueTask();
+  assert.equal(f.posts.length, 1); assert(f.lookups.every(id => id === receiptId));
+  assert.equal(f.files.get('Recovered.md')?.text, 'Recovered exactly once.');
+  assert.equal(f.work.task.requests, 1); assert.equal(f.work.canResumeWithLimit, false);
+  assert.equal(f.saved().backgroundResponseReceipts, undefined);
+  const log = await diagnostics.copyReport({ turn: turn.id });
+  assert.equal(log.includes(receiptId), false);
+  assert.equal(exportedReport(log).confirmedWriteSteps, 1);
+  assert.equal(exportedReport(log).automaticRetries, 0);
+  assert.equal(JSON.stringify([...f.turns.values()]).includes(receiptId), false);
+  await diagnostics.dispose();
+});
+
+test('after reopening, saved responses require an explicit lookup and can never replay old file actions', async () => {
+  const f = recoveryFixture(); await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.work.writeScope = 'new'; f.work.setPrompt('Create the synthetic recovery note.'); await f.work.run();
+  const { id, conversationId } = f.work.chat.at(-1);
+  // A confirmed answer from an earlier round belongs to the original saved turn.
+  const oldTurn = f.turns.get(id);
+  f.turns.set(id, { ...oldTurn, answer: 'Earlier confirmed text.' });
+  f.work.dispose();
+  const w = new AiWorkspace(f.options); await w.initialize();
+  assert.equal(w.hasSavedResponse(id, conversationId), true);
+  assert.deepEqual(f.cancellations, []); assert.deepEqual(f.lookups, [receiptId]);
+  await w.retrieveSavedResponse(id, 'unrelated'); assert.equal(f.lookups.length, 1);
+  f.access.retrieve = async asked => { f.lookups.push(asked); return backgroundReply('in_progress'); };
+  await w.retrieveSavedResponse(id, conversationId); assert.equal(w.hasSavedResponse(id, conversationId), true);
+  f.access.retrieve = async asked => { f.lookups.push(asked); return backgroundReply('completed', [...backgroundText('Saved answer.'), ...backgroundCreate]); };
+  await w.retrieveSavedResponse(id, conversationId); await w.retrieveSavedResponse(id, conversationId);
+  assert.deepEqual(f.lookups, [receiptId, receiptId, receiptId]);
+  assert.equal(f.posts.length, 1); assert.equal(f.files.size, 0);
+  assert.equal(f.turns.get(id).answer, 'Earlier confirmed text.\n\nSaved answer.'); assert.equal(f.turns.get(id).status, 'stopped');
+  assert.equal(w.hasSavedResponse(id, conversationId), false);
+  assert.equal(f.saved().backgroundResponseReceipts, undefined);
+});
+
+test('Finish requests cancellation once and keeps a retrievable receipt when the service already finished', async () => {
+  for (const cancelled of [true, false]) {
+    const f = recoveryFixture(); await f.work.initialize(); f.work.setResponseRecovery(true);
+    f.work.writeScope = 'new'; f.work.setPrompt('Create the synthetic recovery note.'); await f.work.run();
+    const { id, conversationId } = f.work.chat.at(-1);
+    f.access.cancel = async asked => { f.cancellations.push(asked); return backgroundReply(cancelled ? 'cancelled' : 'completed', backgroundCreate); };
+    assert(await f.work.finishHere());
+    assert.equal(f.posts.length, 1); assert.equal(f.files.size, 0);
+    assert.deepEqual(f.cancellations, [receiptId]);
+    assert.equal(f.work.hasSavedResponse(id, conversationId), !cancelled);
+    assert.equal(!!f.saved().backgroundResponseReceipts, !cancelled);
+  }
+});
+
+test('Stop during an outstanding status GET ignores its late tool output', async () => {
+  const f = recoveryFixture(); await f.work.initialize(); f.work.setResponseRecovery(true);
+  const entered = deferred(), returning = deferred();
+  f.access.retrieve = async () => { entered.resolve(); return returning.promise; };
+  f.work.writeScope = 'new'; f.work.setPrompt('Create the synthetic recovery note.');
+  const run = f.work.run(); await entered.promise; f.work.stop();
+  returning.resolve(backgroundReply('completed', backgroundCreate)); await run;
+  assert.deepEqual(f.cancellations, [receiptId]); assert.equal(f.files.size, 0);
+  assert.equal(f.posts.length, 1); assert.equal(f.work.chat.at(-1).status, 'stopped');
+});
+
+test('an expired accepted request ends with a review and a receipt-free submission failure never auto-reposts', async () => {
+  const f = recoveryFixture(); await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.access.retrieve = async id => { assert.equal(id, receiptId); return { status: 410, text: '' }; };
+  f.work.setPrompt('Read this'); await f.work.run();
+  assert.equal(f.work.task.state, 'failed'); assert.equal(f.saved().backgroundResponseReceipts, undefined);
+  assert.match(f.work.message, /no longer return/); assert.equal(f.posts.length, 1);
+  const second = recoveryFixture(); await second.work.initialize(); second.work.setResponseRecovery(true);
+  second.options.transport = async () => { second.posts.push('submitted'); throw Error('EOFException'); };
+  second.work.setPrompt('Read this'); await second.work.run();
+  assert.equal(second.posts.length, 1); assert.equal(second.work.task.hasPendingResponse, false);
+  assert.equal(second.work.chat.at(-1).status, 'paused'); assert.equal(second.lookups.length, 0);
+});
+
+test('background receipt arriving after the app hides is retained without dispatching a status check', async () => {
+  const f = recoveryFixture(), sent = deferred(), delivered = deferred();
+  let visible = true; f.options.appVisible = () => visible;
+  f.options.transport = async req => { f.posts.push(req.method); sent.resolve(); return delivered.promise; };
+  await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.work.setPrompt('Continue this answer'); f.work.maximum = 1;
+  const run = f.work.run(); await sent.promise;
+  visible = false; delivered.resolve(backgroundReply('queued')); await run;
+  assert.equal(f.saved().backgroundResponseReceipts.length, 1);
+  assert.equal(f.work.canResumeWithLimit, true); assert.deepEqual(f.lookups, []);
+  f.access.retrieve = async id => { f.lookups.push(id); return backgroundReply('completed', backgroundText('Retrieved.')); };
+  visible = true; await f.work.continueTask();
+  assert.deepEqual(f.posts, ['POST']); assert.deepEqual(f.lookups, [receiptId]); assert.equal(f.work.result, 'Retrieved.');
+});
+
+test('Stop before a background submission returns cancels its late receipt and never applies returned work', async () => {
+  const f = recoveryFixture(), sent = deferred(), delivered = deferred();
+  f.options.transport = async req => { f.posts.push(req.method); sent.resolve(); return delivered.promise; };
+  await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.work.setPrompt('Create the synthetic note.'); f.work.writeScope = 'new';
+  const run = f.work.run(); await sent.promise; f.work.stop(); delivered.resolve(backgroundReply('queued')); await run;
+  assert.deepEqual(f.posts, ['POST']); assert.deepEqual(f.cancellations, [receiptId]);
+  assert.deepEqual(f.lookups, []); assert.equal(f.files.size, 0); assert.equal(f.work.task.state, 'stopped');
+});
+
+test('after reopening, a different project key returning 404 cannot erase a saved reference', async () => {
+  const f = recoveryFixture(); await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.work.setPrompt('Recover a reply.'); await f.work.run(); const { id, conversationId } = f.work.chat.at(-1);
+  f.work.dispose(); const w = new AiWorkspace(f.options); await w.initialize();
+  f.access.retrieve = async () => ({ status: 404, text: '' });
+  await w.retrieveSavedResponse(id, conversationId); assert(w.hasSavedResponse(id, conversationId));
+  f.access.retrieve = async () => backgroundReply('completed', backgroundText('Available with the original key.'));
+  await w.retrieveSavedResponse(id, conversationId);
+  assert.equal(f.turns.get(id).answer, 'Available with the original key.'); assert.equal(f.posts.length, 1);
+});
