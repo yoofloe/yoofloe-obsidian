@@ -3,6 +3,7 @@ import { readCompaction, type CompactionItem } from "./conversation-context";
 const outputAdded = "response.output_item.added";
 const outputDone = "response.output_item.done";
 const maxItemEventLength = 512 * 1024;
+const maxIndexedItems = 1024;
 
 interface StreamState {
   positions: Map<string, number | null>;
@@ -11,7 +12,7 @@ interface StreamState {
   compaction?: { index: number; item: CompactionItem };
 }
 
-interface StreamResult { text: string; compactionReported: boolean; itemEventSkipped?: boolean }
+export interface StreamResult { text: string; compactionReported: boolean; itemEventSkipped?: boolean }
 
 const terminalStatus = new Map([
   ["response.completed", "completed"], ["response.incomplete", "incomplete"],
@@ -68,7 +69,9 @@ function finalEvent(name: string, lines: string[], state: StreamState): StreamRe
     const identity = itemIdentity(item);
     if (identity && hasIndex) {
       const prior = state.positions.get(identity);
-      state.positions.set(identity, prior === undefined || prior === index ? index : null);
+      if (prior !== undefined || state.positions.size < maxIndexedItems)
+        state.positions.set(identity, prior === undefined || prior === index ? index : null);
+      else state.itemEventSkipped = true;
     }
     if (kind === outputDone && item && typeof item === "object" && (item as { type?: unknown }).type === "compaction") {
       state.compactionReported = true;
@@ -92,27 +95,85 @@ function finalEvent(name: string, lines: string[], state: StreamState): StreamRe
     itemEventSkipped: completed && state.itemEventSkipped };
 }
 
-/** Obsidian delivers the buffered SSE body. Only a complete terminal event authorizes tool work. */
+export const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+const maxFrameLength = MAX_RESPONSE_BYTES + 64 * 1024;
+
+export class OpenAiStreamLimitError extends Error {
+  constructor() { super("The OpenAI response is too large for this device."); }
+}
+
+/** Accept a terminal event as soon as its blank-line delimiter arrives. */
+export class OpenAiEventDecoder {
+  private readonly state: StreamState = { positions: new Map(), compactionReported: false };
+  private first = true;
+  private skipLF = false;
+  private lineParts: string[] = [];
+  private lineSize = 0;
+  private name = "";
+  private data: string[] = [];
+  private dataSize = 0;
+  private skipped = false;
+
+  push(chunk: string): StreamResult | undefined {
+    if (!chunk.length) return;
+    let offset = (this.first && chunk.charCodeAt(0) === 0xfeff) || (this.skipLF && chunk[0] === "\n") ? 1 : 0;
+    this.first = false;
+    this.skipLF = false;
+    const breaks = /\r\n|[\r\n]/g;
+    breaks.lastIndex = offset;
+    let end: RegExpExecArray | null;
+    while ((end = breaks.exec(chunk))) {
+      this.appendPart(chunk.slice(offset, end.index));
+      const result = !this.skipped || this.lineSize === 0 ?
+        this.acceptLine(this.lineParts.length === 1 ? this.lineParts[0] : this.lineParts.join("")) : undefined;
+      this.lineParts = []; this.lineSize = 0;
+      if (result) return result;
+      offset = breaks.lastIndex;
+      this.skipLF = end[0] === "\r" && offset === chunk.length;
+    }
+    if (offset < chunk.length) this.appendPart(chunk.slice(offset));
+  }
+
+  private appendPart(part: string): void {
+    if (!part.length) return;
+    this.lineSize += part.length;
+    if (this.skipped) return;
+    if (this.name && this.name !== "error" && !terminalStatus.has(this.name) && this.lineSize > maxItemEventLength + 6) {
+      if (this.name === outputDone) this.state.itemEventSkipped = true;
+      this.lineParts = []; this.data = []; this.skipped = true;
+      return;
+    }
+    if (this.lineSize > maxFrameLength) throw new OpenAiStreamLimitError();
+    this.lineParts.push(part);
+  }
+
+  private acceptLine(line: string): StreamResult | undefined {
+    if (!line.length) {
+      const result = this.skipped ? undefined : finalEvent(this.name, this.data, this.state);
+      this.name = ""; this.data = []; this.dataSize = 0; this.skipped = false;
+      return result;
+    }
+    if (line.startsWith("event:")) { this.name = line.slice(6).trim(); return; }
+    if (this.skipped || !line.startsWith("data:")) return;
+    const item = this.name === outputAdded || this.name === outputDone;
+    if (this.name && !item && this.name !== "error" && !terminalStatus.has(this.name)) return;
+    const value = line.slice(line[5] === " " ? 6 : 5);
+    this.dataSize += value.length + (this.data.length ? 1 : 0);
+    if (item && this.dataSize > maxItemEventLength) {
+      if (this.name === outputDone) this.state.itemEventSkipped = true;
+      this.data = []; this.skipped = true;
+      return;
+    }
+    if (this.dataSize > maxFrameLength) throw new OpenAiStreamLimitError();
+    this.data.push(value);
+  }
+
+  finish(): never { throw unconfirmed(); }
+}
+
+/** Older WebViews can still return a buffered SSE body or a complete JSON response. */
 export function openAiStreamResult(raw: string): StreamResult {
   if (raw.trimStart().startsWith("{")) return { text: raw, compactionReported: false };
-  const lines = /\r\n|[\r\n]/g;
-  let offset = raw.charCodeAt(0) === 0xfeff ? 1 : 0;
-  lines.lastIndex = offset;
-  const state: StreamState = { positions: new Map(), compactionReported: false };
-  let type = "", data: string[] = [], end: RegExpExecArray | null;
-  while ((end = lines.exec(raw))) {
-    const length = end.index - offset;
-    if (!length) {
-      const result = finalEvent(type, data, state);
-      if (result !== undefined) return result;
-      type = ""; data = [];
-    } else if (raw.startsWith("event:", offset)) {
-      type = raw.slice(offset + 6, end.index).trim();
-    } else if ((!type || type === "error" || type === outputAdded || type === outputDone || terminalStatus.has(type)) && raw.startsWith("data:", offset)) {
-      const start = offset + 5;
-      data.push(raw.slice(raw[start] === " " ? start + 1 : start, end.index));
-    }
-    offset = lines.lastIndex;
-  }
-  throw unconfirmed();
+  const decoder = new OpenAiEventDecoder();
+  return decoder.push(raw) ?? decoder.finish();
 }

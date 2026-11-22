@@ -32,11 +32,12 @@ total limit or no count cap, retaining the original model and scopes. No continu
 The API key goes in the authorization header, never in a prompt or URL. Do not put credentials in notes or prompts.
 
 No OpenAI request is made by opening the plugin, selecting a model, saving a key, selecting attachments, searching local chat history or looking up Calendar or ChronoHUD records locally.
-There are no background AI jobs, automatic retries, paid search planners, embedding uploads or Yoofloe telemetry.
+The Android **Recover interrupted responses** option is off by default and is saved on this device. Enabling it sends future model requests with `background: true` and `store: false`. OpenAI temporarily stores request and response data for retrieval. Yoofloe keeps accepted response IDs in encrypted device conversation state. Continue retrieves the existing response by ID. Stop requests cancellation of a known pending job. [OpenAI background mode](https://developers.openai.com/api/docs/guides/background)
 Yoofloe operates no relay or database for this plugin. Expanded mode can invoke OpenAI web search when you send a task. Store/help links open only when you choose them;
 Obsidian's own updates and other plugins have their own network behavior.
 
-Desktop tasks can use an OpenAI Responses WebSocket. The plugin's HTTP requests handle Responses, input-token
+Desktop tasks can use an OpenAI Responses WebSocket. Supported Android WebViews stream model replies directly from the OpenAI Responses endpoint.
+The plugin's HTTP requests handle Responses, input-token
 counting, uploads, generated-file downloads, transcription and upload cleanup. Base64 represents bytes in
 generated images and Android app transfers.
 

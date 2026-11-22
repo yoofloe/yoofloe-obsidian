@@ -3,6 +3,7 @@ import { safeOutbound } from "./agent-policy";
 import type { DiagnosticFile, DiagnosticRun } from "./diagnostics";
 
 export const MAX_ATTACHMENTS = 10;
+export const OPENAI_UPLOAD_EXPIRY_SECONDS = 3600;
 export const MAX_ATTACHMENT_MIB = 45;
 export const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MIB * 1024 * 1024;
 const sizeLimits = {

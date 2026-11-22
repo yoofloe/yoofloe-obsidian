@@ -11,6 +11,8 @@ import { CHRONOHUD_ACTION, CHRONOHUD_INBOX } from "./chronohud-protocol";
 import { AiPreferences, localSecretBinding } from "./ai-preferences";
 import { OPENAI_ADAPTER } from "./openai";
 import { holdRequestScreen } from "./openai-request";
+import { createAndroidModelStream } from "./android-model-stream";
+import { backgroundAccess } from "./background-response";
 import { AiSession } from "./ai-session";
 import { AiSettingsModal, type AiContext } from "./ai-modals";
 import { AiWorkspace, type WorkspaceSource } from "./workspace";
@@ -396,9 +398,18 @@ export default class YoofloeAiPlugin extends Plugin {
     this.work = new AiWorkspace({ current: () => ai.current(), preferences: ai.preferences, gate: this.gate, configDir: owner.configDir,
       ...(Platform.isDesktopApp ? { liveResponse: openDesktopResponse } : {}),
       ...(Platform.isAndroidApp ? {
-        streamResponses: true,
+        streamResponses: true, directStream: createAndroidModelStream(viewWindow),
+        androidRecovery: {
+          enabled: () => this.app.loadLocalStorage("yoofloe-android-response-recovery") === true,
+          setEnabled: (enabled: boolean) => this.app.saveLocalStorage("yoofloe-android-response-recovery", enabled),
+          access: backgroundAccess(async request => {
+            if (this.app.vault !== owner) throw Error("Vault changed");
+            const { status, text, headers } = await requestUrl(request);
+            return { status, text, headers };
+          }, document),
+        },
         appVisible: () => document.visibilityState === "visible",
-        holdScreen: () => holdRequestScreen(viewWindow.navigator.wakeLock),
+        holdScreen: () => holdRequestScreen(viewWindow.navigator.wakeLock, document),
       } : {}),
       generated: generatedStore({ ...localFiles, download: provider.download }),
       attachments: attachmentStore({

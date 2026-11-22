@@ -34,7 +34,9 @@ test('wrong request, tampering, expiry, malformed dates and duplicate records fa
   const request=createRequest('Test',now), valid=await reply(request);
   await assert.rejects(openReply(valid,request,now+WINDOW_MS+1),/expired/);
   await assert.rejects(openReply(valid,createRequest('Other',now),now),/different request/);
-  const tampered=JSON.parse(valid);tampered.ciphertext=tampered.ciphertext.slice(0,-2)+'AA';
+  const tampered = JSON.parse(valid);
+  const first = tampered.ciphertext[0];
+  tampered.ciphertext = (first === 'A' ? 'B' : 'A') + tampered.ciphertext.slice(1);
   await assert.rejects(openReply(JSON.stringify(tampered),request,now));
   const invalid=data(request);invalid.records[0].date='2026-02-30';await assert.rejects(openReply(await reply(request,invalid),request,now),/date/);
   const duplicate=data(request);duplicate.records.push({...record});await assert.rejects(openReply(await reply(request,duplicate),request,now),/duplicate/);
