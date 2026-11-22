@@ -157,9 +157,10 @@ export class YoofloeAiView extends ItemView {
     this.budgetTimer = win.setTimeout(() => {
       const button = this.contentEl.querySelector<HTMLButtonElement>(".y-ai-input-budget");
       if (!button || this.composing || !this.work.ready) return;
-      void this.work.estimateRequest(this.showFollowUp).then(budget => {
+      const followUp = this.showFollowUp;
+      void this.work.estimateRequest(followUp).then(budget => {
         if (epoch !== this.budgetEpoch || !button.isConnected) return;
-        button.setText(budgetLabel(budget));
+        button.setText((followUp ? "Follow-up · " : "") + budgetLabel(budget));
         button.onclick = () => new InputBudgetModal(this.app, budget, this.work.task?.usage ?? { input: 0, output: 0 }).open();
         setTooltip(button, "Estimated input size. Click for details.");
       }).catch(error => {

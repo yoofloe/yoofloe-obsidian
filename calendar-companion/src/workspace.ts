@@ -145,6 +145,7 @@ export class AiWorkspace {
   readonly workspaceCalendarChanges: CalendarChangeController<CalendarWorkspaceChangeDraft, CalendarWorkspaceChangeReply>;
   constructor(private readonly options: {
     current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; generated?: GeneratedStore; attachments?: AttachmentStore;
+    appVisible?: () => boolean; holdScreen?: () => (() => void) | undefined;
     streamResponses?: boolean; gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; sharing?: SharedConversations; calendar?: () => CalendarSession;
     diagnostics?: Diagnostics;
     calendarChange?: () => CalendarChangeSession; inboxHint(): string;
@@ -1108,7 +1109,8 @@ export class AiWorkspace {
   }
   private createTask(executor: AgentExecutor, current = () => this.current, writeScope = this.writeScope, attachments: Attachment[] = [], pastedTextIsRequest = false, calendarDraft?: CalendarDraftTool, diagnostics?: DiagnosticRun): AgentTask {
     return new AgentTask({ current, preserve: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate, generated: this.options.generated, writeScope,
-      liveResponse: this.options.liveResponse, streamResponses: this.options.streamResponses, steerStatus: (note, status) => this.updateSteer(note, status),
+      liveResponse: this.options.liveResponse, streamResponses: this.options.streamResponses,
+      appVisible: this.options.appVisible, holdScreen: this.options.holdScreen, steerStatus: (note, status) => this.updateSteer(note, status),
        attachmentStore: this.options.attachments, countTokens: this.options.countTokens, calendarDraft, diagnostics,
        ...(attachments.length && this.options.attachments ? { attachments: this.options.attachments.forTask(attachments, pastedTextIsRequest, diagnostics) } : {}) });
   }

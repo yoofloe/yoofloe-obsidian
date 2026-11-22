@@ -23,7 +23,7 @@ const stages = [
 const outcomes = ["started", "received", "ok", "failed", "waiting", "skipped", "paused", "stopped", "interrupted", "unconfirmed", "completed"] as const;
 const reasons = [
   "unknown", "dns", "tls", "timeout", "connection_reset", "offline", "unreachable", "aborted", "http",
-  "stream_incomplete", "response_invalid", "response_unconfirmed", "input_budget", "request_limit", "missing_key", "scope",
+  "stream_incomplete", "response_invalid", "response_unconfirmed", "compaction_not_returned", "stream_item_not_checked", "input_budget", "request_limit", "missing_key", "scope", "app_hidden",
   "tool_arguments", "note_reference_unavailable", "read_range",
   "version_conflict", "superseded", "already_executed", "storage", "vault_changed", "user_action",
   "no_verified_reply", "invalid_reply", "expired", "conflict", "not_found", "cancelled", "rejected",

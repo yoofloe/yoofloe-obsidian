@@ -78,10 +78,12 @@ export class AgentTask {
   private steerUploads: ((onFailure: (error: unknown) => void) => Promise<boolean>)[] = [];
   private steerInputs = new Map<string, { text: string; attachments?: AttachmentRun; parts?: Record<string, unknown>[] }>();
   private stopDeferredCleanup = false;
+  private releaseScreenLock?: () => void;
   private listeners = new Set<() => void>();
   private stagedCalendarProposal = false;
   constructor(private readonly options: {
     current(): boolean; preserve?(): boolean; key(): Promise<string | null>; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; streamResponses?: boolean;
+    appVisible?: () => boolean; holdScreen?: () => (() => void) | undefined;
     steerStatus?(note: SteerNote, status: SteerStatus): void;
     executor: AgentExecutor; gate: { busy: boolean }; generated?: GeneratedStore; attachments?: AttachmentRun; attachmentStore?: AttachmentStore; writeScope?: WriteScope; calendarDraft?: CalendarDraftTool;
     diagnostics?: DiagnosticRun;
@@ -165,6 +167,8 @@ export class AgentTask {
   stop(deferUploadCleanup = false): void {
     this.stopped = true;
     this.stopDeferredCleanup = deferUploadCleanup;
+    this.releaseScreenLock?.();
+    this.releaseScreenLock = undefined;
     if (!this.busy) {
       this.state = "stopped";
       this.reviewRemainingSteers();
@@ -271,6 +275,16 @@ export class AgentTask {
     }
     return prepared.parts;
   }
+  private pauseIfHidden(): boolean {
+    if (this.options.appVisible?.() !== false || this.stopped || !this.options.current()) return false;
+    this.state = "paused";
+    this.connectionPauseReason = "app_hidden";
+    this.pendingSteers = [...this.sendingSteers, ...this.pendingSteers];
+    this.sendingSteers = [];
+    this.diagnostics?.event("visibility", "paused", { reason: "app_hidden", visible: false });
+    this.update("status", "Bring Obsidian to the foreground and choose Continue. Completed work is kept.", "waiting");
+    return true;
+  }
   private async advance(maximum: RequestLimit): Promise<void> {
     const model = this.model, mode = this.mode, effort = resolveEffort(model.model, model.effort);
     const summarize = !!findOpenAiModel(model.model) && effort !== "none";
@@ -285,6 +299,7 @@ export class AgentTask {
         throw Error("Save your OpenAI API key locally before starting. No request was sent.");
       }
       const key = validateOpenAiKey(value);
+      if (this.pauseIfHidden()) return;
       const attachments = this.options.attachments;
       if (attachments && !this.cleanupUploads) this.cleanupUploads = onFailure => attachments.cleanup(key, onFailure);
       if (!this.attachmentsReady && attachments) {
@@ -335,10 +350,12 @@ export class AgentTask {
           this.diagnostics?.event("context", "failed", { reason: "input_budget", requestBytes: bytes });
           throw Error("This task reached its data budget. Your work is kept. Start a focused follow-up.");
         }
+        if (this.pauseIfHidden()) break;
         this.inputBudget = estimateInput(payload, body, bytes);
         if (this.options.countTokens && (this.inputBudget.hasFiles || this.inputBudget.hasCompaction || this.inputBudget.estimated >= TOKEN_COUNT_THRESHOLD))
           this.update("status", "Checking input size", "working");
         this.inputBudget = await verifyInputBudget(payload, key, () => !this.stopped && this.options.current(), this.options.countTokens, this.inputBudget, this.diagnostics);
+        if (this.pauseIfHidden()) break;
         const firstSteer = this.items.length;
         this.items.push(...messages);
         const result = await this.requestReply(body, bytes, key, maximum, effort, hosted.length, canSaveGenerated).catch((error: unknown) => {
@@ -497,13 +514,23 @@ export class AgentTask {
       }
     } else {
       const streamed = this.options.streamResponses === true;
-      const { response, trace: httpTrace } = await requestOpenAiRound(this.options.transport, body, key, this.requests, bytes, streamed, this.diagnostics);
+      let result;
+      this.releaseScreenLock = this.options.holdScreen?.();
+      try {
+        result = await requestOpenAiRound(this.options.transport, body, key, this.requests, bytes, streamed, this.diagnostics);
+      } finally {
+        this.releaseScreenLock?.();
+        this.releaseScreenLock = undefined;
+      }
+      const { response, trace: httpTrace } = result;
       trace = httpTrace;
       let parsedStream = !streamed || response.status < 200 || response.status >= 300;
       try {
-        const responseText = parsedStream ? response.text : openAiStreamResult(response.text);
+        const stream = parsedStream ? undefined : openAiStreamResult(response.text);
         parsedStream = true;
-        reply = parseAgentReply(response.status, responseText);
+        reply = parseAgentReply(response.status, stream?.text ?? response.text);
+        if (stream?.compactionReported) reply.compactionReported = true;
+        if (stream?.itemEventSkipped) reply.streamItemSkipped = true;
       } catch (error) {
         this.diagnostics?.event(parsedStream ? "provider_reply" : "stream", "failed", { requestNumber: this.requests,
           httpStatus: response.status, reason: !parsedStream ? "stream_incomplete" : response.status >= 300 ? "http" : "response_invalid" });
@@ -532,7 +559,13 @@ export class AgentTask {
         this.compaction = compact;
         this.update("status", "Conversation context compacted.");
       } else {
-        if (index >= 0) this.diagnostics?.event("compaction", "unconfirmed", { reason: "response_invalid", requestNumber: this.requests });
+        if (this.autoCompact) {
+          const tokens = Math.max(this.inputBudget?.exact ?? 0, reply.usage.input);
+          const reason = reply.compactionReported ? "response_invalid" :
+            reply.streamItemSkipped ? "stream_item_not_checked" : tokens >= AUTO_COMPACT_TOKENS ? "compaction_not_returned" : undefined;
+          if (reason) this.diagnostics?.event("compaction", "unconfirmed", { reason,
+            requestNumber: this.requests, inputTokens: tokens, thresholdTokens: AUTO_COMPACT_TOKENS });
+        }
         this.items.push(...reply.output.filter(item => item.type !== "compaction"));
       }
     }

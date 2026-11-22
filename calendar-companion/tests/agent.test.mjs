@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { allowedPath, vaultPath, safeOutbound } from '../dist/agent-policy.js';
 import { AgentTask, AGENT_INSTRUCTION } from '../dist/agent-task.js';
 import { agentTools, parseAgentReply } from '../dist/agent-protocol.js';
+import { holdRequestScreen } from '../dist/openai-request.js';
 test('rename instructions permit user-requested filenames instead of conflicting preservation guidance',()=>{assert(AGENT_INSTRUCTION.includes('unless the user requests a rename or move'));assert(!AGENT_INSTRUCTION.includes('Existing filenames and user edits must be preserved.'));});
 const policy={sourcePath:'Work/A.md',folder:'Work',readScope:'vault',writeScope:'current',mode:'edit',configDir:'.obsidian',excluded:['Private']};
 const reply=output=>({status:200,text:JSON.stringify({status:'completed',output,usage:{input_tokens:10,output_tokens:5,output_tokens_details:{reasoning_tokens:2}}})});
@@ -36,6 +37,84 @@ test('Android waits for each final stream event and retains confirmed tools, rea
  assert(attempts[1].input.some(item=>item.encrypted_content==='opaque'));
  assert(attempts[1].input.some(item=>item.type==='function_call_output'&&item.call_id==='c1'));
 });
+test('Android reuses a finalized compaction item that is missing from the terminal response', async () => {
+ const attempts = [], tools = [];
+ const compacted = {type:'compaction', id:'cmp_streamed', encrypted_content:'opaque-stream-context'};
+ const earlier = {type:'reasoning', id:'reasoning_earlier', encrypted_content:'opaque-earlier-reasoning'};
+ const later = {type:'reasoning', id:'reasoning_later', encrypted_content:'opaque-later-reasoning'};
+ const finished = output => ({type:'response.completed',response:JSON.parse(reply(output).text)});
+ const task = new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},streamResponses:true,
+  executor:{execute:async name=>{tools.push(name);return {text:'Retained range'};}},
+  transport:async req=>{
+   const body=JSON.parse(req.body);
+   if(attempts.push(body)===1) return stream(
+    {type:'response.output_item.done',output_index:0,item:earlier},
+    {type:'response.output_item.done',output_index:1,item:compacted},
+    {type:'response.output_item.added',output_index:2,item:later},
+    {type:'response.output_item.done',output_index:3,item:call('keep')},
+    {type:'response.output_item.done',output_index:4,item:{...call('unconfirmed'),name:'create_note'}},
+    finished([later,call('keep')]),
+   );
+   assert.equal(attempts.length,2);
+   assert.deepEqual(body.input[0],compacted);
+   assert.deepEqual(body.input[1],later);
+   assert(body.input.some(item=>item.type==='function_call_output' && item.call_id==='keep'));
+   assert(!body.input.some(item=>item.call_id==='unconfirmed' || item.content==='Earlier context'));
+   return stream(finished([text('Continued after compaction')]));
+  },
+ });
+ await task.run('Read',{model:'gpt-6.2-sol'},'ask',2,undefined,undefined,
+  {autoCompact:true,items:[{role:'user',content:'Earlier context'}]});
+ assert.equal(task.state,'completed');
+ assert.deepEqual(task.compaction,compacted);
+ assert.deepEqual(tools,['read_notes']);
+});
+
+test('Android holds the next model request while hidden and keeps the task available to continue', async () => {
+ let visible=false, counts=0, requests=0;
+ const task=new AgentTask({current:()=>true,key:async()=> 'sk-synthetic-agent-key',gate:{busy:false},streamResponses:true,
+  appVisible:()=>visible,
+  executor:{execute:async()=>assert.fail('No tool request is expected')},
+  countTokens:async()=>{
+   if(++counts===1) visible=false;
+   return {status:200,text:JSON.stringify({object:'response.input_tokens',input_tokens:35000})};
+  },
+  transport:async()=>{
+   requests++;
+   return stream({type:'response.completed',response:JSON.parse(reply([text('Completed')]).text)});
+  },
+ });
+ await task.run('Read',{model:'gpt-6.2-sol'},'ask',2,undefined,undefined,
+   {autoCompact:true,items:[{role:'user',content:'Fixture context '.repeat(7000)}]});
+ assert.equal(task.connectionPauseReason,'app_hidden');
+ assert.equal(task.canResume,true);
+ assert.equal(counts,0);
+ assert.equal(requests,0);
+ visible=true;
+ await task.resume(2);
+ assert.equal(task.connectionPauseReason,'app_hidden');
+ assert.equal(counts,1);
+ assert.equal(task.requests,0);
+ visible=true;
+ await task.resume(2);
+ assert.equal(task.state,'completed');
+ assert.equal(requests,1);
+});
+
+test('Android releases a screen lock when a request ends before the lock is acquired', async () => {
+ let finishLock, releases=0;
+ const wakeLock={request:async kind=>{
+  assert.equal(kind,'screen');
+  return new Promise(resolve=>{finishLock=resolve;});
+ }};
+ const release=holdRequestScreen(wakeLock);
+ release();
+ finishLock({released:false,release:async()=>{releases++;}});
+ await new Promise(resolve=>setImmediate(resolve));
+ release();
+ assert.equal(releases,1);
+});
+
 test('Android keeps a confirmed incomplete answer and never executes a partial or cut-off tool', async () => {
  for(const completeStream of [false,true]) {
   let sent=0,writes=0;
@@ -45,10 +124,12 @@ test('Android keeps a confirmed incomplete answer and never executes a partial o
    transport:async()=>{
     sent++;
     const item={type:'response.output_item.done',item:tool};
-    return completeStream ? stream(item,{type:'response.incomplete',response:{status:'incomplete',output:[text('Partial answer'),tool]}}) :
-     stream(item,{type:'response.in_progress',response:{status:'in_progress',output:[tool]}});
+    const compact={type:'response.output_item.done',output_index:0,item:{type:'compaction',encrypted_content:'opaque-before-interruption'}};
+    return completeStream ? stream(compact,item,{type:'response.incomplete',response:{status:'incomplete',output:[text('Partial answer'),tool]}}) :
+     stream(compact,item,{type:'response.in_progress',response:{status:'in_progress',output:[tool]}});
    }});
-  await task.run('Write',{model:'gpt-6.1-sol'},'edit',3);
+  await task.run('Write',{model:'gpt-6.1-sol'},'edit',3,undefined,undefined,{autoCompact:true,items:[]});
+  assert.equal(task.compaction,null);
   assert.equal(sent,1);
   assert.equal(writes,0);
   assert.equal(task.state,'failed');

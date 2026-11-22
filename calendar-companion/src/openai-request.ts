@@ -76,6 +76,25 @@ function traceText(trace: RequestTrace, response?: AiHttpResponse): string {
   return parts.join(" · ");
 }
 
+/** Best-effort Android screen lock. Acquiring it never delays the API request. */
+export function holdRequestScreen(wakeLock?: WakeLock): (() => void) | undefined {
+  if (!wakeLock) return;
+  let held: WakeLockSentinel | undefined;
+  let finished = false;
+  void (async () => {
+    try {
+      const lock = await wakeLock.request("screen");
+      if (finished) await lock.release();
+      else held = lock;
+    } catch { /* Android or the WebView may decline a screen wake lock. */ }
+  })();
+  return () => {
+    if (finished) return;
+    finished = true;
+    if (held && !held.released) void held.release().catch(() => {});
+  };
+}
+
 /** Only the outbound request carries the key and input. Activity records use bounded metadata. */
 export async function requestOpenAiRound(
   transport: AiTransport, body: string, key: string, number: number, bytes: number, streamed = false, diagnostics?: DiagnosticRun,
