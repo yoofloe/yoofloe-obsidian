@@ -31,6 +31,8 @@ ends continuation without sending another request. Continuation is available whi
 closing/restarting the app keeps saved answers and completed changes but does not automatically resume requests.
 If an OpenAI host lookup failure pauses the task, restore the connection and choose **Continue** in that vault session.
 On Android, long OpenAI replies use an HTTP stream. The plugin waits for the final response before executing any returned note edits.
+If the Android transport fails before returning a usable response, keep Obsidian visible and choose **Continue** to send a new request from the last confirmed step in the same vault session.
+The earlier request still counts toward the total and may incur charges. With a finite hosted-tool limit, an unconfirmed request that included hosted tools pauses those tools for the task.
 
 Opening the first note connects it to a conversation that has no note, even when an earlier answer or unsent draft is present.
 Once a note is connected, browsing another note offers **Use opened note** above the conversation; it never silently switches the active task.

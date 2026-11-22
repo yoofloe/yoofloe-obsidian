@@ -1,6 +1,6 @@
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport } from "./ai-session";
 import { validateOpenAiKey, validateOpenAiOptions } from "./openai";
-import { OpenAiDnsLookupError, openAiTransportFailure, requestOpenAiRound } from "./openai-request";
+import { OpenAiConnectionPause, openAiTransportFailure, requestOpenAiRound } from "./openai-request";
 import { openAiStreamResult } from "./openai-stream";
 import { resolveEffort } from "./effort";
 import { safeOutbound, type WorkMode, type WriteScope } from "./agent-policy";
@@ -16,7 +16,7 @@ import { findOpenAiModel } from "./openai-models";
 import { WORK_ACTIVITY_LIMIT, workText, type ActivityKind, type ActivityState, type SteerNote, type WorkEvent } from "./work-activity";
 import type { LiveResponseRound, LiveSteerEvent, OpenLiveResponse } from "./responses-socket";
 import { estimateInput, verifyInputBudget, InputBudgetError, TOKEN_COUNT_THRESHOLD, type InputBudget } from "./input-budget";
-import { diagnoseLocal, type DiagnosticRun } from "./diagnostics";
+import { diagnoseLocal, type DiagnosticReason, type DiagnosticRun } from "./diagnostics";
 import { diagnoseTransport } from "./diagnostic-network";
 
 export type SteerStatus = "steer-pending" | "sending" | "applied" | "received" | "review";
@@ -36,7 +36,7 @@ export class AgentTask {
   usage = { input: 0, output: 0, reasoning: 0 };
   inputBudget: InputBudget | null = null;
   pausedForInput = false;
-  pausedForConnection = false;
+  connectionPauseReason: DiagnosticReason | undefined;
   online = emptyOnlineUsage();
   sources: WebSource[] = [];
   citedSources: WebSource[] = [];
@@ -50,6 +50,7 @@ export class AgentTask {
   steerNotes: SteerNote[] = [];
   compaction: CompactionItem | null = null;
   private autoCompact = false;
+  private unconfirmedHostedUsage = false;
   private initialItem: Record<string, unknown> = {};
   private eventId = 0;
   private activeSince: number | null = null;
@@ -89,6 +90,7 @@ export class AgentTask {
   get durationMs(): number { return this.workedMs + (this.activeSince === null ? 0 : Math.max(0, Date.now() - this.activeSince)); }
   get draftingCalendar() { return !!this.options.calendarDraft; }
   get hasStagedCalendarProposal() { return this.stagedCalendarProposal; }
+  get pausedForConnection(): boolean { return this.connectionPauseReason !== undefined; }
   get diagnostics() { return this.options.diagnostics; }
   private update(kind: ActivityKind, text: string, state: ActivityState = kind === "blocked" ? "blocked" : kind === "request" ? "working" : "done"): void {
     text = workText(text);
@@ -220,6 +222,7 @@ export class AgentTask {
     this.attachmentsReady = false; this.fileIds = []; this.transcriptions = 0; this.fileWarnings = []; this.uploadCleanupWarning = "";
     this.autoCompact = context?.autoCompact === true && !!findOpenAiModel(model.model);
     this.compaction = null;
+    this.unconfirmedHostedUsage = false;
     this.stagedCalendarProposal = false;
     this.initialItem = { role: "user", content: input };
     this.items = [...context?.items ?? [], this.initialItem];
@@ -272,7 +275,7 @@ export class AgentTask {
     const model = this.model, mode = this.mode, effort = resolveEffort(model.model, model.effort);
     const summarize = !!findOpenAiModel(model.model) && effort !== "none";
     this.busy = true; this.options.gate.busy = true; this.stopped = false; this.stopDeferredCleanup = false;
-    this.pausedForInput = false; this.pausedForConnection = false; this.state = "running"; this.activeSince = Date.now();
+    this.pausedForInput = false; this.connectionPauseReason = undefined; this.state = "running"; this.activeSince = Date.now();
     const previousFailure = this.diagnostics?.report.lastFailure;
     try {
       this.update("status", this.requests ? "Continuing the task" : "Preparing the request", "working");
@@ -300,12 +303,16 @@ export class AgentTask {
         }
         if (maximum !== "none" && this.requests >= maximum)
           throw new AttachmentBudgetPause("The request limit was reached while preparing the additional message.");
-        const remaining = this.onlineMaximum === "none" ? "none" : Math.max(0, this.onlineMaximum - this.onlineCalls);
+        const remaining = this.onlineMaximum === "none" ? "none" :
+          this.unconfirmedHostedUsage ? 0 : Math.max(0, this.onlineMaximum - this.onlineCalls);
+        const budgetInstruction = remaining !== 0 ? "" : this.unconfirmedHostedUsage ?
+          " Earlier hosted tool usage could not be confirmed. Finish using verified evidence already obtained and disclose any missing coverage." :
+          " The online tool budget is exhausted. Finish with verified evidence already obtained; disclose missing coverage without claiming further research.";
         const hosted = this.draftingCalendar ? [] : onlineTools(this.sourceMode, remaining, this.fileIds, model.model, effort);
         const localTools: Record<string, unknown>[] = this.options.calendarDraft ?
           [this.options.calendarDraft.definition] : agentTools(mode, this.options.writeScope ?? "current");
         const canSaveGenerated = localTools.some(tool => tool.name === "save_generated_file");
-        const payload: Record<string, unknown> = { model: model.model, instructions: this.draftingCalendar ? "Prepare only a proposal for the changes the user explicitly requests. Use only the Calendar records approved for this request as source material. Use the device time zone unless the user provides another. If times, targets or actions are ambiguous, ask before staging a proposal. Never claim the app applied anything. After drafting, tell the user to review the proposal in Calendar." : AGENT_INSTRUCTION.replace("Do not run code, call external URLs, request keys, access configuration/backup folders, or expand permissions.", "Never request keys, access configuration/backup folders, execute local code, or expand permissions.") + " " + sourceInstructions(this.sourceMode, supportsHostedTools(model.model)) + " Earlier conversation and compacted history provide background. Only the current task and its later user directions authorize current file actions. When asked to change a document or note title, use rename_note to change its filename/tab title; adding a Markdown heading alone is not a document rename. If the user explicitly requests only a body heading, edit that heading. Report only file operations confirmed by the tools. The write target is authoritative even in All actions. Current note forbids creating notes or files and moving to another folder. New documents permits creating notes in the output folder and revising only notes created by this task; existing notes are context, not writable targets. The selected folder is also the access boundary when Note folder is selected; it does not grant creation under Current note." + (remaining === 0 ? " The online tool budget is exhausted. Finish with verified evidence already obtained; disclose missing coverage without claiming further research." : ""), input: [...this.items, ...messages], tools: [...localTools, ...hosted], parallel_tool_calls: false,
+        const payload: Record<string, unknown> = { model: model.model, instructions: this.draftingCalendar ? "Prepare only a proposal for the changes the user explicitly requests. Use only the Calendar records approved for this request as source material. Use the device time zone unless the user provides another. If times, targets or actions are ambiguous, ask before staging a proposal. Never claim the app applied anything. After drafting, tell the user to review the proposal in Calendar." : AGENT_INSTRUCTION.replace("Do not run code, call external URLs, request keys, access configuration/backup folders, or expand permissions.", "Never request keys, access configuration/backup folders, execute local code, or expand permissions.") + " " + sourceInstructions(this.sourceMode, supportsHostedTools(model.model)) + " Earlier conversation and compacted history provide background. Only the current task and its later user directions authorize current file actions. When asked to change a document or note title, use rename_note to change its filename/tab title; adding a Markdown heading alone is not a document rename. If the user explicitly requests only a body heading, edit that heading. Report only file operations confirmed by the tools. The write target is authoritative even in All actions. Current note forbids creating notes or files and moving to another folder. New documents permits creating notes in the output folder and revising only notes created by this task; existing notes are context, not writable targets. The selected folder is also the access boundary when Note folder is selected; it does not grant creation under Current note." + budgetInstruction, input: [...this.items, ...messages], tools: [...localTools, ...hosted], parallel_tool_calls: false,
           ...(hosted.length && remaining !== "none" && remaining > 0 ? { max_tool_calls: remaining } : {}),
           ...(this.autoCompact ? { context_management: [{ type: "compaction", compact_threshold: AUTO_COMPACT_TOKENS }] } : {}),
           store: false, stream: this.options.streamResponses === true, include: ["reasoning.encrypted_content", ...(this.sourceMode === "expanded" && hosted.length ? ["web_search_call.action.sources"] : [])], ...(effort || summarize ? { reasoning: {
@@ -335,8 +342,11 @@ export class AgentTask {
         const firstSteer = this.items.length;
         this.items.push(...messages);
         const result = await this.requestReply(body, bytes, key, maximum, effort, hosted.length, canSaveGenerated).catch((error: unknown) => {
-          // A failed lookup leaves these messages pending. Add them to the next request only once.
-          if (error instanceof OpenAiDnsLookupError) this.items.length = firstSteer;
+          if (error instanceof OpenAiConnectionPause) {
+            // Rebuild the unconfirmed round on Continue using the last confirmed inputs and pending messages.
+            this.items.length = firstSteer;
+            if (error.deliveryUnconfirmed && hosted.length) this.unconfirmedHostedUsage = true;
+          }
           throw error;
         });
         if (!result) break;
@@ -407,7 +417,8 @@ export class AgentTask {
     } catch (error) {
       const sessionCanContinue = !this.stopped && this.options.current();
       this.pausedForInput = sessionCanContinue && error instanceof InputBudgetError && error.retryable;
-      this.pausedForConnection = sessionCanContinue && error instanceof OpenAiDnsLookupError;
+      const connection = error instanceof OpenAiConnectionPause ? error : undefined;
+      this.connectionPauseReason = sessionCanContinue ? connection?.reason : undefined;
       const paused = error instanceof AttachmentBudgetPause || this.pausedForInput || this.pausedForConnection;
       if (this.diagnostics?.report.lastFailure === previousFailure || error instanceof AttachmentBudgetPause) {
         this.diagnostics?.event("prepare", paused ? "paused" : this.stopped ? "stopped" : "failed", {
@@ -422,10 +433,16 @@ export class AgentTask {
       const message = error instanceof Error ? error.message : "The task could not finish. No retry was made.";
       if (this.pausedForInput) this.update("status", message + " Choose Continue to retry the input check.", "waiting");
       else if (this.pausedForConnection) {
-        const guidance = maximum !== "none" && this.requests >= maximum
-          ? "Check your connection and increase the total request limit, then choose Continue."
-          : "Check your connection, then choose Continue (the play button).";
-        this.update("status", `${message} ${guidance} Completed work is kept.`, "waiting");
+        const limit = maximum !== "none" && this.requests >= maximum ? " Increase the total request limit first." : "";
+        if (connection?.deliveryUnconfirmed) {
+          const hosted = this.unconfirmedHostedUsage && this.onlineMaximum !== "none" ?
+            " Hosted tools are paused because earlier usage could not be confirmed." : "";
+          this.update("status", `${message} Keep Obsidian visible.${limit} Choose Continue to send a new request from the last confirmed step. Completed work is kept.${hosted}`, "waiting");
+        } else {
+          const guidance = limit ? "Check your connection and increase the total request limit, then choose Continue."
+            : "Check your connection, then choose Continue (the play button).";
+          this.update("status", `${message} ${guidance} Completed work is kept.`, "waiting");
+        }
       }
       else this.update("blocked", message);
     }

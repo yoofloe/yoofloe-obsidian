@@ -1,12 +1,18 @@
 import type { AiHttpResponse, AiTransport } from "./ai-session";
 import { OPENAI_ENDPOINT } from "./openai";
-import type { DiagnosticRun } from "./diagnostics";
-import { observeHttp } from "./diagnostic-network";
+import type { DiagnosticDetail, DiagnosticReason, DiagnosticRun } from "./diagnostics";
+import { diagnoseTransport, observeHttp } from "./diagnostic-network";
 
 const OPENAI_HOST = new URL(OPENAI_ENDPOINT).hostname;
 const DNS_FAILURE = "could not resolve the OpenAI host";
 
-export class OpenAiDnsLookupError extends Error {}
+const recoverableTransportReasons = new Set<DiagnosticReason>(["dns", "timeout", "offline", "unreachable", "connection_reset", "aborted", "unknown"]);
+
+export class OpenAiConnectionPause extends Error {
+  constructor(message: string, readonly reason: DiagnosticReason, readonly deliveryUnconfirmed: boolean) {
+    super(message);
+  }
+}
 
 interface RequestTrace {
   clientId: string;
@@ -20,30 +26,25 @@ function stringField(error: Record<string, unknown>, name: string): string {
   return typeof value === "string" ? value.slice(0, 512) : "";
 }
 
+function describeTransportFailure({ reason, httpStatus }: DiagnosticDetail): string {
+  if (httpStatus !== undefined && httpStatus >= 200 && httpStatus < 300)
+    return `returned HTTP ${httpStatus} without a usable confirmation`;
+  if (httpStatus !== undefined && httpStatus >= 300)
+    return `failed with HTTP ${httpStatus} reported by Obsidian`;
+  switch (reason) {
+    case "timeout": return "timed out before an HTTP response was available";
+    case "dns": return DNS_FAILURE;
+    case "tls": return "could not establish a secure connection";
+    case "unreachable":
+    case "offline": return "could not connect to OpenAI";
+    case "connection_reset": return "lost its network connection before the response could be confirmed";
+    case "aborted": return "was interrupted before the response could be confirmed";
+    default: return "ended before Obsidian returned an HTTP response";
+  }
+}
+
 export function openAiTransportFailure(error: unknown): string {
-  const fields = error && typeof error === "object" ? error as Record<string, unknown> : {};
-  const status = fields.status ?? fields.statusCode;
-  if (typeof status === "number" && Number.isInteger(status) && status >= 200 && status < 300)
-    return `returned HTTP ${status} without a usable confirmation`;
-  if (typeof status === "number" && Number.isInteger(status) && status >= 300 && status <= 599)
-    return `failed with HTTP ${status} reported by Obsidian`;
-  const message = typeof error === "string" ? error.slice(0, 512) : stringField(fields, "message");
-  const reported = /^\s*(?:Error: )?Request failed, status ([345]\d{2})\.?\s*$/i.exec(message);
-  if (reported) return `failed with HTTP ${reported[1]} reported by Obsidian`;
-  const hint = [stringField(fields, "name"), stringField(fields, "code"), message].join(" ");
-  if (/\b(?:ETIMEDOUT|ESOCKETTIMEDOUT|ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|SocketTimeoutException|TimeoutError|timed out|timeout)\b/i.test(hint))
-    return "timed out before an HTTP response was available";
-  if (/\b(?:UnknownHostException|Unable to resolve host|ENOTFOUND|EAI_AGAIN|ERR_NAME_NOT_RESOLVED)\b/i.test(hint))
-    return DNS_FAILURE;
-  if (/\b(?:SSLHandshakeException|SSLPeerUnverifiedException|ERR_CERT_[A-Z_]+|ERR_SSL_[A-Z_]+|certificate verify failed)\b/i.test(hint))
-    return "could not establish a secure connection";
-  if (/\b(?:ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ERR_(?:CONNECTION_REFUSED|ADDRESS_UNREACHABLE|INTERNET_DISCONNECTED)|connection refused|network is unreachable)\b/i.test(hint))
-    return "could not connect to OpenAI";
-  if (/\b(?:ECONNRESET|EPIPE|ERR_(?:CONNECTION_(?:RESET|ABORTED|CLOSED)|NETWORK_CHANGED)|connection reset|broken pipe|unexpected end of stream)\b/i.test(hint))
-    return "lost its network connection before the response could be confirmed";
-  if (/\b(?:AbortError|ERR_ABORTED|ECANCELED|cancelled|canceled)\b/i.test(hint))
-    return "was interrupted before the response could be confirmed";
-  return "ended before Obsidian returned an HTTP response";
+  return describeTransportFailure(diagnoseTransport(error));
 }
 
 function confirmedOpenAiLookupFailure(error: unknown): boolean {
@@ -87,11 +88,22 @@ export async function requestOpenAiRound(
     }, () => transport({ url: OPENAI_ENDPOINT, method: "POST", contentType: "application/json", body, throw: false,
       headers: { Authorization: "Bearer " + key, "X-Client-Request-Id": trace.clientId } }));
   } catch (error) {
-    const failure = openAiTransportFailure(error);
-    const message = `OpenAI request ${number} ${failure}.`;
-    if (failure === DNS_FAILURE && confirmedOpenAiLookupFailure(error))
-      throw new OpenAiDnsLookupError(`${message} (${traceText(trace)})`);
-    throw Error(`${message} No retry was made by the plugin. The request may still incur charges. (${traceText(trace)})`);
+    const diagnosis = diagnoseTransport(error);
+    const message = `OpenAI request ${number} ${describeTransportFailure(diagnosis)}.`;
+    const details = traceText(trace);
+    const reason = diagnosis.reason ?? "unknown";
+    if (reason === "dns" && confirmedOpenAiLookupFailure(error))
+      throw new OpenAiConnectionPause(`${message} (${details})`, "dns", false);
+    const responseUnconfirmed = reason === "response_unconfirmed" ||
+      (diagnosis.httpStatus === undefined && recoverableTransportReasons.has(reason));
+    if (streamed && responseUnconfirmed) {
+      const lastFailure = diagnostics?.report.lastFailure;
+      const hidden = lastFailure?.clientId === trace.clientId && lastFailure.appHiddenDuringRequest === true;
+      const lifecycle = hidden ? " Obsidian was hidden while the request was pending." : "";
+      throw new OpenAiConnectionPause(`${message}${lifecycle} This request may still incur charges. (${details})`,
+        reason === "unknown" ? "response_unconfirmed" : reason, true);
+    }
+    throw Error(`${message} No retry was made by the plugin. The request may still incur charges. (${details})`);
   }
   return { response, trace: traceText(trace, response) };
 }

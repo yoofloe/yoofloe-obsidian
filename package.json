@@ -1,6 +1,6 @@
 {
   "name": "obsidian-yoofloe",
-  "version": "0.9.13",
+  "version": "0.9.14",
   "description": "Research, write and organize Markdown with your own OpenAI key. Optional Calendar and ChronoHUD context on Android. Visit www.yoofloe.com.",
   "private": true,
   "type": "module",

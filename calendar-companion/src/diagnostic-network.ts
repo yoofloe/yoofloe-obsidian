@@ -39,7 +39,8 @@ export function diagnoseTransport(error: unknown): DiagnosticDetail {
         typeof value.message === "string" ? value.message.slice(0, 512) : "";
       const httpStatus = safeStatus(value.status ?? value.statusCode) ?? safeStatus(fields(value.response).status) ??
         safeStatus(/^\s*(?:Error: )?Request failed, status ([1-5]\d{2})\.?\s*$/i.exec(raw)?.[1]);
-      if (httpStatus !== undefined) return { reason: "http", evidence: "http_response", httpStatus };
+      if (httpStatus !== undefined)
+        return { reason: httpStatus >= 200 && httpStatus < 300 ? "response_unconfirmed" : "http", evidence: "http_response", httpStatus };
       if (!observed) {
         const hint = [value.code, value.name, raw].filter(part => typeof part === "string").map(part => String(part).slice(0, 512)).join(" ");
         const code = networkErrorCodes.find(item => new RegExp("\\b" + item + "\\b", "i").test(hint)) ??
@@ -72,6 +73,7 @@ export async function observeHttp<T extends { status: number; headers?: Readonly
   if (!run) return send();
   const attempt = run.nextAttempt(), start = performance.now();
   run.event(stage, "started", { ...info, attempt });
+  const sequence = run.report.events.at(-1)?.sequence ?? 0;
   try {
     const response = await send();
     const ok = accepted(response.status);
@@ -79,7 +81,15 @@ export async function observeHttp<T extends { status: number; headers?: Readonly
       ...responseDiagnostics(response), reason: ok ? undefined : "http" });
     return response;
   } catch (error) {
-    run.event(stage, "failed", { ...info, attempt, elapsedMs: Math.round(performance.now() - start), ...diagnoseTransport(error) });
+    const diagnosis = diagnoseTransport(error);
+    const httpUnconfirmed = info.transport === "obsidian_http_stream" &&
+      (diagnosis.reason === "unknown" || diagnosis.reason === "response_unconfirmed");
+    const appHiddenDuringRequest = stage === "model_request" && run.report.events.some(event => event.sequence > sequence &&
+      (event.stage === "visibility" || event.stage === "session") && event.visible === false);
+    run.event(stage, httpUnconfirmed ? "unconfirmed" : "failed", {
+      ...info, attempt, elapsedMs: Math.round(performance.now() - start), ...diagnosis,
+      reason: httpUnconfirmed ? "response_unconfirmed" : diagnosis.reason, appHiddenDuringRequest,
+    });
     throw error;
   }
 }

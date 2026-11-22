@@ -1629,7 +1629,7 @@ export class AiWorkspace {
       }
       if (paused) diagnostic?.finish("paused", this.canResumeWithLimit ? "continue" : "raise_limit", {
         requestNumber: task?.requests || undefined,
-        reason: task?.pausedForConnection ? "dns" : task?.pausedForInput ? "input_budget" : "request_limit",
+        reason: task?.connectionPauseReason ?? (task?.pausedForInput ? "input_budget" : "request_limit"),
       });
       else if (completed) diagnostic?.finish("completed", "none", { requestNumber: task?.requests || undefined });
       else diagnostic?.finish(task?.state === "stopped" || this.stopRequested ? "stopped" : "failed", "review");
