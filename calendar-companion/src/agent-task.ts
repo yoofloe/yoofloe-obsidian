@@ -24,7 +24,8 @@ import { diagnoseTransport, observeHttp } from "./diagnostic-network";
 
 type RoundResult = { reply: AgentReply; trace?: string };
 interface PendingResponse {
-  id: string; number: number; trace: string; keyBinding?: string; recorded: boolean; ready?: AiHttpResponse;
+  id: string; number: number; trace: string; keyBinding: string; recorded: boolean; ready?: AiHttpResponse;
+  recording?: Promise<void>;
   cancel: () => Promise<AiHttpResponse>;
 }
 
@@ -90,7 +91,8 @@ export class AgentTask {
   private releaseScreenLock?: () => void;
   private pausedInputCheck?: { body: string; tokens: number; keyBinding: string };
   private fileCountDeadline = 0;
-  private readonly directLifetime?: AbortController;
+  private directLifetime?: AbortController;
+  private stopTimer?: number;
   private nativeOnContinue = false;
   private pendingResponse?: PendingResponse;
   private lookupAbort?: AbortController;
@@ -107,7 +109,7 @@ export class AgentTask {
     executor: AgentExecutor; gate: { busy: boolean }; generated?: GeneratedStore; attachments?: AttachmentRun; attachmentStore?: AttachmentStore; writeScope?: WriteScope; calendarDraft?: CalendarDraftTool;
     background?: BackgroundAccess; rememberResponse?: (id: string, requestNumber: number) => Promise<void>;
     diagnostics?: DiagnosticRun;
-  }) { this.directLifetime = options.directStream ? new AbortController() : undefined; }
+  }) {}
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   get durationMs(): number { return this.workedMs + (this.activeSince === null ? 0 : Math.max(0, Date.now() - this.activeSince)); }
   get draftingCalendar() { return !!this.options.calendarDraft; }
@@ -189,6 +191,11 @@ export class AgentTask {
     this.stopDeferredCleanup = deferUploadCleanup;
     this.lookupAbort?.abort();
     if (!this.preserveResponseOnUnload) this.cancelResponse();
+    const stream = this.directLifetime;
+    if (this.busy && stream && this.stopTimer === undefined) {
+      if (typeof window === "undefined") stream.abort();
+      else this.stopTimer = window.setTimeout(() => stream.abort(), 2000);
+    }
     this.pausedInputCheck = undefined;
     this.releaseScreenLock?.();
     this.releaseScreenLock = undefined;
@@ -198,11 +205,15 @@ export class AgentTask {
       this.markCleanupUnconfirmed();
       if (!deferUploadCleanup) void this.cleanupFiles().then(() => { for (const listener of this.listeners) listener(); });
     }
-    this.update("status", "Stopping future requests and file actions. An already-sent OpenAI request may still incur charges; its answer is kept.");
+    this.update("status", "Stopping future requests and file actions. An already-sent OpenAI request may still incur charges. Confirmed answers are kept.");
   }
   dispose(): void {
-    this.preserveResponseOnUnload = this.pendingResponse?.recorded === true;
+    const pending = this.pendingResponse;
+    this.preserveResponseOnUnload = !!pending && (pending.recorded || !!pending.recording);
     this.stop(this.preserveResponseOnUnload); this.live?.close(); this.directLifetime?.abort();
+  }
+  confirmResponseSaved(id: string): void {
+    if (this.pendingResponse?.id === id) this.pendingResponse.recorded = true;
   }
   get cleanupPending(): boolean { return !!this.cancelling || this.cleanupUploads !== null || this.steerUploads.length > 0; }
   private markCleanupUnconfirmed(): void {
@@ -250,8 +261,9 @@ export class AgentTask {
   }
   async run(input: string, model: AiModelOptions, mode: WorkMode, maximum: RequestLimit, research?: { mode: SourceMode; maximum: RequestLimit }, initialNote?: string | null, context?: { autoCompact: boolean; items: Record<string, unknown>[] }): Promise<void> {
     if (this.busy || this.options.gate.busy || this.pendingResponse || this.cancelling || !this.options.current()) throw Error("Wait for the current task to finish.");
-    this.resolvedResponseId = undefined; this.preserveResponseOnUnload = false;
     requestLimit(maximum); validateOpenAiOptions(model); safeOutbound(input);
+    this.resolvedResponseId = undefined; this.preserveResponseOnUnload = false;
+    this.directLifetime = this.options.directStream ? new AbortController() : undefined;
     this.model = { ...model }; this.mode = mode; this.lastAction = ""; this.repeats = 0; this.blockedRounds = 0;
     this.sourceMode = effectiveSourceMode(research?.mode ?? "provided", requestText(input)); this.onlineMaximum = requestLimit(research?.maximum ?? 8); this.online = emptyOnlineUsage(); this.sources = []; this.citedSources = []; this.generated = []; this.initialInput = input;
     this.attachmentsReady = false; this.fileIds = []; this.transcriptions = 0; this.fileWarnings = []; this.uploadCleanupWarning = "";
@@ -339,7 +351,9 @@ export class AgentTask {
         throw Error("Save your OpenAI API key locally before starting. No request was sent.");
       }
       const key = validateOpenAiKey(value);
-      const keyBinding = this.options.appVisible ? await inputDigest(key).catch(() => undefined) : undefined;
+      const keyBinding = this.options.appVisible || this.options.background ? await inputDigest(key).catch(() => undefined) : undefined;
+      if (this.options.background && !keyBinding)
+        throw Error("This device could not verify the OpenAI key for response recovery. No model request was sent.");
       if (this.pauseIfHidden()) return;
       const attachments = this.options.attachments;
       if (attachments && !this.cleanupUploads) this.cleanupUploads = onFailure => attachments.cleanup(key, onFailure);
@@ -459,6 +473,10 @@ export class AgentTask {
       else this.update("blocked", message);
     }
     finally {
+      if (this.stopTimer !== undefined) {
+        window.clearTimeout(this.stopTimer);
+        this.stopTimer = undefined;
+      }
       this.releaseScreenLock?.();
       this.releaseScreenLock = undefined;
       if (this.stopped && this.state === "paused") this.state = "stopped";
@@ -594,8 +612,10 @@ export class AgentTask {
         let envelope;
         try { envelope = backgroundEnvelope(response.text); }
         catch {
-          throw new OpenAiConnectionPause("OpenAI returned an unverified background receipt. This request may still incur charges.", "response_unconfirmed", true);
+          this.diagnostics?.event("provider_reply", "unconfirmed", { requestNumber: this.requests, reason: "response_invalid", httpStatus: response.status });
+          throw Error("OpenAI may have accepted this request, but its response ID could not be verified. Review saved work before starting a new task. This request may still incur charges.");
         }
+        if (!keyBinding) throw Error("The OpenAI key could not be verified for response recovery.");
         const { id, status } = envelope;
         const pending = isBackgroundPending(status);
         this.pendingResponse = { id, number: this.requests, keyBinding, trace, recorded: false,
@@ -627,13 +647,26 @@ export class AgentTask {
     this.update("status", message, "waiting");
     return null;
   }
+  private async rememberAcceptedResponse(job: PendingResponse): Promise<void> {
+    const remember = this.options.rememberResponse;
+    if (job.recorded || !remember) return;
+    const saving = job.recording ??= remember(job.id, job.number);
+    try {
+      await saving;
+      job.recorded = true;
+    } finally {
+      if (job.recording === saving) job.recording = undefined;
+    }
+  }
   private cancelResponse(): void {
     const job = this.pendingResponse;
     if (!job) return;
     this.pendingResponse = undefined;
     this.lookupAbort?.abort();
     const info = { transport: "openai_background" as const, action: "stop", requestNumber: job.number };
-    const cancellation = observeHttp(this.diagnostics, "response_cancel", info, job.cancel).then(http => {
+    const cancellation = this.rememberAcceptedResponse(job).catch(() => {
+      this.diagnostics?.event("conversation_save", "failed", { reason: "storage", requestNumber: job.number });
+    }).then(() => observeHttp(this.diagnostics, "response_cancel", info, job.cancel)).then(http => {
       if (http.status < 200 || http.status >= 300) throw Error("Cancellation is unconfirmed.");
       const { status } = backgroundEnvelope(http.text, job.id);
       if (status !== "cancelled" && status !== "failed") throw Error("Cancellation is unconfirmed.");
@@ -648,16 +681,16 @@ export class AgentTask {
   private async retrieveResponse(key: string, keyBinding: string | undefined, waitFirst: boolean): Promise<RoundResult | null> {
     const job = this.pendingResponse, access = this.options.background;
     if (!job || !access) throw Error("The accepted OpenAI response is unavailable.");
-    if (job.keyBinding && job.keyBinding !== keyBinding)
+    if (job.keyBinding !== keyBinding)
       return this.pauseForResponse("Use the original OpenAI key to check this accepted response.");
     const active = () => this.pendingResponse === job && !this.stopped && this.options.current();
-    if (!job.recorded && this.options.rememberResponse) {
-      try { await this.options.rememberResponse(job.id, job.number); job.recorded = true; }
-      catch {
-        if (!active()) return null;
-        return this.pauseForResponse("Keep this session open. The response ID could not be saved on this device. Choose Continue to check the accepted request.");
-      }
+    try { await this.rememberAcceptedResponse(job); }
+    catch {
+      if (!active()) return null;
+      this.diagnostics?.event("conversation_save", "failed", { reason: "storage", requestNumber: job.number });
+      return this.pauseForResponse("Keep this session open. The response ID could not be saved on this device. Choose Continue to check the accepted request.");
     }
+    if (!active()) return null;
     const abort = new AbortController();
     this.lookupAbort = abort;
     let delay = waitFirst ? 2000 : 0;
@@ -674,10 +707,12 @@ export class AgentTask {
           return this.pauseForResponse("The status check was interrupted. Choose Continue to retrieve the same OpenAI response.");
         }
         if (!active()) return null;
-        if (http.status === 404 || http.status === 410) {
+        if (http.status === 410) {
           this.resolvedResponseId = job.id; this.pendingResponse = undefined;
           throw Error("OpenAI could no longer return this response. Review the saved work before starting another request.");
         }
+        if (http.status === 404)
+          return this.pauseForResponse("OpenAI could not find this response with the current key. It may have expired. Choose Continue to check again or Finish here to keep saved work.");
         if (http.status < 200 || http.status >= 300)
           return this.pauseForResponse(`OpenAI returned HTTP ${http.status} during lookup. Choose Continue to check the existing response again.`);
         let envelope;

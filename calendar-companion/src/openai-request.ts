@@ -148,7 +148,9 @@ export async function requestOpenAiRound(
       throw new OpenAiConnectionPause(`${message} (${details})`, "dns", false);
     const responseUnconfirmed = reason === "response_unconfirmed" ||
       (diagnosis.httpStatus === undefined && recoverableTransportReasons.has(reason));
-    if ((streamed || options.background) && responseUnconfirmed) {
+    if (options.background && responseUnconfirmed)
+      throw Error(`${message} (${details}) The accepted response could not be verified by ID. Review saved work before starting a new task. This request may still incur charges.`);
+    if (streamed && responseUnconfirmed) {
       const lastFailure = diagnostics?.report.lastFailure;
       const hidden = lastFailure?.clientId === trace.clientId && lastFailure.appHiddenDuringRequest === true;
       const lifecycle = hidden ? " Obsidian was hidden while the request was pending." : "";

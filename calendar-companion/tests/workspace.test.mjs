@@ -1445,7 +1445,8 @@ test('an expired accepted request ends with a review and a receipt-free submissi
   second.options.transport = async () => { second.posts.push('submitted'); throw Error('EOFException'); };
   second.work.setPrompt('Read this'); await second.work.run();
   assert.equal(second.posts.length, 1); assert.equal(second.work.task.hasPendingResponse, false);
-  assert.equal(second.work.chat.at(-1).status, 'paused'); assert.equal(second.lookups.length, 0);
+  assert.equal(second.work.chat.at(-1).status, 'failed'); assert.equal(second.lookups.length, 0);
+  await second.work.continueTask(); assert.equal(second.posts.length, 1);
 });
 
 test('background receipt arriving after the app hides is retained without dispatching a status check', async () => {
@@ -1482,4 +1483,64 @@ test('after reopening, a different project key returning 404 cannot erase a save
   f.access.retrieve = async () => backgroundReply('completed', backgroundText('Available with the original key.'));
   await w.retrieveSavedResponse(id, conversationId);
   assert.equal(f.turns.get(id).answer, 'Available with the original key.'); assert.equal(f.posts.length, 1);
+});
+
+test('a receipt saved by the pause save survives closing the vault after a transient storage error', async () => {
+  const f = recoveryFixture();
+  const originalSave = f.options.storage.save;
+  let failed = false;
+  f.options.storage.save = async state => {
+    if (state.backgroundResponseReceipts?.length && !failed) { failed = true; throw Error('Transient storage error'); }
+    await originalSave(state);
+  };
+  await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.work.setPrompt('Retrieve this answer later.'); await f.work.run();
+  const { id, conversationId } = f.work.chat.at(-1);
+  assert.equal(failed, true);
+  assert.equal(f.saved().backgroundResponseReceipts[0].responseId, receiptId);
+  f.work.dispose(); const w = new AiWorkspace(f.options); await w.initialize();
+  assert.deepEqual(f.cancellations, []);
+  assert(w.hasSavedResponse(id, conversationId));
+});
+
+test('a late accepted response survives Stop when the service already completed it', async () => {
+  const f = recoveryFixture(), sent = deferred(), delivered = deferred();
+  f.options.transport = async req => { f.posts.push(req.method); sent.resolve(); return delivered.promise; };
+  f.access.cancel = async id => {
+    f.cancellations.push(id);
+    assert.equal(f.saved().backgroundResponseReceipts[0].responseId, receiptId);
+    return backgroundReply('completed', [...backgroundText('Late answer.'), ...backgroundCreate]);
+  };
+  await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.work.writeScope = 'new'; f.work.setPrompt('Create the synthetic note.');
+  const run = f.work.run(); await sent.promise; f.work.stop();
+  delivered.resolve(backgroundReply('queued')); await run;
+  const { id, conversationId } = f.work.chat.at(-1);
+  assert.deepEqual(f.cancellations, [receiptId]); assert.equal(f.posts.length, 1);
+  assert.equal(f.files.size, 0); assert(f.work.hasSavedResponse(id, conversationId));
+  f.access.retrieve = async () => backgroundReply('completed', [...backgroundText('Late answer.'), ...backgroundCreate]);
+  await f.work.retrieveSavedResponse(id, conversationId);
+  assert.equal(f.turns.get(id).answer, 'Late answer.');
+  assert.equal(f.files.size, 0); assert.equal(f.work.hasSavedResponse(id, conversationId), false);
+});
+
+test('an unverified 2xx receipt does not expose Continue for another model POST', async () => {
+  const f = recoveryFixture(); await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.options.transport = async req => { f.posts.push(req.method); return { status: 200, text: '{"status":"queued"}' }; };
+  f.work.setPrompt('Read this'); await f.work.run(); await f.work.continueTask();
+  assert.match(f.work.message, /response ID could not be verified/);
+  assert.deepEqual(f.posts, ['POST']); assert.deepEqual(f.lookups, []);
+  assert.equal(f.work.canContinue, false); assert.equal(f.work.task.state, 'failed');
+});
+
+test('an active lookup that returns 404 keeps the same response reference and model request count', async () => {
+  const f = recoveryFixture(); await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.access.retrieve = async id => { f.lookups.push(id); return { status: 404, text: '' }; };
+  f.work.setPrompt('Read this'); f.work.maximum = 1; await f.work.run();
+  assert.equal(f.work.canResumeWithLimit, true);
+  assert.equal(f.saved().backgroundResponseReceipts[0].responseId, receiptId);
+  f.access.retrieve = async id => { f.lookups.push(id); return backgroundReply('completed', backgroundText('Retrieved.')); };
+  await f.work.continueTask();
+  assert.equal(f.work.result, 'Retrieved.'); assert.equal(f.posts.length, 1);
+  assert.deepEqual(f.lookups, [receiptId, receiptId]);
 });

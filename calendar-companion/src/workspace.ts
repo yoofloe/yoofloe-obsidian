@@ -1129,22 +1129,24 @@ export class AiWorkspace {
   }
   private createTask(executor: AgentExecutor, current = () => this.current, writeScope = this.writeScope, attachments: Attachment[] = [], pastedTextIsRequest = false, calendarDraft?: CalendarDraftTool, diagnostics?: DiagnosticRun): AgentTask {
     const conversation = this.library.active;
-    return new AgentTask({ current, preserve: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate, generated: this.options.generated, writeScope,
+    const task: AgentTask = new AgentTask({ current, preserve: () => this.current, key: () => this.options.preferences.key("openai"), transport: this.options.transport, executor, gate: this.options.gate, generated: this.options.generated, writeScope,
       liveResponse: this.options.liveResponse, streamResponses: this.options.streamResponses, directStream: this.options.directStream,
       ...(this.recoverResponses && this.options.androidRecovery ? {
         background: this.options.androidRecovery.access,
         rememberResponse: async (responseId: string, requestNumber: number) => {
           const turnId = this.activeChatId, turn = this.chat.find(item => item.id === turnId);
-          if (!current() || this.library.active !== conversation || !turnId || !turn) throw Error("The task changed.");
+          const ownsTurn = () => this.current && this.task === task && this.library.active === conversation && this.activeChatId === turnId;
+          if (!ownsTurn() || !turnId || !turn) throw Error("The task changed.");
           this.responseReceipts = [...this.responseReceipts.filter(item => item.turnId !== turnId), { turnId, responseId, requestNumber }];
           await this.options.storage.saveChat?.(turn);
+          if (!ownsTurn()) throw Error("The task changed.");
           await this.persist();
-          if (!current() || this.library.active !== conversation || this.activeChatId !== turnId) throw Error("The task changed.");
         },
       } : {}),
       appVisible: this.options.appVisible, holdScreen: this.options.holdScreen, steerStatus: (note, status) => this.updateSteer(note, status),
        attachmentStore: this.options.attachments, countTokens: this.options.countTokens, calendarDraft, diagnostics,
        ...(attachments.length && this.options.attachments ? { attachments: this.options.attachments.forTask(attachments, pastedTextIsRequest, diagnostics) } : {}) });
+    return task;
   }
   private journalHost(current: () => boolean, run?: DiagnosticRun): AgentHost {
     const host = this.options.host(current);
@@ -2067,6 +2069,8 @@ export class AiWorkspace {
       followUpDefault: this.followUpDefault, autoCompact: this.autoCompact, conversationLibrary: this.library,
       ...(this.customOnlineMaximum !== null ? { customOnlineMaximum: this.customOnlineMaximum } : {}),
       ...(this.customMaximum !== null ? { customMaximum: this.customMaximum } : {}) };
+    const savedTask = this.task;
+    const receipt = this.responseReceipts.find(item => item.turnId === this.activeChatId);
     const next = this.saveQueue.then(async () => {
       if (!this.current) {
         if (deleteId) throw Error("The vault changed before deletion.");
@@ -2078,6 +2082,7 @@ export class AiWorkspace {
         if (!storage.deleteConversation) throw Error("Conversation deletion is unavailable.");
         await storage.deleteConversation(deleteId, updated);
       } else await storage.save(updated);
+      if (receipt && savedTask === this.task) savedTask?.confirmResponseSaved(receipt.responseId);
       this.autoScrollChat = updated.autoScrollChat;
     });
     this.saveQueue = next.catch(() => {});

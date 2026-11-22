@@ -119,3 +119,30 @@ test('disposing an Android task aborts an outstanding direct stream and never re
   await ready;task.dispose();await work;
   assert.equal(task.state,'stopped');assert.equal(task.canResume,false);assert.equal(posts,1);
 });
+
+test('Stop releases the Android task gate when a stream stays open without a terminal event', { timeout: 6000 }, async () => {
+  let receiveHeaders, aborted = false;
+  const ready = new Promise(resolve => { receiveHeaders = resolve; });
+  const direct = createAndroidModelStream({
+    fetch: async (_url, options) => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(': still waiting\n\n'));
+        options.signal.addEventListener('abort', () => {
+          aborted = true;
+          controller.error(new DOMException('Stopped', 'AbortError'));
+        }, { once: true });
+        receiveHeaders();
+      },
+    }), { status: 200 }),
+  });
+  const gate = { busy: false };
+  const task = new AgentTask({ current: () => true, key: async () => 'sk-synthetic-agent-key', gate,
+    streamResponses: true, directStream: direct, transport: async () => assert.fail('Unexpected native POST'),
+    executor: { execute: async () => assert.fail('Stopped task cannot write') } });
+  const sent = task.run('Test the open stream', { model: 'gpt-6.2-sol' }, 'ask', 2);
+  await ready;
+  task.stop();
+  await sent;
+  assert.equal(aborted, true); assert.equal(gate.busy, false);
+  assert.equal(task.state, 'stopped'); assert.equal(task.requests, 1);
+});
