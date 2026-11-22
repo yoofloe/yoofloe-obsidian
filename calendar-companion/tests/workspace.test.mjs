@@ -27,6 +27,88 @@ function fixture() {
   return { work: new AiWorkspace(options), options, host, files, journals, saved: () => saved, calls: () => calls, keyReads: () => keyReads };
 }
 
+test('Android can continue a sixth request without an HTTP response and records the in-flight visibility change', async () => {
+  const f = fixture();
+  const { diagnostics } = diagnosticFixture();
+  f.options.diagnostics = diagnostics;
+  f.options.streamResponses = true;
+  const original = '# Example\none\ntwo\nthree\nfour\nfive\nsix\n';
+  const note = await f.host.create('Synthetic.md', original);
+  const attempts = [];
+  const noteRead = (from, through) => ({ notes: [{ reference: 'N1', from_line: from, through_line: through }] });
+  const rounds = [
+    ['read_outline', { reference: 'N1' }],
+    ['read_notes', noteRead(1, 2)],
+    ['read_notes', noteRead(4, 2)],
+    ['read_notes', noteRead(3, 4)],
+    ['read_notes', noteRead(5, 6)],
+  ];
+  const completed = output => ({
+    status: 200,
+    text: 'event: response.completed\ndata: ' + JSON.stringify({ type: 'response.completed',
+      response: { status: 'completed', output } }) + '\n\n',
+  });
+  f.options.transport = async req => {
+    const body = JSON.parse(req.body);
+    const number = attempts.push(body);
+    assert.equal(body.store, false);
+    if (number <= rounds.length) {
+      const [name, args] = rounds[number - 1];
+      return completed([{ type: 'function_call', name, arguments: JSON.stringify(args), call_id: 'fixture-' + number }]);
+    }
+    if (number === 6) {
+      diagnostics.signal('visibility', { online: true, visible: false });
+      throw Error('Unclassified native failure with private fixture details');
+    }
+    assert.equal(number, 7);
+    assert.deepEqual(body.input, attempts[5].input);
+    assert(!body.tools.some(tool => tool.type === 'web_search'));
+    assert(!('max_tool_calls' in body));
+    return completed([{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Kept the note context.' }] }]);
+  };
+
+  await f.work.initialize();
+  await f.work.newTask({ path: note.path });
+  f.work.mode = 'ask';
+  f.work.setSourceMode('expanded');
+  f.work.maximum = 6;
+  f.work.onlineMaximum = 2;
+  f.work.setPrompt('Review the attached example');
+  await f.work.run();
+  const pausedTurn = f.work.chat.at(-1);
+  const log = await diagnostics.copyReport({ turn: pausedTurn.id });
+  const report = exportedReport(log);
+  assert.equal(attempts.length, 6);
+  assert(attempts[5].tools.some(tool => tool.type === 'web_search'));
+  assert.equal(report.nextAction, 'raise_limit');
+  assert.equal(report.firstFailure.reason, 'read_range');
+  assert.equal(report.lastFailure.reason, 'response_unconfirmed');
+  assert.equal(report.lastFailure.requestNumber, 6);
+  assert.equal(report.lastFailure.appHiddenDuringRequest, true);
+  assert.equal(report.lastFailure.httpStatus, undefined);
+  assert.match(log, /request 6 · app was hidden during this request/);
+  assert.doesNotMatch(log, /Synthetic\.md|attached example|private fixture details/);
+  assert.equal(pausedTurn.status, 'paused');
+  assert.equal(f.work.canContinue, true);
+  assert.equal(f.work.canResumeWithLimit, false);
+  assert.match(f.work.message, /may still incur charges.*Choose Continue to send a new request/s);
+
+  await f.work.run();
+  assert.equal(attempts.length, 6);
+  f.work.maximum = 7;
+  diagnostics.signal('visibility', { visible: true });
+  await f.work.continueTask();
+  assert.equal(attempts.length, 7);
+  assert.equal(f.work.chat.at(-1).id, pausedTurn.id);
+  assert.equal(f.work.chat.at(-1).status, 'completed');
+  assert.equal(note.text, original);
+  const recovered = exportedReport(await diagnostics.copyReport({ turn: pausedTurn.id }));
+  assert.equal(recovered.manualContinuations, 1);
+  assert.equal(recovered.automaticRetries, 0);
+  assert.equal(recovered.outcome, 'completed');
+  await diagnostics.dispose();
+});
+
 test('an initial storage failure creates a report before any Chat turn or outbound request exists', async () => {
   const f = fixture();
   const { diagnostics } = diagnosticFixture();

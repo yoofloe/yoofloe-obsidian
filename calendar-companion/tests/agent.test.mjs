@@ -59,6 +59,45 @@ test('Android keeps a confirmed incomplete answer and never executes a partial o
   }
  }
 });
+test('Android pauses when the transport reports HTTP 200 without returning the response body', async () => {
+  let requests = 0;
+  const task = new AgentTask({
+    current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false }, streamResponses: true,
+    executor: { execute: async () => assert.fail('The unconfirmed request cannot authorize tool execution') },
+    transport: async () => {
+      if (++requests === 1) throw { status: 200, message: 'Private interrupted response detail' };
+      return stream({ type: 'response.completed', response: JSON.parse(reply([text('Continued.')]).text) });
+    },
+  });
+  await task.run('Read', { model: 'gpt-6.1-sol' }, 'ask', 2);
+  assert.equal(task.canResume, true);
+  assert.equal(task.connectionPauseReason, 'response_unconfirmed');
+  assert.equal(requests, 1);
+  assert.match(task.message, /HTTP 200 without a usable confirmation/);
+  assert.doesNotMatch(task.message, /Private interrupted response detail/);
+  await task.resume(2);
+  assert.equal(task.state, 'completed');
+  assert.equal(requests, 2);
+});
+
+test('Android keeps explicit HTTP errors terminal even when an inner cause looks like a network interruption', async () => {
+  let requests = 0;
+  const task = new AgentTask({
+    current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false }, streamResponses: true,
+    executor: { execute: async () => assert.fail('The request cannot authorize tool execution') },
+    transport: async () => {
+      requests++;
+      throw { status: '429', cause: { name: 'AbortError', message: 'private transport details' } };
+    },
+  });
+  await task.run('Read', { model: 'gpt-6.1-sol' }, 'ask', 'none');
+  assert.equal(task.state, 'failed');
+  assert.equal(task.canResume, false);
+  assert.equal(requests, 1);
+  assert.match(task.message, /HTTP 429 reported by Obsidian/);
+  assert.doesNotMatch(task.message, /private transport details/);
+});
+
 test('data scope and write scope are independent, paths/secrets/configuration never bypass local guards',()=>{
  assert(allowedPath(policy,'Other/B.md','read'));assert(!allowedPath(policy,'Other/B.md','edit'));assert(!allowedPath(policy,'Work/New.md','create'));
  for(const path of ['../A.md','/A.md','C:/A.md','Work/../A.md','.obsidian/settings.md','Private/A.md','Yoofloe AI/Backups/a.md'])assert(!allowedPath(policy,path,'read'));

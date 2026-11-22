@@ -23,7 +23,8 @@ const stages = [
 const outcomes = ["started", "received", "ok", "failed", "waiting", "skipped", "paused", "stopped", "interrupted", "unconfirmed", "completed"] as const;
 const reasons = [
   "unknown", "dns", "tls", "timeout", "connection_reset", "offline", "unreachable", "aborted", "http",
-  "stream_incomplete", "response_invalid", "input_budget", "request_limit", "missing_key", "scope",
+  "stream_incomplete", "response_invalid", "response_unconfirmed", "input_budget", "request_limit", "missing_key", "scope",
+  "tool_arguments", "note_reference_unavailable", "read_range",
   "version_conflict", "superseded", "already_executed", "storage", "vault_changed", "user_action",
   "no_verified_reply", "invalid_reply", "expired", "conflict", "not_found", "cancelled", "rejected",
   "revision_unavailable", "invalid_revision", "session_reopened", "pending_confirmation", "unsupported",
@@ -78,6 +79,7 @@ export interface DiagnosticDetail {
   operationId?: string;
   online?: boolean;
   visible?: boolean;
+  appHiddenDuringRequest?: boolean;
   contextReused?: boolean;
   remoteConfirmed?: boolean;
   providerProcessingMs?: number;
@@ -166,6 +168,7 @@ function detail(input: unknown): DiagnosticDetail {
     relatedRun: matching(v.relatedRun, idPattern), operationId: matching(v.operationId, idPattern),
     online: typeof v.online === "boolean" ? v.online : undefined,
     visible: typeof v.visible === "boolean" ? v.visible : undefined,
+    appHiddenDuringRequest: v.appHiddenDuringRequest === true ? true : undefined,
     contextReused: typeof v.contextReused === "boolean" ? v.contextReused : undefined,
     remoteConfirmed: typeof v.remoteConfirmed === "boolean" ? v.remoteConfirmed : undefined,
     providerProcessingMs: integer(v.providerProcessingMs),
@@ -269,7 +272,11 @@ export function diagnoseLocal(error: unknown, fallback: DiagnosticReason = "unkn
     const value = record(error);
     if (value.name === "QuotaExceededError" || value.name === "NotFoundError") return "storage";
     const message = typeof value.message === "string" ? value.message.slice(0, 240) : "";
-    if (/^(?:The (?:selected )?note changed\.|Read the current note version first\.)/.test(message)) return "version_conflict";
+    if (/^(?:The (?:selected )?note changed\.|Read the current note version first\.|The original selection is no longer available\.)/.test(message)) return "version_conflict";
+    if (error instanceof SyntaxError || /^(?:Unsupported tool arguments|Invalid text argument|Choose a bounded set of notes)\.$/.test(message)) return "tool_arguments";
+    if (message === "Read a reference returned by this task's search first.") return "note_reference_unavailable";
+    if (/^(?:Use positive line numbers,|The line range is reversed\.|The requested lines are outside this reference\.|Use the next_cursor returned by the last read\.)/.test(message))
+      return "read_range";
     if (/^(?:The vault changed\.?|Vault changed)$/.test(message)) return "vault_changed";
     if (/^(?:The (?:note|folder|path|attached note) is .*outside |This .* is outside |Access scope |Permission denied)/i.test(message)) return "scope";
   } catch { /* The failure remains unclassified. */ }
@@ -424,7 +431,11 @@ export function formatDiagnostics(input: DiagnosticReport, storageUnconfirmed = 
   const failure = report.lastFailure ?? [...events].reverse().find(event => isIssue(event.outcome));
   const date = (time: number) => new Date(time).toISOString();
   const describe = (event?: DiagnosticEvent) => event ? [human(event.stage), event.action && human(event.action), human(event.outcome),
-    event.reason && human(event.reason), event.reference, event.errorCode, event.httpStatus && "HTTP " + event.httpStatus].filter(Boolean).join(" · ") : "None observed";
+    event.reason && human(event.reason), event.reference, event.errorCode, event.httpStatus && "HTTP " + event.httpStatus,
+    event.requestNumber && "request " + event.requestNumber,
+    event.visible === false && "app hidden", event.visible === true && "app visible",
+    event.online === false && "device offline", event.online === true && "device reports online",
+    event.appHiddenDuringRequest && "app was hidden during this request"].filter(Boolean).join(" · ") : "None observed";
   const first = [
     "Yoofloe diagnostics",
     human(report.area) + " · " + human(report.outcome) + " · " + date(report.startedAt),
