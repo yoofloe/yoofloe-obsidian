@@ -67,6 +67,7 @@ export class AiWorkspace {
   library = readLibrary(null);
   autoCompact = true;
   recoverResponses = false;
+  private appSwitchEnabled = false;
   private responseReceipts: SavedResponseReceipt[] = [];
   autoScrollChat = true;
   private pendingAutoScrollChat: boolean | null = null;
@@ -150,7 +151,7 @@ export class AiWorkspace {
   readonly workspaceCalendarChanges: CalendarChangeController<CalendarWorkspaceChangeDraft, CalendarWorkspaceChangeReply>;
   constructor(private readonly options: {
     current(): boolean; preferences: AiPreferences; host(current: () => boolean): AgentHost; transport: AiTransport; countTokens?: AiTransport; liveResponse?: OpenLiveResponse; generated?: GeneratedStore; attachments?: AttachmentStore;
-    appVisible?: () => boolean; holdScreen?: () => (() => void) | undefined; directStream?: AndroidModelStream; androidRecovery?: AndroidRecovery;
+    appVisible?: () => boolean; appOnline?: () => boolean; holdScreen?: () => (() => void) | undefined; directStream?: AndroidModelStream; androidRecovery?: AndroidRecovery;
     streamResponses?: boolean; gate: { busy: boolean }; configDir: string; storage: WorkspaceStorage; sharing?: SharedConversations; calendar?: () => CalendarSession;
     diagnostics?: Diagnostics;
     calendarChange?: () => CalendarChangeSession; inboxHint(): string;
@@ -230,6 +231,11 @@ export class AiWorkspace {
   get canChangeResponseRecovery(): boolean {
     return this.supportsResponseRecovery && this.current && this.ready && !this.restoreFailed && !this.switchingConversation && !this.busy;
   }
+  get supportsAppSwitchContinuation(): boolean { return !!this.options.androidRecovery?.appSwitch; }
+  get continueWhenSwitchingApps(): boolean { return this.recoverResponses && this.appSwitchEnabled; }
+  get canChangeAppSwitchContinuation(): boolean {
+    return this.supportsAppSwitchContinuation && this.recoverResponses && this.canChangeResponseRecovery;
+  }
   get suggestResponseRecovery(): boolean {
     const reason = this.task?.connectionPauseReason;
     return this.canChangeResponseRecovery && !this.recoverResponses && this.canContinue &&
@@ -275,6 +281,7 @@ export class AiWorkspace {
   private async load(): Promise<void> {
     if (this.ready) return;
     try { this.recoverResponses = this.options.androidRecovery?.enabled() === true; } catch { this.recoverResponses = false; }
+    try { this.appSwitchEnabled = this.options.androidRecovery?.appSwitch?.enabled() === true; } catch { this.appSwitchEnabled = false; }
     try {
       const raw = await this.options.storage.load(); if (!this.current) return;
       if (raw !== null && raw !== undefined && (typeof raw !== "object" || Array.isArray(raw))) throw Error("Invalid saved workspace");
@@ -486,6 +493,25 @@ export class AiWorkspace {
       this.recoverResponses = enabled;
     } catch { this.recoverResponses = false; this.message = "Response recovery is off in this session. The device setting could not be saved."; }
     this.changed();
+  }
+  setAppSwitchContinuation(enabled: boolean): void {
+    const preference = this.options.androidRecovery?.appSwitch;
+    if (!preference || !this.canChangeAppSwitchContinuation) return;
+    try {
+      preference.setEnabled(enabled);
+      if (preference.enabled() !== enabled) throw Error();
+      this.appSwitchEnabled = enabled;
+    } catch { this.appSwitchEnabled = false; this.message = "The app-switch setting could not be saved on this device."; }
+    this.changed();
+  }
+  appVisibilityChanged(visible: boolean): void {
+    if (!this.current || !this.task) return;
+    this.task.appVisibilityChanged(visible);
+    this.changed("progress");
+    if (visible) this.resumeAfterAppSwitch();
+  }
+  resumeAfterAppSwitch(): void {
+    if (this.task?.waitingForAppReturn) void this.continueTask("app_switch");
   }
   setAutoCompact(enabled: boolean): void {
     if (this.settingsLocked || !this.current) return;
@@ -1141,6 +1167,7 @@ export class AiWorkspace {
       liveResponse: this.options.liveResponse, streamResponses: this.options.streamResponses, directStream: this.options.directStream,
       ...(this.recoverResponses && this.options.androidRecovery ? {
         background: this.options.androidRecovery.access,
+        ...(this.continueWhenSwitchingApps ? { keepWorkingWhenHidden: () => this.continueWhenSwitchingApps } : {}),
         rememberResponse: async (responseId: string, requestNumber: number) => {
           const turnId = this.activeChatId, turn = this.chat.find(item => item.id === turnId);
           const ownsTurn = () => this.current && this.task === task && this.library.active === conversation && this.activeChatId === turnId;
@@ -1650,6 +1677,7 @@ export class AiWorkspace {
     completed = completed && !this.stopRequested;
     if (this.stopRequested) this.message = "Stopped. Completed work and any returned answer are kept; no further request or file action will start.";
     const paused = task?.state === "paused" && !this.stopRequested;
+    let resumeOnReturn = false;
     if (!completed && !paused && !this.queueHeld) this.holdQueue("Review queued messages before sending again.");
     if (completed && this.agent?.pendingTrash.length) this.holdQueue("Review the Trash proposal before resuming the queue.");
     const entry = this.followUps.find(item => item.id === this.activeQueueId);
@@ -1672,14 +1700,18 @@ export class AiWorkspace {
         if (turn && (turn.status === "completed" || turn.status === "stopped" || turn.status === "failed"))
           await this.publishChange(this.activeConversation, [turn]);
       }
-      if (paused) diagnostic?.finish("paused", task?.hasPendingResponse ? "check_response" : this.canResumeWithLimit ? "continue" : "raise_limit", {
-        requestNumber: task?.requests || undefined,
-        reason: task?.connectionPauseReason ?? (task?.pausedForInput ? "input_budget" : "request_limit"),
-      });
-      else if (completed) diagnostic?.finish("completed", "none", { requestNumber: task?.requests || undefined });
+      if (paused) {
+        resumeOnReturn = task?.waitingForAppReturn === true && this.canResumeWithLimit;
+        diagnostic?.finish("paused", resumeOnReturn ? "return_to_app" :
+          task?.hasPendingResponse ? "check_response" : this.canResumeWithLimit ? "continue" : "raise_limit", {
+          requestNumber: task?.requests || undefined,
+          reason: task?.connectionPauseReason ?? (task?.pausedForServer ? "http" : task?.pausedForInput ? "input_budget" : "request_limit"),
+        });
+      } else if (completed) diagnostic?.finish("completed", "none", { requestNumber: task?.requests || undefined });
       else diagnostic?.finish(task?.state === "stopped" || this.stopRequested ? "stopped" : "failed", "review");
       return completed;
     } catch {
+      task?.clearAppReturnResume();
       diagnostic?.event("conversation_save", "failed", { reason: "storage" });
       diagnostic?.finish(paused ? "paused" : "unconfirmed", paused && task?.hasPendingResponse ? "check_response" :
         paused && this.canResumeWithLimit ? "continue" : paused ? "raise_limit" : "review");
@@ -1691,6 +1723,7 @@ export class AiWorkspace {
       if (!paused && this.activeDiagnostics === diagnostic) this.activeDiagnostics = undefined;
       void this.diagnostics?.flush();
       this.busy = false; this.changed();
+      if (resumeOnReturn) queueMicrotask(() => { if (this.task === task) this.resumeAfterAppSwitch(); });
     }
   }
   private async persistResolvedResponse(task: AgentTask | null): Promise<void> {
@@ -1808,6 +1841,7 @@ export class AiWorkspace {
     turn.durationMs = task.durationMs;
     turn.pausedForInput = task.pausedForInput || undefined;
     turn.pausedForConnection = task.state === "paused" && task.pausedForConnection || undefined;
+    turn.pausedForServer = task.state === "paused" && task.pausedForServer || undefined;
     turn.readCoverage = agent.readCoverage;
     turn.activity = [...task.events];
     turn.steers = [...task.steerNotes];
@@ -1836,11 +1870,16 @@ export class AiWorkspace {
     catch { this.message = "The full local chat record is unavailable. Its saved preview is kept."; }
     this.changed();
   }
-  async continueTask(): Promise<void> {
+  async continueTask(source: "manual" | "app_switch" = "manual"): Promise<void> {
     if (this.busy || !this.canContinue || !this.task || !this.agent) return;
-    if (!this.canResumeWithLimit) { this.message = this.limitProblem || "Choose a total limit above requests already used, or no request-count limit."; this.changed(); return; }
     const task = this.task, agent = this.agent;
-    task.diagnostics?.resume({ contextReused: true, requestNumber: task.hasPendingResponse ? task.requests : task.requests + 1, requestLimit: this.maximum, evidence: "user_action" });
+    const automatic = source === "app_switch";
+    if (automatic && (!task.waitingForAppReturn || this.options.appVisible?.() !== true ||
+        this.options.appOnline?.() === false || this.options.gate.busy || !this.canResumeWithLimit)) return;
+    if (!this.canResumeWithLimit) { this.message = this.limitProblem || "Choose a total limit above requests already used, or no request-count limit."; this.changed(); return; }
+    task.clearAppReturnResume();
+    task.diagnostics?.resume({ contextReused: true, requestNumber: task.hasPendingResponse ? task.requests : task.requests + 1,
+      requestLimit: this.maximum, ...(automatic ? { action: "app_switch_resume" as const } : { evidence: "user_action" as const }) });
     this.busy = true; this.running = true; this.stopRequested = false;
     this.message = task.hasPendingResponse ? "Checking the existing OpenAI response." : "Continuing the original task with its original model and scopes."; this.changed();
     const unsubscribe = this.watchTask(task);

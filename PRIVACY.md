@@ -33,6 +33,7 @@ The API key goes in the authorization header, never in a prompt or URL. Do not p
 
 No OpenAI request is made by opening the plugin, selecting a model, saving a key, selecting attachments, searching local chat history or looking up Calendar or ChronoHUD records locally.
 The Android **Recover interrupted responses** option is off by default and is saved on this device. Enabling it sends future model requests with `background: true` and `store: false`. OpenAI temporarily stores request and response data for retrieval. Yoofloe keeps accepted response IDs in encrypted device conversation state. Continue retrieves the existing response by ID. Stop requests cancellation of a known pending job. [OpenAI background mode](https://developers.openai.com/api/docs/guides/background)
+With response recovery enabled, **Continue when switching apps** lets an approved Android task continue sending its permitted requests to OpenAI and performing permitted note actions while Obsidian can run. In the same vault session, Obsidian can resume an interrupted input check or retrieve an accepted response when it becomes visible and online. This option is off by default, saved on this device, and applies to new tasks.
 Yoofloe operates no relay or database for this plugin. Expanded mode can invoke OpenAI web search when you send a task. Store/help links open only when you choose them;
 Obsidian's own updates and other plugins have their own network behavior.
 

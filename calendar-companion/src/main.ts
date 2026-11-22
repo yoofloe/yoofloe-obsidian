@@ -299,12 +299,18 @@ export default class YoofloeAiPlugin extends Plugin {
       Platform.isWin ? "windows" : Platform.isMacOS ? "macos" : Platform.isLinux ? "linux" : "other";
     const diagnostics = new Diagnostics(diagnosticDevice, { plugin: this.manifest.version, obsidian: apiVersion, platform },
       sameVault, Date.now, networkSignals, viewWindow);
-    const networkChanged = () => diagnostics.signal("network", networkSignals());
+    const networkChanged = () => {
+      const signals = networkSignals();
+      diagnostics.signal("network", signals);
+      if (Platform.isAndroidApp && sameVault() && signals.online) this.work?.resumeAfterAppSwitch();
+    };
     this.registerDomEvent(viewWindow, "online", networkChanged);
     this.registerDomEvent(viewWindow, "offline", networkChanged);
     this.registerDomEvent(document, "visibilitychange", () => {
-      diagnostics.signal("visibility", networkSignals());
-      if (document.visibilityState !== "visible") void diagnostics.flush();
+      const signals = networkSignals();
+      diagnostics.signal("visibility", signals);
+      if (Platform.isAndroidApp && sameVault()) this.work?.appVisibilityChanged(signals.visible);
+      if (!signals.visible) void diagnostics.flush();
     });
     this.registerDomEvent(viewWindow, "pagehide", () => {
       diagnostics.signal("session", { visible: false });
@@ -402,6 +408,10 @@ export default class YoofloeAiPlugin extends Plugin {
         androidRecovery: {
           enabled: () => this.app.loadLocalStorage("yoofloe-android-response-recovery") === true,
           setEnabled: (enabled: boolean) => this.app.saveLocalStorage("yoofloe-android-response-recovery", enabled),
+          appSwitch: {
+            enabled: () => this.app.loadLocalStorage("yoofloe-android-continue-when-switching-apps") === true,
+            setEnabled: enabled => this.app.saveLocalStorage("yoofloe-android-continue-when-switching-apps", enabled),
+          },
           access: backgroundAccess(async request => {
             if (this.app.vault !== owner) throw Error("Vault changed");
             const { status, text, headers } = await requestUrl(request);
@@ -409,6 +419,7 @@ export default class YoofloeAiPlugin extends Plugin {
           }, document),
         },
         appVisible: () => document.visibilityState === "visible",
+        appOnline: () => viewWindow.navigator.onLine,
         holdScreen: () => holdRequestScreen(viewWindow.navigator.wakeLock, document),
       } : {}),
       generated: generatedStore({ ...localFiles, download: provider.download }),

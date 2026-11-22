@@ -21,7 +21,7 @@ const OUTPUT_RESERVE = 128000;
 const FORMAT_RESERVE = 8192;
 export const TOKEN_COUNT_THRESHOLD = 24000;
 export class InputBudgetError extends Error {
-  constructor(message: string, readonly retryable = false) { super(message); }
+  constructor(message: string, readonly retryable = false, readonly transportInterrupted = false) { super(message); }
 }
 
 function inputKinds(value: unknown, found = { files: false, compaction: false }): typeof found {
@@ -81,7 +81,7 @@ export async function verifyInputBudget(
       headers: { Authorization: "Bearer " + key }, body: encoded, throw: false,
     }));
   } catch (error) {
-    throw new InputBudgetError(`Input-size verification ${openAiTransportFailure(error)}. Your draft and completed work are kept.`, true);
+    throw new InputBudgetError(`Input-size verification ${openAiTransportFailure(error)}. Your draft and completed work are kept.`, true, true);
   }
   if (!current()) throw new InputBudgetError("Stopped after the input check. No next model request was sent.");
   if (response.status < 200 || response.status >= 300)

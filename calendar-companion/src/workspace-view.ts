@@ -814,6 +814,7 @@ export class YoofloeAiView extends ItemView {
   }
   private updateWorkHeading(metadata: HTMLElement, turn: ChatTurn): void {
     const label = turn.status === "running" && this.work.stopping ? "Stopping…" :
+      turn.status === "paused" && turn.pausedForServer ? "Paused for OpenAI" :
       turn.status === "paused" && turn.pausedForConnection ? "Paused for connection" :
       turn.status === "paused" && turn.pausedForInput ? "Paused at input verification" :
       turn.status === "failed" && confirmedChangeCount(turn) > 0 ? "Changes saved · Could not finish" : WORK_STATUS[turn.status];
@@ -905,7 +906,7 @@ export class YoofloeAiView extends ItemView {
   }
   private statusFeedback(): string {
     const w = this.work;
-    const feedback = w.busy && w.task?.busy ? w.task.message : w.message;
+    const feedback = w.task?.workingInBackground ? "Working in background" : w.busy && w.task?.busy ? w.task.message : w.message;
     if (this.settingsExpanded || this.chatQuery) return feedback;
     const latest = w.chat.at(-1);
     return latest && (taskFailure(latest) === feedback || latest.fileWarnings?.includes(feedback)) ? "" : feedback;
@@ -1436,6 +1437,15 @@ export class YoofloeAiView extends ItemView {
       recovery.setAttribute("aria-describedby", info);
       data.createEl("p", { cls: "y-ai-hint y-ai-response-recovery-info", attr: { id: info },
         text: "Applies to new tasks on this device. OpenAI temporarily stores requests and replies for recovery." });
+      if (w.supportsAppSwitchContinuation) {
+        const continuation = this.settingSwitch(data, "Continue when switching apps", w.continueWhenSwitchingApps,
+          w.canChangeAppSwitchContinuation, enabled => w.setAppSwitchContinuation(enabled));
+        const hint = `${this.settingsId}-app-switch-info`;
+        continuation.setAttribute("aria-describedby", hint);
+        data.createEl("p", { cls: "y-ai-hint y-ai-response-recovery-info", attr: { id: hint }, text: w.recoverResponses ?
+          "Applies to new tasks. Approved requests and note actions can continue while Obsidian can run." :
+          "Turn on response recovery to use this setting." });
+      }
     }
     const diagnostics = w.diagnostics;
     if (diagnostics) {

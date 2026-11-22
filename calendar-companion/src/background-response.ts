@@ -8,12 +8,13 @@ const states = ["queued", "in_progress", "completed", "incomplete", "cancelled",
 type ResponseState = typeof states[number];
 export interface SavedResponseReceipt { turnId: string; responseId: string; requestNumber: number }
 export interface BackgroundAccess {
-  retrieve(id: string, key: string, signal?: AbortSignal): Promise<AiHttpResponse>;
+  retrieve(id: string, key: string, signal?: AbortSignal, allowHidden?: boolean): Promise<AiHttpResponse>;
   cancel(id: string, key: string): Promise<AiHttpResponse>;
-  wait(milliseconds: number, signal: AbortSignal): Promise<void>;
+  wait(milliseconds: number, signal: AbortSignal, allowHidden?: boolean): Promise<void>;
 }
 export interface AndroidRecovery {
   access: BackgroundAccess;
+  appSwitch?: { enabled(): boolean; setEnabled(value: boolean): void };
   enabled(): boolean;
   setEnabled(value: boolean): void;
 }
@@ -50,10 +51,30 @@ export function backgroundAccess(request: StatusHttp, owner: Document): Backgrou
     return request({ url: OPENAI_ENDPOINT + "/" + id + (cancel ? "/cancel" : ""), method: cancel ? "POST" : "GET",
       headers: { Authorization: "Bearer " + validateOpenAiKey(key) }, throw: false });
   };
+  const lookups = new Map<string, { key: string; response: Promise<AiHttpResponse> }[]>();
+  const lookup = (id: string, key: string) => {
+    const originalKey = validateOpenAiKey(key);
+    const active = lookups.get(id) ?? [];
+    // A return to the app can replace a stalled check. Native requestUrl can still be finishing the old GET.
+    if (active.length >= 2) {
+      const matching = active.slice().reverse().find(entry => entry.key === originalKey);
+      return matching?.response ?? Promise.reject(Error("Earlier status checks are still finishing. Try again in a moment."));
+    }
+    const response = call(id, originalKey, false);
+    const entry = { key: originalKey, response };
+    active.push(entry);
+    lookups.set(id, active);
+    const finished = () => {
+      active.splice(active.indexOf(entry), 1);
+      if (!active.length) lookups.delete(id);
+    };
+    void response.then(finished, finished);
+    return response;
+  };
   return {
-    retrieve: (id, key, signal) => {
-      if (!signal) return call(id, key, false);
-      if (signal.aborted || owner.visibilityState !== "visible") return Promise.reject(Error("The status check was interrupted."));
+    retrieve: (id, key, signal, allowHidden = false) => {
+      if (!signal) return lookup(id, key);
+      if (signal.aborted || !allowHidden && owner.visibilityState !== "visible") return Promise.reject(Error("The status check was interrupted."));
       return new Promise<AiHttpResponse>((resolve, reject) => {
         const cleanup = () => {
           signal.removeEventListener("abort", interrupted);
@@ -62,15 +83,15 @@ export function backgroundAccess(request: StatusHttp, owner: Document): Backgrou
         const interrupted = () => { cleanup(); reject(Error("The status check was interrupted.")); };
         const changed = () => { if (owner.visibilityState !== "visible") interrupted(); };
         signal.addEventListener("abort", interrupted, { once: true });
-        owner.addEventListener("visibilitychange", changed);
-        try { call(id, key, false).then(resolve, reject).finally(cleanup); }
+        if (!allowHidden) owner.addEventListener("visibilitychange", changed);
+        try { lookup(id, key).then(resolve, reject).finally(cleanup); }
         catch (error) { cleanup(); reject(error instanceof Error ? error : Error("The status check was interrupted.")); }
       });
     },
     cancel: (id, key) => call(id, key, true),
-    wait: (milliseconds, signal) => new Promise<void>(resolve => {
+    wait: (milliseconds, signal, allowHidden = false) => new Promise<void>(resolve => {
       const win = owner.defaultView;
-      if (!win || signal.aborted || owner.visibilityState !== "visible") { resolve(); return; }
+      if (!win || signal.aborted || !allowHidden && owner.visibilityState !== "visible") { resolve(); return; }
       const done = () => {
         win.clearTimeout(timer);
         signal.removeEventListener("abort", done);
@@ -79,7 +100,7 @@ export function backgroundAccess(request: StatusHttp, owner: Document): Backgrou
       };
       const timer = win.setTimeout(done, milliseconds);
       signal.addEventListener("abort", done, { once: true });
-      owner.addEventListener("visibilitychange", done, { once: true });
+      if (!allowHidden) owner.addEventListener("visibilitychange", done, { once: true });
     }),
   };
 }

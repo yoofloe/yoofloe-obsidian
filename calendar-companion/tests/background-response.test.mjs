@@ -41,6 +41,28 @@ test('hidden or aborted lookup stops waiting and ignores its late native respons
   assert.equal(calls, 1);
 });
 
+test('app switches reuse a pending status check after one native replacement', async () => {
+  const pending = [];
+  const access = backgroundAccess(() => new Promise(resolve => { pending.push(resolve); }), page());
+  for (let switchNumber = 0; switchNumber < 5; switchNumber++) {
+    const controller = new AbortController();
+    const lookup = access.retrieve(id, key, controller.signal, true);
+    controller.abort();
+    await assert.rejects(lookup, /interrupted/);
+  }
+  assert.equal(pending.length, 2);
+  await assert.rejects(access.retrieve(id, 'sk-synthetic-different-project'), /still finishing/);
+  const existing = access.retrieve(id, key);
+  assert.equal(pending.length, 2);
+  pending[1](reply);
+  assert.equal(await existing, reply);
+  const next = access.retrieve(id, key);
+  assert.equal(pending.length, 3);
+  pending[2](reply);
+  pending[0](reply);
+  assert.equal(await next, reply);
+});
+
 test('stored references and provider state require matching IDs and a valid turn', () => {
   const turnId = crypto.randomUUID();
   assert.deepEqual(backgroundEnvelope(reply.text, id), { id, status: 'completed' });

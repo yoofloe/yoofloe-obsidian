@@ -37,15 +37,25 @@ export function openAiErrorCodes(value: unknown): string[] {
   return [...new Set([value.type, value.code].filter((code): code is string => typeof code === "string" && errorCodes.has(code)))];
 }
 
+function readOpenAiHttpError(raw: string): Record<string, unknown> | null {
+  if (raw.length > 65536) return null;
+  try {
+    const data: unknown = JSON.parse(raw);
+    return object(data) && object(data.error) ? data.error : null;
+  } catch { return null; }
+}
+
+export function isOpenAiServerError(status: number, raw: string): boolean {
+  return status === 500 && openAiErrorCodes(readOpenAiHttpError(raw)).includes("server_error");
+}
+
 function failureDetails(status: number, raw: string, includeParameter: boolean): string {
   const parts = [`HTTP ${status}`];
-  if (raw.length <= 65536) try {
-    const data: unknown = JSON.parse(raw), error = object(data) && object(data.error) ? data.error : null;
-    if (error) {
-      parts.push(...openAiErrorCodes(error));
-      if (includeParameter && typeof error.param === "string" && error.param.length <= 96 && /^(?:model|tool_choice|parallel_tool_calls|max_tool_calls|reasoning(?:\.effort)?|tools(?:\[\d{1,3}\](?:\.(?:type|model|quality|size|output_format))?)?|input(?:\[\d{1,3}\]\.content(?:\[\d{1,3}\](?:\.(?:type|file_id|image_url|detail))?)?)?)$/.test(error.param)) parts.push(`parameter: ${error.param}`);
-    }
-  } catch { /* A non-JSON error still has a useful status without exposing its body. */ }
+  const error = readOpenAiHttpError(raw);
+  if (error) {
+    parts.push(...openAiErrorCodes(error));
+    if (includeParameter && typeof error.param === "string" && error.param.length <= 96 && /^(?:model|tool_choice|parallel_tool_calls|max_tool_calls|reasoning(?:\.effort)?|tools(?:\[\d{1,3}\](?:\.(?:type|model|quality|size|output_format))?)?|input(?:\[\d{1,3}\]\.content(?:\[\d{1,3}\](?:\.(?:type|file_id|image_url|detail))?)?)?)$/.test(error.param)) parts.push(`parameter: ${error.param}`);
+  }
   return parts.join("; ");
 }
 

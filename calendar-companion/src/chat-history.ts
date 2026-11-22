@@ -20,6 +20,7 @@ export interface ChatTurn {
   referenceSnapshot?: ReferenceSnapshot;
   pausedForInput?: boolean;
   pausedForConnection?: boolean;
+  pausedForServer?: boolean;
   readCoverage?: ReadCoverage[];
   uploadCleanupWarning?: string;
   generatedTruncated?: boolean;
@@ -96,6 +97,7 @@ export function readChat(value: unknown): ChatTurn | null {
     sourceMode: v.sourceMode === "expanded" ? "expanded" : "provided", sources: sourceList(v.sources), generated: readGeneratedFiles(v.generated), generatedTruncated: v.generatedTruncated === true,
     attachments: readAttachments(v.attachments), ...(reference ? { reference } : {}), ...(referenceSnapshot ? { referenceSnapshot } : {}),
     ...(v.pausedForInput === true ? { pausedForInput: true } : {}), ...(v.pausedForConnection === true ? { pausedForConnection: true } : {}),
+    ...(v.pausedForServer === true ? { pausedForServer: true } : {}),
     ...(readCoverage ? { readCoverage } : {}),
     transcriptions: count(v.transcriptions), fileWarnings: Array.isArray(v.fileWarnings) ? v.fileWarnings.filter((value): value is string => typeof value === "string").slice(0, 32).map(value => value.slice(0, 500)) : [],
     ...(typeof v.uploadCleanupWarning === "string" ? { uploadCleanupWarning: workText(v.uploadCleanupWarning, 500) } : {}),

@@ -1,6 +1,6 @@
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport, type AiHttpResponse } from "./ai-session";
 import { validateOpenAiKey, validateOpenAiOptions } from "./openai";
-import { OpenAiConnectionPause, openAiTransportFailure, requestOpenAiRound } from "./openai-request";
+import { OpenAiConnectionPause, OpenAiServerPause, openAiTransportFailure, requestOpenAiRound } from "./openai-request";
 import { openAiStreamResult } from "./openai-stream";
 import type { AndroidModelStream } from "./android-model-stream";
 import { backgroundEnvelope, isBackgroundPending, type BackgroundAccess } from "./background-response";
@@ -46,6 +46,7 @@ export class AgentTask {
   usage = { input: 0, output: 0, reasoning: 0 };
   inputBudget: InputBudget | null = null;
   pausedForInput = false;
+  pausedForServer = false;
   connectionPauseReason: DiagnosticReason | undefined;
   online = emptyOnlineUsage();
   sources: WebSource[] = [];
@@ -96,6 +97,9 @@ export class AgentTask {
   private nativeOnContinue = false;
   private pendingResponse?: PendingResponse;
   private lookupAbort?: AbortController;
+  private lookupCrossedAppSwitch = false;
+  private hiddenTransitions = 0;
+  private resumeOnAppReturn = false;
   private cancelling?: Promise<void>;
   private preserveResponseOnUnload = false;
   resolvedResponseId?: string;
@@ -108,6 +112,7 @@ export class AgentTask {
     steerStatus?(note: SteerNote, status: SteerStatus): void;
     executor: AgentExecutor; gate: { busy: boolean }; generated?: GeneratedStore; attachments?: AttachmentRun; attachmentStore?: AttachmentStore; writeScope?: WriteScope; calendarDraft?: CalendarDraftTool;
     background?: BackgroundAccess; rememberResponse?: (id: string, requestNumber: number) => Promise<void>;
+    keepWorkingWhenHidden?: () => boolean;
     diagnostics?: DiagnosticRun;
   }) {}
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -115,6 +120,22 @@ export class AgentTask {
   get draftingCalendar() { return !!this.options.calendarDraft; }
   get hasStagedCalendarProposal() { return this.stagedCalendarProposal; }
   get pausedForConnection(): boolean { return this.connectionPauseReason !== undefined; }
+  private get continueWhileAway(): boolean { return !!this.options.background && this.options.keepWorkingWhenHidden?.() === true; }
+  get workingInBackground(): boolean {
+    return this.state === "running" && !this.stopped && this.continueWhileAway && this.options.appVisible?.() === false;
+  }
+  get waitingForAppReturn(): boolean { return this.state === "paused" && this.resumeOnAppReturn && this.continueWhileAway; }
+  clearAppReturnResume(): void { this.resumeOnAppReturn = false; }
+  appVisibilityChanged(visible: boolean): void {
+    if (!this.continueWhileAway) return;
+    if (!visible) {
+      this.hiddenTransitions++;
+      if (this.lookupAbort) this.lookupCrossedAppSwitch = true;
+    } else if (this.lookupCrossedAppSwitch) {
+      // Abandon a status wait that crossed the app switch. Its saved response ID can be checked again.
+      this.lookupAbort?.abort();
+    }
+  }
   get diagnostics() { return this.options.diagnostics; }
   private update(kind: ActivityKind, text: string, state: ActivityState = kind === "blocked" ? "blocked" : kind === "request" ? "working" : "done"): void {
     text = workText(text);
@@ -326,7 +347,7 @@ export class AgentTask {
     return prepared.parts;
   }
   private pauseIfHidden(): boolean {
-    if (this.options.appVisible?.() !== false || this.stopped || !this.options.current()) return false;
+    if (this.options.appVisible?.() !== false || this.continueWhileAway || this.stopped || !this.options.current()) return false;
     if (this.pendingResponse) {
       this.pauseForResponse("OpenAI accepted this request. Return to Obsidian and choose Continue to check its result.");
       return true;
@@ -341,7 +362,8 @@ export class AgentTask {
   }
   private async advance(maximum: RequestLimit): Promise<void> {
     this.busy = true; this.options.gate.busy = true; this.stopped = false; this.stopDeferredCleanup = false;
-    this.pausedForInput = false; this.connectionPauseReason = undefined; this.state = "running"; this.activeSince = Date.now();
+    this.resumeOnAppReturn = false;
+    this.pausedForInput = false; this.pausedForServer = false; this.connectionPauseReason = undefined; this.state = "running"; this.activeSince = Date.now();
     const previousFailure = this.diagnostics?.report.lastFailure;
     try {
       this.update("status", this.requests ? "Continuing the task" : "Preparing the request", "working");
@@ -447,24 +469,28 @@ export class AgentTask {
       this.pausedForInput = sessionCanContinue && error instanceof InputBudgetError && error.retryable;
       const connection = error instanceof OpenAiConnectionPause ? error : undefined;
       this.connectionPauseReason = sessionCanContinue ? connection?.reason : undefined;
-      const paused = error instanceof AttachmentBudgetPause || this.pausedForInput || this.pausedForConnection;
+      this.pausedForServer = sessionCanContinue && error instanceof OpenAiServerPause;
+      const paused = error instanceof AttachmentBudgetPause || this.pausedForInput || this.pausedForConnection || this.pausedForServer;
       if (this.diagnostics?.report.lastFailure === previousFailure || error instanceof AttachmentBudgetPause) {
         this.diagnostics?.event("prepare", paused ? "paused" : this.stopped ? "stopped" : "failed", {
           reason: error instanceof AttachmentBudgetPause ? "request_limit" : error instanceof InputBudgetError ? "input_budget" : diagnoseLocal(error),
         });
       }
       if (paused) {
-        if (this.pausedForConnection) for (const note of this.sendingSteers) this.options.steerStatus?.(note, "steer-pending");
+        if (this.pausedForConnection || this.pausedForServer) for (const note of this.sendingSteers) this.options.steerStatus?.(note, "steer-pending");
         this.pendingSteers = [...this.sendingSteers, ...this.pendingSteers]; this.sendingSteers = [];
       }
       this.state = paused ? "paused" : this.stopped ? "stopped" : "failed";
       const message = error instanceof Error ? error.message : "The task could not finish. No retry was made.";
-      if (this.pausedForInput) this.update("status", message + " Choose Continue to retry the input check.", "waiting");
-      else if (this.pausedForConnection) {
+      if (this.pausedForInput) this.update("status", message + (this.waitingForAppReturn ?
+        " The input check will continue when Obsidian is visible and online." : " Choose Continue to retry the input check."), "waiting");
+      else if (this.pausedForServer || this.pausedForConnection) {
         const limit = maximum !== "none" && this.requests >= maximum ? " Increase the total request limit first." : "";
-        if (connection?.deliveryUnconfirmed) {
-          const hosted = this.unconfirmedHostedUsage && this.onlineMaximum !== "none" ?
-            " Hosted tools are paused because earlier usage could not be confirmed." : "";
+        const hosted = this.unconfirmedHostedUsage && this.onlineMaximum !== "none" ?
+          " Hosted tools are paused because earlier usage could not be confirmed." : "";
+        if (this.pausedForServer) {
+          this.update("status", `${message}${limit} Wait a moment, then choose Continue to retry this step. Earlier results are kept. The new request may incur charges.${hosted}`, "waiting");
+        } else if (connection?.deliveryUnconfirmed) {
           const route = connection.nativeOnContinue ? " Continue will use Obsidian HTTP." : "";
           this.update("status", `${message} Keep Obsidian visible.${limit} Choose Continue to send a new request from the last confirmed step.${route} Completed work is kept.${hosted}`, "waiting");
         } else {
@@ -546,8 +572,16 @@ export class AgentTask {
     } else {
       if (this.options.countTokens && (this.inputBudget.hasFiles || this.inputBudget.hasCompaction || this.inputBudget.estimated >= TOKEN_COUNT_THRESHOLD))
         this.update("status", "Checking input size", "working");
-      this.inputBudget = await verifyInputBudget(payload, key, () => !this.stopped && this.options.current(),
-        this.options.countTokens, this.inputBudget, this.diagnostics, this.requests + 1);
+      const hidden = this.options.appVisible?.() === false, transitions = this.hiddenTransitions;
+      try {
+        this.inputBudget = await verifyInputBudget(payload, key, () => !this.stopped && this.options.current(),
+          this.options.countTokens, this.inputBudget, this.diagnostics, this.requests + 1);
+      } catch (error) {
+        if (this.continueWhileAway && error instanceof InputBudgetError && error.transportInterrupted &&
+            (hidden || this.hiddenTransitions !== transitions || this.options.appVisible?.() === false))
+          this.resumeOnAppReturn = true;
+        throw error;
+      }
     }
     if (this.pauseIfHidden()) {
       if (keyBinding && this.inputBudget.exact !== undefined) this.pausedInputCheck = { body, tokens: this.inputBudget.exact, keyBinding };
@@ -556,11 +590,13 @@ export class AgentTask {
     const firstSteer = this.items.length;
     this.items.push(...messages);
     return await this.requestReply(body, bytes, key, maximum, effort, hosted.length, canSaveGenerated, keyBinding).catch((error: unknown) => {
-      if (error instanceof OpenAiConnectionPause) {
-        // Rebuild the unconfirmed round on Continue using the last confirmed inputs and pending messages.
+      if (error instanceof OpenAiConnectionPause || error instanceof OpenAiServerPause) {
+        // Continue rebuilds this round with the last confirmed inputs and pending messages.
         this.items.length = firstSteer;
-        if (error.nativeOnContinue) this.nativeOnContinue = true;
-        if (error.deliveryUnconfirmed && hosted.length) this.unconfirmedHostedUsage = true;
+        if (error instanceof OpenAiConnectionPause && error.nativeOnContinue) this.nativeOnContinue = true;
+        if (hosted.length && (error instanceof OpenAiServerPause || error.deliveryUnconfirmed)) this.unconfirmedHostedUsage = true;
+        if (error instanceof OpenAiServerPause && keyBinding && this.inputBudget?.exact !== undefined)
+          this.pausedInputCheck = { body, tokens: this.inputBudget.exact, keyBinding };
       }
       throw error;
     });
@@ -650,6 +686,10 @@ export class AgentTask {
     this.update("status", message, "waiting");
     return null;
   }
+  private pauseLookupForAppReturn(): null {
+    this.resumeOnAppReturn = true;
+    return this.pauseForResponse("Waiting for Obsidian to check the accepted response.");
+  }
   private async rememberAcceptedResponse(job: PendingResponse): Promise<void> {
     const remember = this.options.rememberResponse;
     if (job.recorded || !remember) return;
@@ -697,17 +737,23 @@ export class AgentTask {
     if (!active()) return null;
     const abort = new AbortController();
     this.lookupAbort = abort;
+    this.lookupCrossedAppSwitch = this.options.appVisible?.() === false;
     let delay = waitFirst ? 2000 : 0;
     const info = { transport: "openai_background" as const, action: "status", requestNumber: job.number };
     try {
       while (active()) {
         if (this.pauseIfHidden()) return null;
-        if (delay && !job.ready) await access.wait(delay, abort.signal);
-        if (!active() || abort.signal.aborted || this.pauseIfHidden()) return null;
+        if (delay && !job.ready) await access.wait(delay, abort.signal, this.continueWhileAway);
+        if (!active()) return null;
+        if (abort.signal.aborted) return this.pauseLookupForAppReturn();
+        if (this.pauseIfHidden()) return null;
         let http: AiHttpResponse;
-        try { http = job.ready ?? await observeHttp(this.diagnostics, "response_lookup", info, () => access.retrieve(job.id, key, abort.signal)); }
+        try { http = job.ready ?? await observeHttp(this.diagnostics, "response_lookup", info,
+          () => access.retrieve(job.id, key, abort.signal, this.continueWhileAway)); }
         catch {
           if (!active()) return null;
+          if (this.continueWhileAway && (this.lookupCrossedAppSwitch || this.options.appVisible?.() === false))
+            return this.pauseLookupForAppReturn();
           return this.pauseForResponse("The status check was interrupted. Choose Continue to retrieve the same OpenAI response.");
         }
         if (!active()) return null;
@@ -744,7 +790,10 @@ export class AgentTask {
         return { reply, trace: job.trace };
       }
       return null;
-    } finally { this.lookupAbort = undefined; }
+    } finally {
+      this.lookupAbort = undefined;
+      this.lookupCrossedAppSwitch = false;
+    }
   }
   private async collectReply(reply: AgentReply, key: string, canSaveGenerated: boolean, replay = true, trace?: string): Promise<number> {
     this.usage.input += reply.usage.input; this.usage.output += reply.usage.output; this.usage.reasoning += reply.usage.reasoning;

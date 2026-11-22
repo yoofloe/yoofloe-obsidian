@@ -1328,6 +1328,232 @@ function recoveryFixture() {
   return { ...f, turns, posts, lookups, cancellations, access: f.options.androidRecovery.access };
 }
 
+function appSwitchFixture() {
+  const f = recoveryFixture();
+  let visible = true, online = true, enabled = false;
+  f.options.androidRecovery.appSwitch = { enabled: () => enabled, setEnabled: next => { enabled = next; } };
+  f.options.appVisible = () => visible;
+  f.options.appOnline = () => online;
+  return { ...f, visible: () => visible, show: value => { visible = value; f.work.appVisibilityChanged(value); },
+    network: value => { online = value; if (online) f.work.resumeAfterAppSwitch(); } };
+}
+
+function whenCompleted(work) {
+  return new Promise(resolve => {
+    const check = () => {
+      if (work.busy || work.task?.state !== 'completed') return;
+      unsubscribe();
+      resolve();
+    };
+    const unsubscribe = work.subscribe(check);
+    check();
+  });
+}
+
+test('an opted-in Android task can look up a response, retain permissions and finish a note while hidden', { timeout: 5000 }, async () => {
+  const f = appSwitchFixture();
+  const began = deferred(), receipt = deferred();
+  f.options.transport = async req => {
+    const body = JSON.parse(req.body);
+    const number = f.posts.push(body);
+    assert.equal(body.background, true);
+    if (number === 1) { began.resolve(); return receipt.promise; }
+    assert.equal(f.visible(), false);
+    assert(body.input.some(item => item.type === 'function_call_output' && item.call_id === 'save-once'));
+    return backgroundReply('completed', backgroundText('Created the approved note.'), 'resp_fixture_second');
+  };
+  f.access.retrieve = async (id, _key, _signal, allowHidden) => {
+    assert.equal(f.visible(), false);
+    assert.equal(allowHidden, true);
+    f.lookups.push(id);
+    return backgroundReply('completed', backgroundCreate);
+  };
+
+  await f.work.initialize();
+  assert.equal(f.work.continueWhenSwitchingApps, false);
+  f.work.setAppSwitchContinuation(true);
+  assert.equal(f.work.continueWhenSwitchingApps, false);
+  f.work.setResponseRecovery(true);
+  assert.equal(f.work.continueWhenSwitchingApps, false);
+  f.work.setAppSwitchContinuation(true);
+  assert.equal(f.work.continueWhenSwitchingApps, true);
+  f.work.writeScope = 'new';
+  f.work.setPrompt('Create the synthetic note.');
+  const sending = f.work.run();
+  await began.promise;
+  f.show(false);
+  assert.equal(f.work.task.workingInBackground, true);
+  receipt.resolve(backgroundReply('queued'));
+  await sending;
+  assert.equal(f.work.task.state, 'completed');
+  assert.equal(f.files.get('Recovered.md')?.text, 'Recovered exactly once.');
+  assert.deepEqual(f.lookups, [receiptId]);
+  f.show(true); f.show(true);
+  assert.equal(f.posts.length, 2);
+});
+
+test('returning to Android rechecks the accepted response once and never resends a creation request', { timeout: 5000 }, async () => {
+  const f = appSwitchFixture();
+  const lookupStarted = deferred();
+  const { diagnostics } = diagnosticFixture();
+  f.options.diagnostics = diagnostics;
+  f.access.retrieve = async (id, _key, signal) => {
+    if (f.lookups.push(id) === 1) {
+      lookupStarted.resolve();
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(Error('Interrupted by app switch')), { once: true });
+      });
+    }
+    return backgroundReply('completed', backgroundText('Retrieved the original response.'));
+  };
+
+  await f.work.initialize();
+  f.work.setResponseRecovery(true);
+  f.work.setAppSwitchContinuation(true);
+  f.work.maximum = 1;
+  f.work.setPrompt('Use the synthetic response.');
+  const sending = f.work.run();
+  await lookupStarted.promise;
+  f.show(false);
+  f.network(false);
+  f.show(true);
+  await sending;
+  assert.equal(f.work.task.waitingForAppReturn, true);
+  assert.equal(f.work.task.hasPendingResponse, true);
+  assert.equal(f.posts.length, 1);
+  assert.deepEqual(f.lookups, [receiptId]);
+  const turnId = f.work.chat.at(-1).id;
+  const paused = exportedReport(await diagnostics.copyReport({ turn: turnId }));
+  assert.equal(paused.nextAction, 'return_to_app');
+  f.network(true); f.show(true); f.network(true);
+  await whenCompleted(f.work);
+  assert.deepEqual(f.lookups, [receiptId, receiptId]);
+  assert.equal(f.posts.length, 1);
+  assert.equal(f.work.chat.at(-1).id, turnId);
+  const completed = exportedReport(await diagnostics.copyReport({ turn: turnId }));
+  assert.equal(completed.lastResume.action, 'app_switch_resume');
+  assert.equal(completed.manualContinuations, 0);
+  assert.equal(completed.automaticRetries, 0);
+  await diagnostics.dispose();
+});
+
+test('an interrupted token check resumes before sending an unsent request and retains the upload', { timeout: 5000 }, async () => {
+  const f = appSwitchFixture();
+  const checking = deferred(), finishCheck = deferred();
+  let checks = 0, uploads = 0, cleanup = 0;
+  f.options.attachments = { forTask: () => ({ hasUploads: true, prepare: async () => {
+    uploads++; return { fileIds: ['file-fixture'], parts: [{ type: 'input_image', file_id: 'file-fixture' }] };
+  }, cleanup: async () => { cleanup++; return true; } }) };
+  f.options.countTokens = async () => {
+    if (++checks === 1) { checking.resolve(); await finishCheck.promise; throw Error('Connection interrupted'); }
+    return { status: 200, text: '{"object":"response.input_tokens","input_tokens":11125}' };
+  };
+  f.options.transport = async req => {
+    const body = JSON.parse(req.body);
+    f.posts.push(body);
+    assert(body.input.some(item => Array.isArray(item.content) && item.content.some(part => part.file_id === 'file-fixture')));
+    return backgroundReply('completed', backgroundText('Sent once after counting the input.'));
+  };
+
+  await f.work.initialize();
+  f.work.setResponseRecovery(true);
+  f.work.setAppSwitchContinuation(true);
+  f.work.attachments = [{ id: crypto.randomUUID(), name: 'Fixture.jpg', extension: 'jpg', kind: 'image', mime: 'image/jpeg', bytes: 12, sha256: 'a'.repeat(64) }];
+  f.work.setPrompt('Review a synthetic image.');
+  const sending = f.work.run();
+  await checking.promise;
+  f.show(false);
+  assert.equal(f.posts.length, 0);
+  f.show(true);
+  finishCheck.resolve();
+  await sending;
+  await whenCompleted(f.work);
+  assert.equal(f.posts.length, 1);
+  assert.equal(f.work.task.requests, 1);
+  assert.equal(checks, 2); assert.equal(uploads, 1); assert.equal(cleanup, 1);
+});
+
+test('visibility and network events never retry an uncertain submission or an HTTP 500 model error', async () => {
+  for (const failure of ['uncertain', 'server error']) {
+    const f = appSwitchFixture(), sent = deferred(), reply = deferred();
+    f.options.transport = async req => {
+      f.posts.push(JSON.parse(req.body));
+      sent.resolve();
+      await reply.promise;
+      if (failure === 'uncertain') throw Error('EOFException');
+      return { status: 500, text: '{"error":{"code":"server_error"}}' };
+    };
+    await f.work.initialize();
+    f.work.setResponseRecovery(true);
+    f.work.setAppSwitchContinuation(true);
+    f.work.setPrompt('Run a synthetic task.');
+    const sending = f.work.run();
+    await sent.promise;
+    f.show(false);
+    f.show(true);
+    reply.resolve();
+    await sending;
+    f.show(false); f.show(true); f.network(true);
+    assert.equal(f.work.task.state, failure === 'server error' ? 'paused' : 'failed');
+    assert.equal(f.work.task.waitingForAppReturn, false);
+    assert.equal(f.posts.length, 1);
+    assert.deepEqual(f.lookups, []);
+  }
+});
+
+test('finishing an Android task while waiting for app return prevents automatic continuation', { timeout: 5000 }, async () => {
+  const f = appSwitchFixture(), lookupStarted = deferred();
+  f.access.retrieve = async (id, _key, signal) => {
+    f.lookups.push(id);
+    lookupStarted.resolve();
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(Error('Interrupted by app switch')), { once: true });
+    });
+  };
+  await f.work.initialize();
+  f.work.setResponseRecovery(true);
+  f.work.setAppSwitchContinuation(true);
+  f.work.setPrompt('Check the synthetic task.');
+  const sending = f.work.run();
+  await lookupStarted.promise;
+  f.show(false);
+  f.network(false);
+  f.show(true);
+  await sending;
+  assert.equal(f.work.task.waitingForAppReturn, true);
+  assert(await f.work.finishHere());
+  f.network(true); f.show(true);
+  assert.equal(f.work.task.state, 'stopped');
+  assert.deepEqual(f.cancellations, [receiptId]);
+  assert.deepEqual(f.lookups, [receiptId]);
+  assert.equal(f.posts.length, 1);
+});
+
+test('a suspended Android lookup stays manual when app switch continuation is off', { timeout: 5000 }, async () => {
+  const f = appSwitchFixture(), waiting = deferred(), poll = deferred();
+  f.access.wait = async () => { waiting.resolve(); await poll.promise; };
+  f.access.retrieve = async id => {
+    f.lookups.push(id);
+    return backgroundReply('completed', backgroundText('Retrieved after choosing Continue.'));
+  };
+  await f.work.initialize();
+  f.work.setResponseRecovery(true);
+  f.work.setPrompt('Retrieve a synthetic response.');
+  const sending = f.work.run();
+  await waiting.promise;
+  f.show(false);
+  poll.resolve();
+  await sending;
+  f.show(true); f.network(true);
+  assert.equal(f.work.canContinue, true);
+  assert.equal(f.work.task.waitingForAppReturn, false);
+  assert.deepEqual(f.lookups, []);
+  assert.equal(f.posts.length, 1);
+  await f.work.continueTask();
+  assert.equal(f.posts.length, 1);
+  assert.deepEqual(f.lookups, [receiptId]);
+});
+
 test('Android recovery is an explicit device preference and startup never looks up an answer', async () => {
   const f = recoveryFixture();
   await f.work.initialize();
@@ -1400,6 +1626,130 @@ test('the recovery hint stays hidden for key errors, rate limits, DNS lookup fai
     await f.work.run();
     assert.match(f.work.task.state, /^(paused|failed)$/);
     assert.equal(f.work.suggestResponseRecovery, false);
+  }
+});
+
+test('an OpenAI HTTP 500 pauses a background task and Continue reuses confirmed work and the upload', async () => {
+  const f = recoveryFixture();
+  const { diagnostics } = diagnosticFixture();
+  f.options.diagnostics = diagnostics;
+  const failureId = 'req_' + 'a'.repeat(32);
+  const original = '# Synthetic study note\nA retained outline.\n';
+  const note = await f.host.create('Synthetic.md', original);
+  const image = { id: crypto.randomUUID(), name: 'Synthetic.jpg', extension: 'jpg', kind: 'image', mime: 'image/jpeg', bytes: 2_121_258, sha256: 'a'.repeat(64) };
+  let uploads = 0, cleanups = 0, tokenChecks = 0;
+  f.options.attachments = { forTask: () => ({ hasUploads: true,
+    prepare: async () => { uploads++; return { fileIds: ['file-synthetic-image'], parts: [{ type: 'input_image', file_id: 'file-synthetic-image' }] }; },
+    cleanup: async () => { cleanups++; return true; },
+  }) };
+  f.options.countTokens = async () => ({ status: 200, text: JSON.stringify({
+    object: 'response.input_tokens', input_tokens: ++tokenChecks === 1 ? 19873 : 22747,
+  }) });
+  f.access.retrieve = async id => {
+    f.lookups.push(id);
+    return backgroundReply('completed', [{ type: 'function_call', name: 'read_outline', call_id: 'outline-once',
+      arguments: JSON.stringify({ reference: 'N1' }) }], id);
+  };
+  f.options.transport = async req => {
+    const body = JSON.parse(req.body);
+    const number = f.posts.push(body);
+    assert.equal(body.background, true);
+    if (number === 1) return backgroundReply('queued');
+    assert(body.input.some(item => item.type === 'function_call_output' && item.call_id === 'outline-once'));
+    if (number === 2) return { status: 500, headers: { 'x-request-id': failureId },
+      text: JSON.stringify({ error: { type: 'server_error', code: null, message: 'Synthetic private provider details' } }) };
+    assert.deepEqual(body, f.posts[1]);
+    return backgroundReply('completed', backgroundText('Checked the source note.'), 'resp_fixture_retry');
+  };
+
+  await f.work.initialize();
+  f.work.setResponseRecovery(true);
+  await f.work.newTask({ path: note.path });
+  f.work.attachments = [image];
+  f.work.maximum = 2;
+  f.work.setPrompt('Compare the synthetic outline and image.');
+  await f.work.run();
+
+  const paused = f.work.chat.at(-1);
+  assert.equal(paused.status, 'paused');
+  assert.equal(paused.pausedForServer, true);
+  assert.equal(f.work.canContinue, true);
+  assert.equal(f.work.canResumeWithLimit, false);
+  assert.equal(f.work.suggestResponseRecovery, false);
+  assert.equal(f.posts.length, 2);
+  assert.equal(f.work.task.hasPendingResponse, false);
+  assert.equal(uploads, 1); assert.equal(cleanups, 0); assert.equal(tokenChecks, 2);
+  assert.deepEqual(f.work.attachments, [image]);
+  const log = await diagnostics.copyReport({ turn: paused.id });
+  const partial = exportedReport(log);
+  assert.equal(partial.lastFailure.requestNumber, 2);
+  assert.equal(partial.lastFailure.httpStatus, 500);
+  assert.equal(partial.lastFailure.providerId, failureId);
+  assert.equal(partial.lastFailure.transport, 'openai_background');
+  assert.equal(partial.nextAction, 'raise_limit');
+  assert.doesNotMatch(log, /Synthetic\.jpg|private provider details|Compare the synthetic/);
+
+  await f.work.continueTask();
+  assert.equal(f.posts.length, 2);
+  f.work.maximum = 3;
+  await f.work.continueTask();
+  const completed = f.work.chat.at(-1);
+  assert.equal(completed.id, paused.id); assert.equal(completed.status, 'completed');
+  assert.equal(completed.pausedForServer, undefined);
+  assert.equal(f.posts.length, 3); assert.deepEqual(f.lookups, [receiptId]);
+  assert.equal(uploads, 1); assert.equal(cleanups, 1); assert.equal(tokenChecks, 2);
+  assert.equal(note.text, original);
+  const report = exportedReport(await diagnostics.copyReport({ turn: paused.id }));
+  assert.equal(report.events.filter(event => event.stage === 'tool' && event.action === 'read_outline' && event.outcome === 'ok').length, 1);
+  assert.equal(report.automaticRetries, 0); assert.equal(report.manualContinuations, 1);
+  assert.equal(report.outcome, 'completed');
+  await diagnostics.dispose();
+});
+
+test('an HTTP 500 on lookup keeps the accepted response ID and Continue checks the same ID', async () => {
+  const f = recoveryFixture();
+  f.access.retrieve = async id => {
+    assert.equal(id, receiptId);
+    if (f.lookups.push(id) === 1) return { status: 500, text: '{"error":{"code":"server_error"}}' };
+    return backgroundReply('completed', backgroundText('Recovered the original answer.'));
+  };
+  await f.work.initialize();
+  f.work.setResponseRecovery(true);
+  f.work.maximum = 1;
+  f.work.setPrompt('Read the synthetic record.');
+  await f.work.run();
+  assert.equal(f.work.task.hasPendingResponse, true);
+  assert.equal(f.work.task.pausedForServer, false);
+  assert.equal(f.work.canResumeWithLimit, true);
+  assert.equal(f.posts.length, 1);
+  await f.work.continueTask();
+  assert.deepEqual(f.lookups, [receiptId, receiptId]);
+  assert.equal(f.posts.length, 1);
+  assert.equal(f.work.result, 'Recovered the original answer.');
+});
+
+test('the default stream offers Continue only for a structured OpenAI server error', async () => {
+  const cases = [
+    { text: '{"error":{"code":"server_error"}}', paused: true },
+    { text: '<html>Temporary gateway error</html>', paused: false },
+  ];
+  for (const { text, paused } of cases) {
+    const f = recoveryFixture();
+    f.options.streamResponses = true;
+    const succeed = f.options.transport;
+    f.options.transport = async req => {
+      if (f.posts.length) return succeed(req);
+      f.posts.push(JSON.parse(req.body));
+      return { status: 500, text };
+    };
+    await f.work.initialize();
+    f.work.setPrompt('Read the synthetic record.');
+    await f.work.run();
+    assert.equal(f.work.canContinue, paused);
+    assert.equal(f.work.suggestResponseRecovery, false);
+    assert.equal(f.posts.length, 1);
+    await f.work.continueTask();
+    assert.equal(f.posts.length, paused ? 2 : 1);
   }
 });
 
