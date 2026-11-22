@@ -72,22 +72,25 @@ export async function observeHttp<T extends { status: number; headers?: Readonly
 ): Promise<T> {
   if (!run) return send();
   const attempt = run.nextAttempt(), start = performance.now();
-  run.event(stage, "started", { ...info, attempt });
+  const before = run.sampleDevice();
+  run.event(stage, "started", { ...info, ...before, attempt });
   const sequence = run.report.events.at(-1)?.sequence ?? 0;
   try {
     const response = await send();
     const ok = accepted(response.status);
-    run.event(stage, ok ? "received" : "failed", { ...info, attempt, elapsedMs: Math.round(performance.now() - start),
+    run.event(stage, ok ? "received" : "failed", { ...info, ...run.sampleDevice(), attempt, elapsedMs: Math.round(performance.now() - start),
       ...responseDiagnostics(response), reason: ok ? undefined : "http" });
     return response;
   } catch (error) {
     const diagnosis = diagnoseTransport(error);
     const httpUnconfirmed = info.transport === "obsidian_http_stream" &&
       (diagnosis.reason === "unknown" || diagnosis.reason === "response_unconfirmed");
-    const appHiddenDuringRequest = stage === "model_request" && run.report.events.some(event => event.sequence > sequence &&
-      (event.stage === "visibility" || event.stage === "session") && event.visible === false);
+    const after = run.sampleDevice();
+    const appHiddenDuringRequest = stage === "model_request" && (before?.visible === false || after?.visible === false ||
+      run.report.events.some(event => event.sequence > sequence &&
+        (event.stage === "visibility" || event.stage === "session") && event.visible === false));
     run.event(stage, httpUnconfirmed ? "unconfirmed" : "failed", {
-      ...info, attempt, elapsedMs: Math.round(performance.now() - start), ...diagnosis,
+      ...info, ...after, attempt, elapsedMs: Math.round(performance.now() - start), ...diagnosis,
       reason: httpUnconfirmed ? "response_unconfirmed" : diagnosis.reason, appHiddenDuringRequest,
     });
     throw error;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Diagnostics, DIAGNOSTIC_RETENTION } from '../dist/diagnostics.js';
+import { Diagnostics, DIAGNOSTIC_RETENTION, formatDiagnostics } from '../dist/diagnostics.js';
 import { diagnoseTransport, observeHttp } from '../dist/diagnostic-network.js';
 import { AgentTask } from '../dist/agent-task.js';
 import { providerFiles } from '../dist/provider-files.js';
@@ -33,21 +33,60 @@ test('transport observations keep the available evidence without copying excepti
   diagnostics.dispose();
 });
 
+test('Android request rejection keeps the recorded device state even without a transition event', async () => {
+  let observed = { online: true, visible: true };
+  const { diagnostics } = diagnosticFixture(Date.now, () => observed);
+  const run = diagnostics.start('assistant', 'inbox');
+  await assert.rejects(observeHttp(run, 'model_request', { requestNumber: 26, inputTokens: 33037,
+    transport: 'obsidian_http_stream' }, async () => {
+    observed = { online: false, visible: true, causeText: 'private host detail' };
+    throw Error('Request failed with private host detail');
+  }));
+  run.finish('paused', 'continue');
+  const copied = await diagnostics.copyReport({ id: run.id });
+  const report = exportedReport(copied);
+  const sent = report.events.find(event => event.stage === 'model_request' && event.outcome === 'started');
+  assert.equal(sent.visible, true);
+  assert.equal(sent.online, true);
+  assert.equal(report.lastFailure.visible, true);
+  assert.equal(report.lastFailure.online, false);
+  assert.equal(report.lastFailure.appHiddenDuringRequest, undefined);
+  assert.equal(report.lastFailure.reason, 'response_unconfirmed');
+  assert.equal(report.lastFailure.inputTokens, 33037);
+  assert.match(copied, /request 26 · 33037 input tokens · app visible · device offline · \d+ ms/);
+  assert.doesNotMatch(copied, /private host detail/);
+  await diagnostics.dispose();
+});
+
 test('bounded diagnostic records keep anchors, report interrupted sessions, and expire without touching other records', async () => {
   let now = Date.UTC(2026, 10, 22);
   const { diagnostics, storage, records } = diagnosticFixture(() => now);
   records.set('workspace.json', new ArrayBuffer(12));
-  const task = diagnostics.start('assistant', 'inbox');
+  const task = diagnostics.start('assistant', 'inbox', { model: 'gpt-6.2-sol', effort: 'max' });
   task.event('input_tokens', 'failed', { reason: 'dns' });
   task.resume({ contextReused: true });
   task.updateJournal('local', { confirmed: 2, pending: 1, reverted: 0 });
+  task.event('vault_write', 'ok', { action: 'edit', reference: 'Note 1' });
+  task.event('vault_write', 'ok', { action: 'edit', reference: 'Note 1' });
+  task.event('vault_write', 'ok', { action: 'edit', reference: 'Note 2' });
   task.event('journal_save', 'ok');
+  task.event('compaction', 'unconfirmed', { reason: 'compaction_not_returned', requestNumber: 3, inputTokens: 34110 });
+  task.event('compaction', 'ok', { action: 'applied', requestNumber: 5 });
   for (let count = 0; count < 175; count++) task.event('tool', 'ok', { action: 'read_notes', count });
   task.event('model_request', 'started', { requestNumber: 14 });
   await diagnostics.flush();
   const reopened = new Diagnostics(storage, environment, () => true, () => now);
-  const report = exportedReport(await reopened.copyReport({ id: task.id }));
+  const copy = await reopened.copyReport({ id: task.id });
+  const report = exportedReport(copy);
   assert.equal(report.outcome, 'interrupted');
+  assert.equal(report.startEvent.model, 'gpt-6.2-sol');
+  assert.equal(report.startEvent.effort, 'max');
+  assert.equal(report.lastAppliedCompaction.requestNumber, 5);
+  assert.equal(report.lastCompactionIssue.inputTokens, 34110);
+  assert.equal(report.confirmedWriteSteps, 3);
+  assert(report.events.some(event => event.sequence === report.lastAppliedCompaction.sequence));
+  assert.match(copy, /Recovery entries · 2 confirmed/);
+  assert.match(copy, /Confirmed write steps — 3/);
   assert.equal(report.firstFailure.stage, 'input_tokens');
   assert.equal(report.lastSave.stage, 'journal_save');
   assert.equal(report.lastResume.contextReused, true);
@@ -69,6 +108,34 @@ test('bounded diagnostic records keep anchors, report interrupted sessions, and 
   assert.equal((await reopened.recentIssues()).reports.length, 0);
   diagnostics.dispose();
   reopened.dispose();
+});
+
+test('Copy logs recovers older compaction summaries and rejects conflicting checkpoints', async () => {
+  const { diagnostics } = diagnosticFixture();
+  const run = diagnostics.start('assistant', 'inbox');
+  run.event('compaction', 'ok', { action: 'applied', requestNumber: 4 });
+  run.event('compaction', 'unconfirmed', { reason: 'compaction_not_returned', requestNumber: 7 });
+  run.event('model_request', 'unconfirmed', { reason: 'response_unconfirmed', requestNumber: 8, inputTokens: 0 });
+  const legacy = structuredClone(run.report);
+  delete legacy.startEvent;
+  delete legacy.lastAppliedCompaction;
+  delete legacy.lastCompactionIssue;
+
+  const text = formatDiagnostics(legacy);
+  assert.match(text, /Last confirmed compaction — compaction · applied · ok · request 4/);
+  assert.match(text, /Last compaction issue — compaction · unconfirmed · compaction not returned · request 7/);
+  assert.match(text, /Last recorded issue — model request · unconfirmed · response unconfirmed · request 8 · 0 input tokens/);
+
+  const request = legacy.events.at(-1);
+  legacy.lastAppliedCompaction = { ...request, stage: 'compaction', outcome: 'ok', action: 'applied' };
+  legacy.lastCompactionIssue = { ...legacy.lastAppliedCompaction, sequence: request.sequence + 1 };
+  legacy.startEvent = { ...legacy.events[1], stage: 'start', outcome: 'started' };
+  const copy = exportedReport(formatDiagnostics(legacy));
+  assert.equal(copy.startEvent.sequence, legacy.events[0].sequence);
+  assert.equal(copy.lastAppliedCompaction.requestNumber, 4);
+  assert.equal(copy.lastCompactionIssue.requestNumber, 7);
+  assert.equal(copy.events.find(event => event.sequence === request.sequence).stage, 'model_request');
+  await diagnostics.dispose();
 });
 
 test('idle maintenance expires records and unload saves the final checkpoint after lifecycle signals', async () => {
@@ -208,7 +275,11 @@ test('automatic compaction of a large input keeps tool results and logs the redu
   const text = await diagnostics.copyReport({ id: run.id });
   const output = exportedReport(text);
   assert(output.events.some(event => event.stage === 'compaction' && event.action === 'applied'));
-  assert.deepEqual(output.events.filter(event => event.stage === 'model_request' && event.outcome === 'started').map(event => event.requestBytes), sizes);
+  const observedRequests = output.events.filter(event => event.stage === 'model_request' && event.outcome === 'started');
+  assert.deepEqual(observedRequests.map(event => event.requestBytes), sizes);
+  assert.deepEqual(observedRequests.map(event => [event.requestNumber, event.inputTokens]), [[1, 65000], [2, 1200]]);
+  assert.deepEqual(output.events.filter(event => event.stage === 'input_tokens' && event.outcome === 'ok')
+    .map(event => [event.requestNumber, event.inputTokens]), [[1, 65000], [2, 1200]]);
   assert.doesNotMatch(text, /opaque-compact-state|PRIVATE HISTORY WORD|Private latest prompt|Private answer/);
   diagnostics.dispose();
 });
