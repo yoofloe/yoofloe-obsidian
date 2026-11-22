@@ -1,7 +1,7 @@
 import { Diagnostics } from '../../dist/diagnostics.js';
 
 export const environment = { plugin: '0.9.11', obsidian: '1.15.1', platform: 'android' };
-export function diagnosticFixture(now = Date.now) {
+export function diagnosticFixture(now = Date.now, signals) {
   const records = new Map();
   const storage = {
     keys: async prefix => [...records.keys()].filter(key => key.startsWith(prefix)),
@@ -12,7 +12,7 @@ export function diagnosticFixture(now = Date.now) {
     },
     discard: async keys => { for (const key of keys) records.delete(key); },
   };
-  const diagnostics = new Diagnostics(storage, environment, () => true, now);
+  const diagnostics = new Diagnostics(storage, environment, () => true, now, signals);
   return { diagnostics, records, storage };
 }
 

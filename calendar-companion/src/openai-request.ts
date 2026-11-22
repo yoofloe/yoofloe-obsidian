@@ -97,13 +97,14 @@ export function holdRequestScreen(wakeLock?: WakeLock): (() => void) | undefined
 
 /** Only the outbound request carries the key and input. Activity records use bounded metadata. */
 export async function requestOpenAiRound(
-  transport: AiTransport, body: string, key: string, number: number, bytes: number, streamed = false, diagnostics?: DiagnosticRun,
+  transport: AiTransport, body: string, key: string, number: number, bytes: number, streamed = false,
+  diagnostics?: DiagnosticRun, inputTokens?: number,
 ): Promise<{ response: AiHttpResponse; trace: string }> {
   const trace = { clientId: crypto.randomUUID(), bytes, started: performance.now(), streamed };
   let response: AiHttpResponse;
   try {
     response = await observeHttp(diagnostics, "model_request", {
-      requestNumber: number, requestBytes: bytes, clientId: trace.clientId, transport: streamed ? "obsidian_http_stream" : "obsidian_http",
+      requestNumber: number, requestBytes: bytes, inputTokens, clientId: trace.clientId, transport: streamed ? "obsidian_http_stream" : "obsidian_http",
     }, () => transport({ url: OPENAI_ENDPOINT, method: "POST", contentType: "application/json", body, throw: false,
       headers: { Authorization: "Bearer " + key, "X-Client-Request-Id": trace.clientId } }));
   } catch (error) {

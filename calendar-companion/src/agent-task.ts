@@ -354,7 +354,8 @@ export class AgentTask {
         this.inputBudget = estimateInput(payload, body, bytes);
         if (this.options.countTokens && (this.inputBudget.hasFiles || this.inputBudget.hasCompaction || this.inputBudget.estimated >= TOKEN_COUNT_THRESHOLD))
           this.update("status", "Checking input size", "working");
-        this.inputBudget = await verifyInputBudget(payload, key, () => !this.stopped && this.options.current(), this.options.countTokens, this.inputBudget, this.diagnostics);
+        this.inputBudget = await verifyInputBudget(payload, key, () => !this.stopped && this.options.current(),
+          this.options.countTokens, this.inputBudget, this.diagnostics, this.requests + 1);
         if (this.pauseIfHidden()) break;
         const firstSteer = this.items.length;
         this.items.push(...messages);
@@ -483,7 +484,8 @@ export class AgentTask {
     this.update("request", `OpenAI request ${this.requests}${maximum === "none" ? " · no request-count limit" : ` of ${maximum}`} · ${this.model.model}${effort ? ` · ${effort}` : " · model default"}`);
     let reply: AgentReply, trace: string | undefined;
     if (live) {
-      const info = { transport: "responses_websocket" as const, requestNumber: this.requests, requestBytes: bytes, attempt: this.diagnostics?.nextAttempt() };
+      const info = { transport: "responses_websocket" as const, requestNumber: this.requests, requestBytes: bytes,
+        inputTokens: this.inputBudget?.exact, attempt: this.diagnostics?.nextAttempt() };
       const started = performance.now();
       this.diagnostics?.event("model_request", "started", info);
       this.live = live;
@@ -517,7 +519,7 @@ export class AgentTask {
       let result;
       this.releaseScreenLock = this.options.holdScreen?.();
       try {
-        result = await requestOpenAiRound(this.options.transport, body, key, this.requests, bytes, streamed, this.diagnostics);
+        result = await requestOpenAiRound(this.options.transport, body, key, this.requests, bytes, streamed, this.diagnostics, this.inputBudget?.exact);
       } finally {
         this.releaseScreenLock?.();
         this.releaseScreenLock = undefined;

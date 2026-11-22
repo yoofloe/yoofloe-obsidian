@@ -107,12 +107,16 @@ export interface DiagnosticReport {
   nextAction: "wait" | "continue" | "raise_limit" | "review" | "check_result" | "none";
   events: DiagnosticEvent[];
   omitted: number;
+  startEvent?: DiagnosticEvent;
   firstFailure?: DiagnosticEvent;
   lastFailure?: DiagnosticEvent;
   lastSuccess?: DiagnosticEvent;
   lastResume?: DiagnosticEvent;
   lastSave?: DiagnosticEvent;
+  lastAppliedCompaction?: DiagnosticEvent;
+  lastCompactionIssue?: DiagnosticEvent;
   changes: ChangeSummary;
+  confirmedWriteSteps?: number;
   automaticRetries: number;
   manualContinuations: number;
   /** Used on this device to locate the right report. Excluded from the exported JSON. */
@@ -180,16 +184,28 @@ function readEvent(input: unknown): DiagnosticEvent | undefined {
   if (!stage || !outcome || sequence === undefined || at === undefined) return;
   return { sequence, at, stage, outcome, ...detail(v) };
 }
+function selectCheckpoint(value: unknown, events: DiagnosticEvent[], matches: (event: DiagnosticEvent) => boolean): DiagnosticEvent | undefined {
+  const retained = events.reduce<DiagnosticEvent | undefined>((latest, event) => matches(event) ? event : latest, undefined);
+  const stored = readEvent(value);
+  if (!stored || !matches(stored) || (retained && retained.sequence >= stored.sequence) || events.some(event => event.sequence === stored.sequence))
+    return retained;
+  return stored;
+}
 function readReport(input: unknown): DiagnosticReport | null {
   const v = record(input), id = matching(v.id, idPattern), area = oneOf(areas, v.area), outcome = oneOf(outcomes, v.outcome);
   const startedAt = integer(v.startedAt, 0, 8640000000000000), updatedAt = integer(v.updatedAt, 0, 8640000000000000);
   if (v.schema !== 1 || !id || !area || !outcome || startedAt === undefined || updatedAt === undefined) return null;
   const changes = record(v.changes);
+  const events = Array.isArray(v.events) ? v.events.slice(-MAX_EVENTS).map(readEvent).filter(event => !!event) : [];
   return { schema: 1, id, area, startedAt, updatedAt, outcome, environment: environment(v.environment),
     nextAction: oneOf(nextActions, v.nextAction) ?? "review",
-    events: Array.isArray(v.events) ? v.events.slice(-MAX_EVENTS).map(readEvent).filter(event => !!event) : [],
-    omitted: integer(v.omitted) ?? 0, firstFailure: readEvent(v.firstFailure), lastFailure: readEvent(v.lastFailure), lastSuccess: readEvent(v.lastSuccess),
+    events,
+    omitted: integer(v.omitted) ?? 0, startEvent: selectCheckpoint(v.startEvent, events, event => event.stage === "start" && event.outcome === "started"),
+    firstFailure: readEvent(v.firstFailure), lastFailure: readEvent(v.lastFailure), lastSuccess: readEvent(v.lastSuccess),
     lastResume: readEvent(v.lastResume), lastSave: readEvent(v.lastSave),
+    lastAppliedCompaction: selectCheckpoint(v.lastAppliedCompaction, events, event => event.stage === "compaction" && event.outcome === "ok" && event.action === "applied"),
+    lastCompactionIssue: selectCheckpoint(v.lastCompactionIssue, events, event => event.stage === "compaction" && isIssue(event.outcome)),
+    confirmedWriteSteps: integer(v.confirmedWriteSteps),
     changes: { confirmed: integer(changes.confirmed) ?? 0, pending: integer(changes.pending) ?? 0, reverted: integer(changes.reverted) ?? 0 },
     automaticRetries: integer(v.automaticRetries) ?? 0, manualContinuations: integer(v.manualContinuations) ?? 0,
     conversation: matching(v.conversation, /^[a-zA-Z0-9_-]{1,80}$/),
@@ -202,9 +218,16 @@ export class DiagnosticRun {
   private readonly aliases = new Map<string, string>();
   private readonly journals = new Map<string, ChangeSummary>();
   private readonly journalOperations = new Map<string, string>();
-  constructor(readonly report: DiagnosticReport, private readonly changed: (run: DiagnosticRun) => void, private readonly clock: () => number) {}
+  constructor(readonly report: DiagnosticReport, private readonly changed: (run: DiagnosticRun) => void, private readonly clock: () => number,
+    private readonly signals?: () => Pick<DiagnosticDetail, "online" | "visible">) {}
   get id(): string { return this.report.id; }
   nextAttempt(): number { return ++this.attempt; }
+  sampleDevice(): Pick<DiagnosticDetail, "online" | "visible"> | undefined {
+    try {
+      const observed = this.signals?.();
+      return observed && { online: observed.online, visible: observed.visible };
+    } catch { return undefined; }
+  }
   relateConversation(id: string): void {
     this.report.conversation = matching(id, /^[a-zA-Z0-9_-]{1,80}$/);
     this.changed(this);
@@ -228,6 +251,12 @@ export class DiagnosticRun {
     report.updatedAt = event.at;
     report.events.push(event);
     if (report.events.length > MAX_EVENTS) { report.events.shift(); report.omitted++; }
+    if (stage === "start") report.startEvent = event;
+    if (stage === "vault_write" && outcome === "ok") report.confirmedWriteSteps = (report.confirmedWriteSteps ?? 0) + 1;
+    if (stage === "compaction") {
+      if (outcome === "ok" && event.action === "applied") report.lastAppliedCompaction = event;
+      if (isIssue(outcome)) report.lastCompactionIssue = event;
+    }
     if (isIssue(outcome)) {
       report.firstFailure ??= event;
       if (stage !== "finish" || !report.lastFailure) report.lastFailure = event;
@@ -325,8 +354,8 @@ export class Diagnostics {
     const now = this.now();
     const run = new DiagnosticRun({ schema: 1, id: crypto.randomUUID(), area, startedAt: now, updatedAt: now, environment: environment(this.runtime),
       outcome: "started", nextAction: "wait", events: [], omitted: 0, changes: emptyChanges(), automaticRetries: 0, manualContinuations: 0,
-      conversation: matching(conversation, /^[a-zA-Z0-9_-]{1,80}$/) }, item => this.changed(item), this.now);
-    run.event("start", "started", { ...this.signals?.(), ...info });
+      conversation: matching(conversation, /^[a-zA-Z0-9_-]{1,80}$/) }, item => this.changed(item), this.now, this.signals);
+    run.event("start", "started", { ...run.sampleDevice(), ...info });
     void this.flush();
     return run;
   }
@@ -426,22 +455,29 @@ export function formatDiagnostics(input: DiagnosticReport, storageUnconfirmed = 
   const safe = readReport(input);
   if (!safe) return "";
   const { conversation: _conversation, turn: _turn, ...report } = safe;
-  const events = [...new Map([...report.events, report.firstFailure, report.lastFailure, report.lastSuccess, report.lastResume, report.lastSave]
+  const events = [...new Map([report.startEvent, report.firstFailure, report.lastFailure, report.lastSuccess, report.lastResume, report.lastSave,
+    report.lastAppliedCompaction, report.lastCompactionIssue, ...report.events]
     .filter(event => !!event).map(event => [event.sequence, event])).values()].sort((a, b) => a.sequence - b.sequence);
   const failure = report.lastFailure ?? [...events].reverse().find(event => isIssue(event.outcome));
   const date = (time: number) => new Date(time).toISOString();
   const describe = (event?: DiagnosticEvent) => event ? [human(event.stage), event.action && human(event.action), human(event.outcome),
     event.reason && human(event.reason), event.reference, event.errorCode, event.httpStatus && "HTTP " + event.httpStatus,
     event.requestNumber && "request " + event.requestNumber,
+    event.inputTokens !== undefined && (event.inputTokens > 0 || event.stage === "input_tokens" || event.stage === "model_request") &&
+      event.inputTokens + " input tokens",
     event.visible === false && "app hidden", event.visible === true && "app visible",
     event.online === false && "device offline", event.online === true && "device reports online",
-    event.appHiddenDuringRequest && "app was hidden during this request"].filter(Boolean).join(" · ") : "None observed";
+    event.appHiddenDuringRequest && "app was hidden during this request",
+    isIssue(event.outcome) && event.elapsedMs !== undefined && event.elapsedMs + " ms"].filter(Boolean).join(" · ") : "None observed";
   const first = [
     "Yoofloe diagnostics",
     human(report.area) + " · " + human(report.outcome) + " · " + date(report.startedAt),
     "Last confirmed step — " + describe(report.lastSuccess),
     "Last recorded issue — " + (report.outcome === "interrupted" && !failure ? "App session ended with no final state recorded" : describe(failure)),
-    `Local changes · ${report.changes.confirmed} confirmed · ${report.changes.pending} unconfirmed · ${report.changes.reverted} reverted`,
+    ...(report.lastAppliedCompaction ? ["Last confirmed compaction — " + describe(report.lastAppliedCompaction)] : []),
+    ...(report.lastCompactionIssue ? ["Last compaction issue — " + describe(report.lastCompactionIssue)] : []),
+    `Recovery entries · ${report.changes.confirmed} confirmed · ${report.changes.pending} unconfirmed · ${report.changes.reverted} reverted`,
+    ...(report.confirmedWriteSteps ? ["Confirmed write steps — " + report.confirmedWriteSteps] : []),
     `Recovery · ${report.automaticRetries} automatic retries · ${report.manualContinuations} manual continuations`,
     "Next action — " + nextLabel[report.nextAction],
   ];
