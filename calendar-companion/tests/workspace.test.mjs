@@ -1348,6 +1348,61 @@ test('Android recovery is an explicit device preference and startup never looks 
   assert.deepEqual(f.lookups, []); assert.equal(f.posts.length, 1);
 });
 
+test('Android suggests recovery after interruption and a switch while paused affects only new tasks', async () => {
+  const f = recoveryFixture();
+  f.options.streamResponses = true;
+  const transport = f.options.transport;
+  f.options.transport = async req => {
+    if (!f.posts.length) {
+      f.posts.push(JSON.parse(req.body));
+      throw Error('Connection reset');
+    }
+    return transport(req);
+  };
+  await f.work.initialize();
+  assert.equal(f.work.suggestResponseRecovery, false);
+  f.work.setPrompt('Run a synthetic task.');
+  await f.work.run();
+  assert.equal(f.work.canContinue, true);
+  assert.equal(f.work.suggestResponseRecovery, true);
+  assert.equal(f.work.canChangeResponseRecovery, true);
+  assert.equal(f.options.androidRecovery.enabled(), false);
+  f.work.setResponseRecovery(true);
+  assert.equal(f.work.recoverResponses, true);
+  assert.equal(f.work.suggestResponseRecovery, false);
+  assert.equal(f.posts.length, 1);
+  await f.work.continueTask();
+  assert.equal(f.posts.length, 2);
+  assert.equal('background' in f.posts[0], false);
+  assert.equal('background' in f.posts[1], false);
+  assert.equal(f.work.task.state, 'completed');
+  await f.work.newTask();
+  f.work.setPrompt('Run a new synthetic task.');
+  await f.work.run();
+  assert.equal(f.posts[2].background, true);
+  assert.equal(f.work.suggestResponseRecovery, false);
+});
+
+test('the recovery hint stays hidden for key errors, rate limits, DNS lookup failures and desktop interruptions', async () => {
+  const cases = [
+    { transport: async () => ({ status: 401, text: '{"error":{"code":"invalid_api_key"}}' }) },
+    { transport: async () => ({ status: 429, text: '{"error":{"code":"rate_limit_exceeded"}}' }) },
+    { transport: async () => { throw Error('Unable to resolve host "api.openai.com": No address associated with hostname'); } },
+    { desktop: true, transport: async () => { throw Error('Connection reset'); } },
+  ];
+  for (const scenario of cases) {
+    const f = recoveryFixture();
+    f.options.streamResponses = true;
+    f.options.transport = scenario.transport;
+    if (scenario.desktop) f.options.androidRecovery = undefined;
+    await f.work.initialize();
+    f.work.setPrompt('Run a synthetic task.');
+    await f.work.run();
+    assert.match(f.work.task.state, /^(paused|failed)$/);
+    assert.equal(f.work.suggestResponseRecovery, false);
+  }
+});
+
 test('Continue retrieves only the accepted ID at the request limit and applies a validated tool once', async () => {
   const f = recoveryFixture();
   const { diagnostics } = diagnosticFixture(); f.options.diagnostics = diagnostics;
