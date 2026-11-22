@@ -31,7 +31,7 @@ const reasons = [
 ] as const;
 const actions = [
   "send", "dequeued", "queued", "sending", "applied", "received", "enabled", "reused", "review", "clear", "lookup", "records", "capabilities",
-  "undo", "status", "manual_import", "app_return", "scan", "publish", "import", "stop",
+  "undo", "status", "manual_import", "app_return", "app_switch_resume", "scan", "publish", "import", "stop",
   "search_notes", "read_outline", "read_notes", "read_next", "apply_changes",
   "create_note", "create_folder", "rename_note", "update_properties", "propose_trash", "save_generated_file",
   "draft_calendar_changes", "draft_calendar_workspace_changes", "edit", "create", "rename", "trash", "folder", "asset",
@@ -104,7 +104,7 @@ export interface DiagnosticReport {
   updatedAt: number;
   environment: DiagnosticEnvironment;
   outcome: DiagnosticOutcome;
-  nextAction: "wait" | "continue" | "check_response" | "raise_limit" | "review" | "check_result" | "none";
+  nextAction: "wait" | "continue" | "check_response" | "return_to_app" | "raise_limit" | "review" | "check_result" | "none";
   events: DiagnosticEvent[];
   omitted: number;
   startEvent?: DiagnosticEvent;
@@ -131,7 +131,7 @@ export interface DiagnosticStorage {
 }
 
 const emptyChanges = (): ChangeSummary => ({ confirmed: 0, pending: 0, reverted: 0 });
-const nextActions = ["wait", "continue", "check_response", "raise_limit", "review", "check_result", "none"] as const;
+const nextActions = ["wait", "continue", "check_response", "return_to_app", "raise_limit", "review", "check_result", "none"] as const;
 const platforms = ["android", "ios", "windows", "macos", "linux", "other"] as const;
 const isIssue = (value: DiagnosticOutcome) => value === "failed" || value === "unconfirmed" || value === "interrupted" || value === "paused";
 const isActive = (value: DiagnosticOutcome) => value === "started" || value === "waiting";
@@ -265,7 +265,7 @@ export class DiagnosticRun {
     if (stage === "journal_save" || stage === "result_save") report.lastSave = event;
     if (stage === "continue" && outcome === "started") {
       report.lastResume = event;
-      report.manualContinuations++;
+      if (event.action !== "app_switch_resume") report.manualContinuations++;
     }
     this.changed(this);
   }
@@ -447,6 +447,7 @@ const nextLabel: Record<DiagnosticReport["nextAction"], string> = {
   wait: "Wait for the running task or the app reply.",
   continue: "Use Continue in the same active task.",
   check_response: "Choose Continue to retrieve the existing OpenAI response.",
+  return_to_app: "Return to Obsidian with a connection to continue the active task.",
   raise_limit: "Increase the total request limit, then use Continue in the same task.",
   review: "Review the task status and saved changes before sending again.",
   check_result: "Reopen the conversation or check the originating app for a saved result.",

@@ -1,7 +1,7 @@
 import type { AiHttpRequest, AiHttpResponse, AiTransport } from "./ai-session";
 import type { AndroidModelStream, HttpReceipt, StreamHttpResponse } from "./android-model-stream";
 import { OpenAiStreamLimitError } from "./openai-stream";
-import { OPENAI_ENDPOINT } from "./openai";
+import { OPENAI_ENDPOINT, isOpenAiServerError } from "./openai";
 import type { DiagnosticDetail, DiagnosticReason, DiagnosticRun } from "./diagnostics";
 import { diagnoseTransport, observeHttp, responseDiagnostics } from "./diagnostic-network";
 
@@ -15,6 +15,8 @@ export class OpenAiConnectionPause extends Error {
     super(message);
   }
 }
+
+export class OpenAiServerPause extends Error {}
 
 interface RequestTrace {
   clientId: string;
@@ -160,5 +162,8 @@ export async function requestOpenAiRound(
     }
     throw Error(`${message} No retry was made by the plugin. The request may still incur charges. (${details})`);
   }
-  return { response, trace: traceText(trace, response) };
+  const details = traceText(trace, response);
+  if (isOpenAiServerError(response.status, response.text))
+    throw new OpenAiServerPause(`OpenAI request ${number} returned a server error. (${details})`);
+  return { response, trace: details };
 }
