@@ -1,8 +1,9 @@
 import { containsCredential } from "./agent-policy";
+import { MAX_AI_INPUT_BYTES } from "./ai-session";
 import type { ChatTurn } from "./chat-history";
 
 export const AUTO_COMPACT_TOKENS = 32000;
-const MAX_COMPACTION_BYTES = 384 * 1024;
+const MAX_SAVED_COMPACTION_BYTES = 384 * 1024;
 const MAX_HISTORY_BYTES = 640 * 1024;
 const bytes = (value: string) => new TextEncoder().encode(value).length;
 
@@ -19,20 +20,29 @@ export interface ConversationCheckpoint {
 }
 export const validContextScope = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 
-export function readCompaction(value: unknown): CompactionItem | null {
-  if (!value || typeof value !== "object") return null;
+export const compactionProblems = ["missing_content", "content_too_large", "invalid_encoding", "credential_pattern", "invalid_id",
+  "invalid_window", "missing_item", "unchanged_window", "input_not_reduced"] as const;
+export type CompactionProblem = typeof compactionProblems[number];
+
+export function inspectCompaction(value: unknown): CompactionItem | CompactionProblem {
+  if (!value || typeof value !== "object") return "invalid_window";
   const { type, encrypted_content, id } = value as Record<string, unknown>;
-  if (type !== "compaction" || typeof encrypted_content !== "string" || !encrypted_content ||
-    encrypted_content.length > MAX_COMPACTION_BYTES || !/^[A-Za-z0-9+/_=-]+$/.test(encrypted_content) ||
-    containsCredential(encrypted_content)) return null;
-  if (id !== undefined && (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,200}$/.test(id))) return null;
+  if (type !== "compaction" || typeof encrypted_content !== "string" || !encrypted_content) return "missing_content";
+  if (encrypted_content.length > MAX_AI_INPUT_BYTES) return "content_too_large";
+  if (!/^[A-Za-z0-9+/_=.~-]+$/.test(encrypted_content)) return "invalid_encoding";
+  if (containsCredential(encrypted_content)) return "credential_pattern";
+  if (id != null && (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,200}$/.test(id))) return "invalid_id";
   return { type, encrypted_content, ...(typeof id === "string" ? { id } : {}) };
+}
+export function readCompaction(value: unknown): CompactionItem | null {
+  const item = inspectCompaction(value);
+  return typeof item === "string" ? null : item;
 }
 export function readCheckpoint(value: unknown): ConversationCheckpoint | null {
   if (!value || typeof value !== "object") return null;
   const { scope, turnId, item, at } = value as Record<string, unknown>, compact = readCompaction(item);
   if (!validContextScope(scope) || typeof turnId !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(turnId) ||
-    !compact || typeof at !== "number" || !Number.isFinite(at)) return null;
+    !compact || compact.encrypted_content.length > MAX_SAVED_COMPACTION_BYTES || typeof at !== "number" || !Number.isFinite(at)) return null;
   return { scope, turnId, item: compact, at };
 }
 

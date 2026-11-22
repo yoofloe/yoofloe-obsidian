@@ -3,13 +3,17 @@ import type { AiDraft } from "./ai-session";
 import { openAiErrorCodes, parseOpenAiDraft } from "./openai";
 import { emptyOnlineUsage, sourceList, sourceLink, publicUrl, withSources, type WebSource, type OnlineUsage } from "./research";
 import type { PendingGeneratedFile } from "./generated-files";
-import { readCompaction } from "./conversation-context";
+import { inspectCompaction, type CompactionProblem } from "./conversation-context";
 import { MAX_RESPONSE_BYTES } from "./openai-stream";
 import { workText } from "./work-activity";
 export interface AgentCall { id: string; name: string; arguments: string }
-export interface AgentReply { output: Record<string, unknown>[]; calls: AgentCall[]; text: string; summaries: string[]; incomplete: boolean; compactionReported: boolean; streamItemSkipped?: boolean; sources: WebSource[]; citations: WebSource[]; generated: PendingGeneratedFile[]; online: OnlineUsage; usage: { input: number; output: number; reasoning: number } }
+export interface AgentReply { output: Record<string, unknown>[]; calls: AgentCall[]; text: string; summaries: string[]; incomplete: boolean; compactionReported: boolean; compactionProblem?: CompactionProblem; streamItemSkipped?: boolean; sources: WebSource[]; citations: WebSource[]; generated: PendingGeneratedFile[]; online: OnlineUsage; usage: { input: number; output: number; reasoning: number } }
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const num = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0 ? v as number : 0;
+export function responseUsage(raw: unknown): AgentReply["usage"] {
+  const usage = obj(raw) ? raw : {}, details = obj(usage.output_tokens_details) ? usage.output_tokens_details : {};
+  return { input: num(usage.input_tokens), output: num(usage.output_tokens), reasoning: num(details.reasoning_tokens) };
+}
 export function parseAgentReply(status: number, raw: string, superseded = false): AgentReply {
   if (status < 200 || status >= 300) { parseOpenAiDraft(status, raw, false); throw Error("OpenAI did not return a usable response."); }
   if (new TextEncoder().encode(raw).length > MAX_RESPONSE_BYTES) throw Error("The response is too large for this device.");
@@ -61,19 +65,21 @@ export function parseAgentReply(status: number, raw: string, superseded = false)
     }
   }
   if (calls.length > 16 || generated.size > 16 || (!superseded && !calls.length && !texts.length && !generated.size)) throw Error("No text or supported work was returned.");
-  const usage = obj(data.usage) ? data.usage : {}, details = obj(usage.output_tokens_details) ? usage.output_tokens_details : {};
   const cited = sourceList(citations), sources = sourceList([...citations, ...candidates]);
+  let compactionProblem: CompactionProblem | undefined;
   const replay = output.flatMap(item => {
     if (item.type === "compaction") {
-      const compaction = readCompaction(item);
-      return compaction ? [compaction] : [];
+      const compaction = inspectCompaction(item);
+      if (typeof compaction !== "string") return [compaction];
+      compactionProblem = compaction;
+      return [];
     }
     return ["message", "reasoning", "function_call", "web_search_call", "code_interpreter_call", "image_generation_call"].includes(String(item.type))
       ? [item.type === "image_generation_call" ? { ...item, result: null } : item] : [];
   });
-  return { output: replay, calls, compactionReported: output.some(item => item.type === "compaction"),
+  return { output: replay, calls, compactionReported: output.some(item => item.type === "compaction"), compactionProblem,
     text: texts.length ? withSources(texts.join("\n\n"), cited) : "", summaries, incomplete: data.status === "incomplete", sources, citations: cited, generated: [...generated.values()], online,
-    usage: { input: num(usage.input_tokens), output: num(usage.output_tokens), reasoning: num(details.reasoning_tokens) } };
+    usage: responseUsage(data.usage) };
 }
 const str = { type: "string" }, integer = { type: "integer" };
 const array = (items: unknown) => ({ type: "array", items });

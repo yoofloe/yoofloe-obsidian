@@ -1829,6 +1829,67 @@ test('Finish requests cancellation once and keeps a retrievable receipt when the
   }
 });
 
+test('Stop after Continue reconciles a cancel HTTP 400 against the original response without applying its tools', async () => {
+  const f = recoveryFixture();
+  const { diagnostics } = diagnosticFixture(); f.options.diagnostics = diagnostics;
+  await f.work.initialize(); f.work.setResponseRecovery(true);
+  f.work.writeScope = 'new'; f.work.setPrompt('Create the synthetic recovery note.');
+  await f.work.run();
+  const { id, conversationId } = f.work.chat.at(-1);
+  const entered = deferred();
+  f.access.retrieve = async (asked, _key, signal) => {
+    assert.equal(asked, receiptId);
+    f.lookups.push(asked);
+    if (f.lookups.length === 2) {
+      entered.resolve();
+      return new Promise((_, reject) => signal.addEventListener('abort', () => reject(Error('Interrupted')), { once: true }));
+    }
+    return backgroundReply('completed', [...backgroundText('Already finished.'), ...backgroundCreate]);
+  };
+  f.access.cancel = async asked => { f.cancellations.push(asked); return { status: 400, text: 'Private provider detail' }; };
+  const resumed = f.work.continueTask();
+  await entered.promise;
+  f.work.stop();
+  await resumed;
+  assert.equal(f.work.chat.at(-1).status, 'stopped');
+  assert.equal(f.posts.length, 1);
+  assert.equal(f.files.size, 0);
+  assert.deepEqual(f.cancellations, [receiptId]);
+  assert.deepEqual(f.lookups, [receiptId, receiptId, receiptId]);
+  assert(f.work.hasSavedResponse(id, conversationId));
+  const copy = await diagnostics.copyReport({ turn: id });
+  const report = exportedReport(copy);
+  assert(report.events.some(e => e.stage === 'response_cancel' && e.httpStatus === 400));
+  assert(report.events.some(e => e.stage === 'response_cancel' && e.providerStatus === 'completed' && e.remoteConfirmed));
+  assert(report.events.some(e => e.stage === 'response_lookup' && e.outcome === 'stopped'));
+  assert(!report.events.some(e => e.stage === 'response_cancel' && e.reason === 'pending_confirmation'));
+  assert(!copy.includes('Private provider detail'));
+  await f.work.retrieveSavedResponse(id, conversationId);
+  assert.equal(f.turns.get(id).answer, 'Already finished.');
+  assert.equal(f.files.size, 0);
+  await diagnostics.dispose();
+});
+
+test('an ambiguous cancel checks once and clears only a verified cancelled or failed receipt', async () => {
+  for (const [result, keep] of [
+    [backgroundReply('cancelled'), false], [backgroundReply('failed'), false],
+    [backgroundReply('in_progress'), true], [backgroundReply('incomplete', backgroundCreate), true],
+    [backgroundReply('cancelled', [], 'resp_unrelated'), true], [{ status: 404, text: '' }, true],
+  ]) {
+    const f = recoveryFixture(); await f.work.initialize(); f.work.setResponseRecovery(true);
+    f.work.setPrompt('Read the synthetic record.'); await f.work.run();
+    const { id, conversationId } = f.work.chat.at(-1);
+    f.access.cancel = async asked => { f.cancellations.push(asked); return { status: 409, text: '' }; };
+    f.access.retrieve = async (asked, key) => {
+      assert.equal(key, 'sk-synthetic-agent-key'); f.lookups.push(asked); return result;
+    };
+    f.options.preferences.key = async () => 'sk-synthetic-replacement';
+    assert(await f.work.finishHere());
+    assert.deepEqual(f.cancellations, [receiptId]); assert.deepEqual(f.lookups, [receiptId, receiptId]);
+    assert.equal(f.work.hasSavedResponse(id, conversationId), keep); assert.equal(f.posts.length, 1); assert.equal(f.files.size, 0);
+  }
+});
+
 test('Stop during an outstanding status GET ignores its late tool output', async () => {
   const f = recoveryFixture(); await f.work.initialize(); f.work.setResponseRecovery(true);
   const entered = deferred(), returning = deferred();

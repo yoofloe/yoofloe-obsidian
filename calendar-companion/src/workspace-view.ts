@@ -814,6 +814,7 @@ export class YoofloeAiView extends ItemView {
   }
   private updateWorkHeading(metadata: HTMLElement, turn: ChatTurn): void {
     const label = turn.status === "running" && this.work.stopping ? "Stopping…" :
+      turn.status === "paused" && turn.pausedForCompaction ? "Paused at context compaction" :
       turn.status === "paused" && turn.pausedForServer ? "Paused for OpenAI" :
       turn.status === "paused" && turn.pausedForConnection ? "Paused for connection" :
       turn.status === "paused" && turn.pausedForInput ? "Paused at input verification" :
@@ -1426,7 +1427,7 @@ export class YoofloeAiView extends ItemView {
     compact.checked = w.autoCompact; compact.disabled = w.settingsLocked;
     compactLabel.createSpan({ text: "Automatically compact long conversations" });
     compact.addEventListener("change", () => w.setAutoCompact(compact.checked));
-    contextSettings.createEl("p", { cls: "y-ai-hint", text: `Supported models can compact the active context at ${AUTO_COMPACT_TOKENS.toLocaleString()} tokens. Full messages remain in the local conversation.` });
+    contextSettings.createEl("p", { cls: "y-ai-hint", text: `At ${AUTO_COMPACT_TOKENS.toLocaleString()} tokens, a separate OpenAI compaction request may be needed. It counts toward your API request limit. Full messages stay in this conversation.` });
     const data = this.details(secondarySettings, "privacy", "Privacy and data use");
     this.settingSummary(data, "Privacy", "", "shield-check");
     if (w.supportsResponseRecovery) {

@@ -1705,10 +1705,14 @@ export class AiWorkspace {
         diagnostic?.finish("paused", resumeOnReturn ? "return_to_app" :
           task?.hasPendingResponse ? "check_response" : this.canResumeWithLimit ? "continue" : "raise_limit", {
           requestNumber: task?.requests || undefined,
-          reason: task?.connectionPauseReason ?? (task?.pausedForServer ? "http" : task?.pausedForInput ? "input_budget" : "request_limit"),
+          reason: task?.connectionPauseReason ?? (task?.pausedForCompaction ? "compaction_required" : task?.pausedForServer ? "http" : task?.pausedForInput ? "input_budget" : "request_limit"),
         });
       } else if (completed) diagnostic?.finish("completed", "none", { requestNumber: task?.requests || undefined });
-      else diagnostic?.finish(task?.state === "stopped" || this.stopRequested ? "stopped" : "failed", "review");
+      else {
+        const stopped = task?.state === "stopped" || this.stopRequested;
+        const savedResponse = stopped && this.responseReceipts.some(item => item.turnId === this.activeChatId);
+        diagnostic?.finish(stopped ? "stopped" : "failed", savedResponse ? "retrieve_response" : "review");
+      }
       return completed;
     } catch {
       task?.clearAppReturnResume();
@@ -1823,7 +1827,8 @@ export class AiWorkspace {
     const turn = this.chat.find(item => item.id === this.activeChatId);
     if (turn) {
       if (turn.status === "completed" && turn.contextScope && task.compaction) {
-        this.checkpoint = { scope: turn.contextScope, item: task.compaction, turnId: turn.id, at: Date.now() };
+        const checkpoint = readCheckpoint({ scope: turn.contextScope, item: task.compaction, turnId: turn.id, at: Date.now() });
+        if (checkpoint) this.checkpoint = checkpoint;
       }
       await this.archiveChat(turn);
     }
@@ -1840,6 +1845,7 @@ export class AiWorkspace {
     turn.uploadCleanupWarning = task.uploadCleanupWarning || undefined;
     turn.durationMs = task.durationMs;
     turn.pausedForInput = task.pausedForInput || undefined;
+    turn.pausedForCompaction = task.state === "paused" && task.pausedForCompaction || undefined;
     turn.pausedForConnection = task.state === "paused" && task.pausedForConnection || undefined;
     turn.pausedForServer = task.state === "paused" && task.pausedForServer || undefined;
     turn.readCoverage = agent.readCoverage;

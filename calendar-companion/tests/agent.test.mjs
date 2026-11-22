@@ -425,6 +425,120 @@ test('a safe-step steer supersedes unstarted local actions and elapsed time excl
   assert(task.events.some(event => event.kind === 'summary' && event.text === 'Checked the allowed scope'));
 });
 
+test('a missed inline checkpoint compacts the finished tool round within the request limit', async () => {
+  const requests = [], executed = [];
+  const previous = { type: 'compaction', id: 'cmp_old', encrypted_content: 'old-context' };
+  const retained = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Edit the approved note.' }] };
+  const window = [retained, { type: 'compaction', id: 'cmp_new', encrypted_content: 'new-context' }];
+  const task = new AgentTask({
+    current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false },
+    executor: { execute: async (name) => { executed.push(name); return { saved: true }; } },
+    transport: async req => {
+      const body = JSON.parse(req.body);
+      requests.push(req.url);
+      if (requests.length === 1) {
+        const original = JSON.parse(reply([{ ...call('write-1'), name: 'apply_changes' }]).text);
+        original.usage.input_tokens = 38263;
+        return { status: 200, text: JSON.stringify(original) };
+      }
+      if (requests.length === 2) {
+        assert.equal(req.url, 'https://api.openai.com/v1/responses/compact');
+        assert.equal(body.model, 'gpt-6.2-sol');
+        assert.deepEqual(body.input[0], previous);
+        assert(body.input.some(i => i.type === 'function_call_output' && i.call_id === 'write-1' && JSON.parse(i.output).saved));
+        assert.equal(body.tools, undefined);
+        return { status: 200, text: JSON.stringify({ object: 'response.compaction', output: window, usage: { input_tokens: 39500, output_tokens: 400 } }) };
+      }
+      assert.equal(req.url, 'https://api.openai.com/v1/responses');
+      assert.deepEqual(body.input, window);
+      return reply([text('Done.')]);
+    },
+  });
+  await task.run('Edit the approved note.', { model: 'gpt-6.2-sol' }, 'edit', 1, undefined, undefined,
+    { autoCompact: true, items: [previous] });
+  assert.equal(task.state, 'paused');
+  assert.equal(requests.length, 1);
+  await task.resume(2);
+  assert.equal(task.state, 'paused');
+  assert.deepEqual(requests.map(url => url.split('/').pop()), ['responses', 'compact']);
+  await task.resume(3);
+  assert.equal(task.state, 'completed');
+  assert.equal(task.text, 'Done.');
+  assert.equal(task.requests, 3);
+  assert.equal(task.usage.input, 38263 + 39500 + 10);
+  assert.deepEqual(executed, ['apply_changes']);
+  assert.equal(task.compaction, null, 'A multi-item standalone window cannot be saved as a lone cross-turn checkpoint');
+});
+
+test('a compacted input that remains large waits for a manual continuation before generation', async () => {
+  const routes = [], tools = [], counts = [38262, 46385, 46385];
+  const checkpoint = { type: 'compaction', encrypted_content: 'initial-context' };
+  const task = new AgentTask({
+    current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false },
+    executor: { execute: async name => { tools.push(name); return { read: true }; } },
+    countTokens: async () => ({ status: 200, text: JSON.stringify({ object: 'response.input_tokens', input_tokens: counts.shift() }) }),
+    transport: async req => {
+      routes.push(req.url.split('/').pop());
+      if (routes.length === 1) return reply([call('read-once')]);
+      if (routes.length === 2) return { status: 200, text: JSON.stringify({ object: 'response.compaction',
+        output: [{ type: 'compaction', encrypted_content: 'next-context' }] }) };
+      return reply([text('Finished after review.')]);
+    },
+  });
+  await task.run('Read.', { model: 'gpt-6.2-sol' }, 'ask', 'none', undefined, undefined, { autoCompact: true, items: [checkpoint] });
+  assert.equal(task.state, 'paused'); assert.match(task.message, /46\D?385/);
+  assert.deepEqual(routes, ['responses', 'compact']);
+  await task.resume('none');
+  assert.equal(task.state, 'completed'); assert.deepEqual(routes, ['responses', 'compact', 'responses']);
+  assert.deepEqual(tools, ['read_notes']);
+});
+
+test('Stop during standalone compaction ignores its eventual result and starts no follow-up model step', async () => {
+  let arrive, release;
+  const entered = new Promise(resolve => { arrive = resolve; }), returned = new Promise(resolve => { release = resolve; });
+  const routes = [], tools = [];
+  const task = new AgentTask({
+    current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false },
+    executor: { execute: async name => { tools.push(name); return { ok: true }; } },
+    transport: async req => {
+      routes.push(req.url.split('/').pop());
+      if (routes.length === 1) {
+        const original = JSON.parse(reply([call('read-once')]).text); original.usage.input_tokens = 38263;
+        return { status: 200, text: JSON.stringify(original) };
+      }
+      arrive();
+      return returned;
+    },
+  });
+  const active = task.run('Read.', { model: 'gpt-6.2-sol' }, 'ask', 'none', undefined, undefined, { autoCompact: true, items: [] });
+  await entered; task.stop();
+  release({ status: 200, text: JSON.stringify({ object: 'response.compaction', output: [{ type: 'compaction', encrypted_content: 'late-context' }], usage: { input_tokens: 40000 } }) });
+  await active;
+  assert.equal(task.state, 'stopped'); assert.equal(task.compaction, null);
+  assert.equal(task.usage.input, 38263 + 40000);
+  assert.deepEqual(routes, ['responses', 'compact']); assert.deepEqual(tools, ['read_notes']);
+});
+
+test('a reduction above the threshold requires Continue before the next paid compaction', async () => {
+  const routes = [], counts = [65000, 35000, 1800];
+  const task = new AgentTask({ current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false },
+    executor: { execute: async () => ({ ok: true }) },
+    countTokens: async () => ({ status: 200, text: JSON.stringify({ object: 'response.input_tokens', input_tokens: counts.shift() }) }),
+    transport: async req => {
+      const route = req.url.split('/').pop(); routes.push(route);
+      if (route === 'compact') return { status: 200, text: JSON.stringify({ object: 'response.compaction',
+        output: [{ type: 'compaction', encrypted_content: 'checkpoint-' + routes.length }] }) };
+      return routes.length < 4 ? reply([call('read-' + routes.length)]) : reply([text('Done.')]);
+    },
+  });
+  await task.run('Read.', { model: 'gpt-6.2-sol' }, 'ask', 'none', undefined, undefined,
+    { autoCompact: true, items: [{ type: 'compaction', encrypted_content: 'initial-context' }] });
+  assert.deepEqual(routes, ['responses', 'compact', 'responses']); assert.equal(task.state, 'paused');
+  assert.match(task.message, /one more compaction/);
+  await task.resume('none');
+  assert.deepEqual(routes, ['responses', 'compact', 'responses', 'compact', 'responses']); assert.equal(task.state, 'completed');
+});
+
 test('automatic compaction prunes the next request at the encrypted item and retains pending local tool output', async () => {
   const inputs = [];
   const compact = { type: 'compaction', id: 'cmp_test', encrypted_content: 'encrypted-state-123' };
