@@ -1,5 +1,5 @@
 import { MAX_AI_INPUT_BYTES, type AiModelOptions, type AiTransport, type AiHttpResponse } from "./ai-session";
-import { validateOpenAiKey, validateOpenAiOptions } from "./openai";
+import { OPENAI_ENDPOINT, validateOpenAiKey, validateOpenAiOptions } from "./openai";
 import { OpenAiConnectionPause, OpenAiServerPause, openAiTransportFailure, requestOpenAiRound } from "./openai-request";
 import { openAiStreamResult } from "./openai-stream";
 import type { AndroidModelStream } from "./android-model-stream";
@@ -15,11 +15,12 @@ import type { GeneratedStore, GeneratedFile } from "./generated-files";
 import { AttachmentBudgetPause, OPENAI_UPLOAD_EXPIRY_SECONDS, type AttachmentRun, type AttachmentStore } from "./attachments";
 import type { SelectionReference } from "./selection-reference";
 import { AUTO_COMPACT_TOKENS, readCompaction, type CompactionItem } from "./conversation-context";
+import { CompactionWindowError, readCompactedWindow, readCompactionResponse } from "./standalone-compaction";
 import { findOpenAiModel } from "./openai-models";
 import { WORK_ACTIVITY_LIMIT, workText, type ActivityKind, type ActivityState, type SteerNote, type WorkEvent } from "./work-activity";
 import type { LiveResponseRound, LiveSteerEvent, OpenLiveResponse } from "./responses-socket";
 import { estimateInput, verifyInputBudget, InputBudgetError, TOKEN_COUNT_THRESHOLD, type InputBudget } from "./input-budget";
-import { diagnoseLocal, type DiagnosticReason, type DiagnosticRun } from "./diagnostics";
+import { diagnoseLocal, type DiagnosticDetail, type DiagnosticReason, type DiagnosticRun } from "./diagnostics";
 import { diagnoseTransport, observeHttp } from "./diagnostic-network";
 
 type RoundResult = { reply: AgentReply; trace?: string };
@@ -27,6 +28,7 @@ interface PendingResponse {
   id: string; number: number; trace: string; keyBinding: string; recorded: boolean; ready?: AiHttpResponse;
   recording?: Promise<void>;
   cancel: () => Promise<AiHttpResponse>;
+  checkStatus: (signal: AbortSignal) => Promise<AiHttpResponse>;
 }
 
 export type SteerStatus = "steer-pending" | "sending" | "applied" | "received" | "review";
@@ -47,6 +49,7 @@ export class AgentTask {
   inputBudget: InputBudget | null = null;
   pausedForInput = false;
   pausedForServer = false;
+  pausedForCompaction = false;
   connectionPauseReason: DiagnosticReason | undefined;
   online = emptyOnlineUsage();
   sources: WebSource[] = [];
@@ -61,6 +64,9 @@ export class AgentTask {
   steerNotes: SteerNote[] = [];
   compaction: CompactionItem | null = null;
   private autoCompact = false;
+  private compactBeforeNextRequest?: number;
+  private checkCompactedSizeAgainst?: number;
+  private compactedAboveThreshold = false;
   private unconfirmedHostedUsage = false;
   private initialItem: Record<string, unknown> = {};
   private eventId = 0;
@@ -293,6 +299,9 @@ export class AgentTask {
     this.attachmentsReady = false; this.fileIds = []; this.transcriptions = 0; this.fileWarnings = []; this.uploadCleanupWarning = "";
     this.autoCompact = context?.autoCompact === true && !!findOpenAiModel(model.model);
     this.compaction = null;
+    this.compactBeforeNextRequest = undefined;
+    this.checkCompactedSizeAgainst = undefined;
+    this.compactedAboveThreshold = false;
     this.nativeOnContinue = false;
     this.pausedInputCheck = undefined;
     // Task creation precedes all its uploads. Recheck counts for aged file references.
@@ -315,6 +324,7 @@ export class AgentTask {
     if (this.state !== "paused" || this.busy || this.options.gate.busy || !this.options.current()) throw Error("This task is not available to continue in this vault session.");
     if (!this.pendingResponse && maximum !== "none" && maximum <= this.requests) throw Error("Choose a total request limit above the requests already used, or no request-count limit.");
     requestLimit(onlineMaximum); if (onlineMaximum !== "none" && onlineMaximum < this.onlineCalls) throw Error("The tool limit cannot be below calls already used."); this.onlineMaximum = onlineMaximum;
+    if (this.pausedForCompaction && this.compactBeforeNextRequest !== undefined) this.compactedAboveThreshold = false;
     await this.advance(maximum);
   }
   private async prepareSteer(note: SteerNote, key: string, maximum: RequestLimit): Promise<string | Record<string, unknown>[]> {
@@ -363,6 +373,7 @@ export class AgentTask {
   private async advance(maximum: RequestLimit): Promise<void> {
     this.busy = true; this.options.gate.busy = true; this.stopped = false; this.stopDeferredCleanup = false;
     this.resumeOnAppReturn = false;
+    this.pausedForCompaction = false;
     this.pausedForInput = false; this.pausedForServer = false; this.connectionPauseReason = undefined; this.state = "running"; this.activeSince = Date.now();
     const previousFailure = this.diagnostics?.report.lastFailure;
     try {
@@ -393,6 +404,15 @@ export class AgentTask {
         [this.options.calendarDraft.definition] : agentTools(this.mode, this.options.writeScope ?? "current");
       const canSaveGenerated = localTools.some(tool => tool.name === "save_generated_file");
       while ((this.pendingResponse || maximum === "none" || this.requests < maximum) && !this.stopped && this.options.current()) {
+        if (!this.pendingResponse && this.compactBeforeNextRequest !== undefined) {
+          if (this.compactedAboveThreshold) {
+            this.pauseForCompaction("The task is still above the compaction threshold. Continue uses one more compaction request. You can also choose Finish here.", { inputTokens: this.compactBeforeNextRequest });
+            break;
+          }
+          await this.compactActiveContext(key, this.compactBeforeNextRequest);
+          if (this.state !== "running") break;
+          continue;
+        }
         const result = this.pendingResponse ? await this.retrieveResponse(key, keyBinding, false) :
           await this.startRound(key, keyBinding, maximum, localTools, canSaveGenerated);
         if (!result) break;
@@ -459,7 +479,7 @@ export class AgentTask {
         if (this.blockedRounds >= 3) throw Error("Three consecutive steps could not perform any permitted action. The task stopped without an automatic retry; completed work is kept.");
         if (maximum !== "none" && this.requests === maximum) { this.state = "paused"; this.update("status", "The request limit was reached. Work and the answer are kept. Choose a higher total limit or no request-count limit, then continue this task."); }
       }
-      if (this.state === "running") { this.state = this.stopped || !this.options.current() ? "stopped" : maximum !== "none" && this.requests >= maximum ? "paused" : "completed"; if (this.state === "paused") this.update("status", "The request limit was reached after preparing attachments. Continue with a higher total limit; completed work is reused."); }
+      if (this.state === "running") { this.state = this.stopped || !this.options.current() ? "stopped" : maximum !== "none" && this.requests >= maximum ? "paused" : "completed"; if (this.state === "paused") this.update("status", "The API request limit was reached. Increase the total limit to continue with the saved task context.", "waiting"); }
     } catch (error) {
       const sessionCanContinue = !this.stopped && this.options.current();
       if (this.pendingResponse && sessionCanContinue) {
@@ -520,6 +540,61 @@ export class AgentTask {
       for (const listener of this.listeners) listener();
     }
   }
+  private pauseForCompaction(message: string, detail: DiagnosticDetail): void {
+    this.state = "paused";
+    this.pausedForCompaction = true;
+    this.diagnostics?.event("compaction", "paused", { reason: "compaction_required", thresholdTokens: AUTO_COMPACT_TOKENS,
+      requestNumber: this.requests, ...detail });
+    this.update("status", message, "waiting");
+  }
+
+  private async compactActiveContext(key: string, inputTokens: number): Promise<void> {
+    if (this.pauseIfHidden()) return;
+    const body = JSON.stringify({ model: this.model.model, input: this.items });
+    const requestBytes = new TextEncoder().encode(body).length;
+    if (requestBytes > MAX_AI_INPUT_BYTES) throw new InputBudgetError("The task context is too large to compact on this device. Start a focused follow-up from the saved work.");
+    const requestNumber = this.requests + 1;
+    this.update("status", `Compacting conversation context · request ${requestNumber}`, "working");
+    if (this.stopped || !this.options.current() || this.pauseIfHidden()) return;
+    this.requests = requestNumber;
+    this.compactedAboveThreshold = true;
+    const info = { action: "standalone", requestBytes, requestNumber, inputTokens, transport: "obsidian_http" as const };
+    let response: AiHttpResponse;
+    try {
+      response = await observeHttp(this.diagnostics, "compaction", info, () => this.options.transport({
+        url: OPENAI_ENDPOINT + "/compact", method: "POST", contentType: "application/json",
+        headers: { Authorization: "Bearer " + key }, body, throw: false,
+      }));
+    } catch (error) {
+      if (!this.stopped && this.options.current())
+        this.pauseForCompaction("The compaction response could not be confirmed. Continue retries compaction and may incur charges.", { ...info, ...diagnoseTransport(error) });
+      return;
+    }
+    if (response.status < 200 || response.status >= 300) {
+      if (this.stopped || !this.options.current()) return;
+      this.pauseForCompaction(`OpenAI returned HTTP ${response.status} during compaction. Choose Continue to retry or Finish here to keep the saved work.`,
+        { ...info, reason: "http", httpStatus: response.status });
+      return;
+    }
+    try {
+      const { output, usage } = readCompactionResponse(response.text);
+      this.usage.input += usage.input; this.usage.output += usage.output; this.usage.reasoning += usage.reasoning;
+      if (this.stopped || !this.options.current()) return;
+      const compacted = readCompactedWindow(output, this.items);
+      const count = this.items.length;
+      this.items = compacted.items;
+      this.compaction = compacted.checkpoint;
+      this.compactBeforeNextRequest = undefined;
+      this.checkCompactedSizeAgainst = inputTokens;
+      this.diagnostics?.event("compaction", "ok", { ...info, action: "applied", count, outputTokens: usage.output, evidence: "verified_reply" });
+      this.update("status", "Conversation context compacted.");
+    } catch (error) {
+      if (this.stopped || !this.options.current()) return;
+      this.pauseForCompaction("The compacted context could not be used. Choose Continue to retry compaction or Finish here to keep the saved work.",
+        { ...info, reason: "response_invalid", compactionProblem: error instanceof CompactionWindowError ? error.problem : "invalid_window" });
+    }
+  }
+
   private async startRound(key: string, keyBinding: string | undefined, maximum: RequestLimit,
     localTools: Record<string, unknown>[], canSaveGenerated: boolean): Promise<RoundResult | null> {
     const model = this.model, effort = resolveEffort(model.model, model.effort);
@@ -586,6 +661,19 @@ export class AgentTask {
     if (this.pauseIfHidden()) {
       if (keyBinding && this.inputBudget.exact !== undefined) this.pausedInputCheck = { body, tokens: this.inputBudget.exact, keyBinding };
       return null;
+    }
+    const checkedSize = this.inputBudget.exact ?? this.inputBudget.estimated;
+    if (this.inputBudget.exact !== undefined && checkedSize < AUTO_COMPACT_TOKENS) this.compactedAboveThreshold = false;
+    if (this.checkCompactedSizeAgainst !== undefined) {
+      const before = this.checkCompactedSizeAgainst;
+      const after = checkedSize;
+      this.checkCompactedSizeAgainst = undefined;
+      if (after >= before && after >= AUTO_COMPACT_TOKENS) {
+        this.pendingSteers = [...this.sendingSteers, ...this.pendingSteers]; this.sendingSteers = [];
+        this.pauseForCompaction(`The compacted request still needs ${after.toLocaleString()} input tokens. Continue sends this step. Choose Finish here to keep the saved work.`,
+          { inputTokens: after, compactionProblem: "input_not_reduced" });
+        return null;
+      }
     }
     const firstSteer = this.items.length;
     this.items.push(...messages);
@@ -658,7 +746,8 @@ export class AgentTask {
         const { id, status } = envelope;
         const pending = isBackgroundPending(status);
         this.pendingResponse = { id, number: this.requests, keyBinding, trace, recorded: false,
-          ready: pending ? undefined : response, cancel: () => background.cancel(id, key) };
+          ready: pending ? undefined : response, cancel: () => background.cancel(id, key),
+          checkStatus: signal => background.retrieve(id, key, signal, this.continueWhileAway) };
         if (this.stopped || !this.options.current()) { this.cancelResponse(); return null; }
         if (pending) this.update("status", "OpenAI accepted the request. Waiting for its result.", "waiting");
         return await this.retrieveResponse(key, keyBinding, pending);
@@ -710,15 +799,26 @@ export class AgentTask {
     const cancellation = this.rememberAcceptedResponse(job)
       .catch(() => this.rememberAcceptedResponse(job))
       .catch(() => { this.diagnostics?.event("conversation_save", "failed", { reason: "storage", requestNumber: job.number }); })
-      .then(() => observeHttp(this.diagnostics, "response_cancel", info, job.cancel)).then(http => {
-      if (http.status < 200 || http.status >= 300) throw Error("Cancellation is unconfirmed.");
-      const { status } = backgroundEnvelope(http.text, job.id);
-      if (status !== "cancelled" && status !== "failed") throw Error("Cancellation is unconfirmed.");
-      this.resolvedResponseId = job.id;
-      this.diagnostics?.event("response_cancel", "ok", info);
-    }).catch(() => {
-      this.diagnostics?.event("response_cancel", "unconfirmed", { ...info, reason: "pending_confirmation" });
-    });
+      .then(async () => {
+        let http = await observeHttp(this.diagnostics, "response_cancel", info, job.cancel,
+          status => status >= 200 && status < 300 || status === 400 || status === 409);
+        if ((http.status === 400 || http.status === 409) && (this.options.preserve?.() ?? this.options.current())) {
+          http = await observeHttp(this.diagnostics, "response_lookup", { ...info, action: "stop" },
+            () => job.checkStatus(AbortSignal.timeout(10000)));
+        }
+        if (http.status < 200 || http.status >= 300) throw Error("Cancellation is unconfirmed.");
+        const { status } = backgroundEnvelope(http.text, job.id);
+        const verified = { ...info, providerStatus: status, evidence: "verified_reply" as const, remoteConfirmed: true };
+        if (status === "cancelled" || status === "failed") this.resolvedResponseId = job.id;
+        if (isBackgroundPending(status)) {
+          this.diagnostics?.event("response_cancel", "unconfirmed", { ...verified, reason: "response_pending" });
+        } else {
+          // A finished answer is still retrievable from its receipt. Stop never executes its tool calls.
+          this.diagnostics?.event("response_cancel", status === "cancelled" ? "ok" : "skipped", verified);
+        }
+      }).catch(() => {
+        this.diagnostics?.event("response_cancel", "unconfirmed", { ...info, reason: "pending_confirmation" });
+      });
     this.cancelling = cancellation;
     void cancellation.then(() => { if (this.cancelling === cancellation) this.cancelling = undefined; });
   }
@@ -749,7 +849,7 @@ export class AgentTask {
         if (this.pauseIfHidden()) return null;
         let http: AiHttpResponse;
         try { http = job.ready ?? await observeHttp(this.diagnostics, "response_lookup", info,
-          () => access.retrieve(job.id, key, abort.signal, this.continueWhileAway)); }
+          () => access.retrieve(job.id, key, abort.signal, this.continueWhileAway), undefined, () => this.stopped && abort.signal.aborted); }
         catch {
           if (!active()) return null;
           if (this.continueWhileAway && (this.lookupCrossedAppSwitch || this.options.appVisible?.() === false))
@@ -806,7 +906,10 @@ export class AgentTask {
     if (replay) {
       const index = this.autoCompact ? reply.output.findLastIndex(item => item.type === "compaction") : -1;
       const compact = index >= 0 ? readCompaction(reply.output[index]) : null;
-      if (compact) {
+      const tokens = Math.max(this.inputBudget?.exact ?? 0, reply.usage.input);
+      if (tokens > 0 && tokens < AUTO_COMPACT_TOKENS) this.compactedAboveThreshold = false;
+      const repeated = compact && this.items.some(item => item.type === "compaction" && item.encrypted_content === compact.encrypted_content);
+      if (compact && !repeated) {
         const pendingCalls = reply.output.slice(0, index).filter(item => item.type === "function_call");
         this.diagnostics?.event("compaction", "ok", { action: "applied", requestNumber: this.requests, count: this.items.length });
         this.items = [compact, ...pendingCalls, ...reply.output.slice(index + 1)];
@@ -814,11 +917,12 @@ export class AgentTask {
         this.update("status", "Conversation context compacted.");
       } else {
         if (this.autoCompact) {
-          const tokens = Math.max(this.inputBudget?.exact ?? 0, reply.usage.input);
+          if (tokens >= AUTO_COMPACT_TOKENS) this.compactBeforeNextRequest = tokens;
           const reason = reply.compactionReported ? "response_invalid" :
             reply.streamItemSkipped ? "stream_item_not_checked" : tokens >= AUTO_COMPACT_TOKENS ? "compaction_not_returned" : undefined;
           if (reason) this.diagnostics?.event("compaction", "unconfirmed", { reason,
-            requestNumber: this.requests, inputTokens: tokens, thresholdTokens: AUTO_COMPACT_TOKENS });
+            requestNumber: this.requests, inputTokens: tokens, thresholdTokens: AUTO_COMPACT_TOKENS,
+            compactionProblem: repeated ? "unchanged_window" : reply.compactionProblem });
         }
         this.items.push(...reply.output.filter(item => item.type !== "compaction"));
       }

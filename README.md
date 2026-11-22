@@ -101,6 +101,10 @@ context are counted through the OpenAI input-token endpoint before generation. K
 reasoning. A failed size check keeps the draft and completed work. The activity details separately report cumulative
 model usage. Image previews use the selected Markdown only, with embedded files shown as text.
 
+With automatic compaction enabled, a task that still has work to do can use one OpenAI compaction request
+when an over-threshold reply provides no usable checkpoint. This counts toward the API request limit.
+If compaction fails or the next input is still as large, the task pauses for review. Confirmed edits are kept.
+
 ## Sources and attachments
 
 **Expanded** uses permitted notes, supplied attachments, general knowledge and live web research as needed.

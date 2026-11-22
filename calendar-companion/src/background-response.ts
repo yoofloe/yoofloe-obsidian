@@ -4,8 +4,8 @@ import { MAX_RESPONSE_BYTES } from "./openai-stream";
 import { validChatId } from "./chat-history";
 
 const idPattern = /^resp_[A-Za-z0-9_-]{1,180}$/;
-const states = ["queued", "in_progress", "completed", "incomplete", "cancelled", "failed"] as const;
-type ResponseState = typeof states[number];
+export const backgroundStates = ["queued", "in_progress", "completed", "incomplete", "cancelled", "failed"] as const;
+export type ResponseState = typeof backgroundStates[number];
 export interface SavedResponseReceipt { turnId: string; responseId: string; requestNumber: number }
 export interface BackgroundAccess {
   retrieve(id: string, key: string, signal?: AbortSignal, allowHidden?: boolean): Promise<AiHttpResponse>;
@@ -38,7 +38,7 @@ export function backgroundEnvelope(raw: string, expectedId?: string): { id: stri
   try { value = JSON.parse(raw); } catch { throw Error("OpenAI returned an unreadable background response."); }
   const item = value && typeof value === "object" ? value as Record<string, unknown> : {};
   if (item.object !== "response" || typeof item.id !== "string" || !idPattern.test(item.id) ||
-      (expectedId !== undefined && item.id !== expectedId) || !states.some(state => state === item.status))
+      (expectedId !== undefined && item.id !== expectedId) || !backgroundStates.some(state => state === item.status))
     throw Error("The OpenAI response identity or status could not be verified.");
   return { id: item.id, status: item.status as ResponseState };
 }
@@ -49,7 +49,7 @@ export function backgroundAccess(request: StatusHttp, owner: Document): Backgrou
   const call = (id: string, key: string, cancel: boolean) => {
     if (!idPattern.test(id)) throw Error("Invalid saved OpenAI response reference.");
     return request({ url: OPENAI_ENDPOINT + "/" + id + (cancel ? "/cancel" : ""), method: cancel ? "POST" : "GET",
-      headers: { Authorization: "Bearer " + validateOpenAiKey(key) }, throw: false });
+      headers: { Authorization: "Bearer " + validateOpenAiKey(key), ...(cancel ? { "Content-Type": "application/json" } : {}) }, throw: false });
   };
   const lookups = new Map<string, { key: string; response: Promise<AiHttpResponse> }[]>();
   const lookup = (id: string, key: string) => {

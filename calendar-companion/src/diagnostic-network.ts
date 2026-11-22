@@ -71,7 +71,7 @@ const successful = (status: number): boolean => status >= 200 && status < 300;
 
 export async function observeHttp<T extends { status: number; headers?: Readonly<Record<string, string>> }>(
   run: DiagnosticRun | undefined, stage: DiagnosticStage, info: DiagnosticDetail, send: () => Promise<T>,
-  accepted: (status: number) => boolean = successful,
+  accepted: (status: number) => boolean = successful, stoppedWhileWaiting?: () => boolean,
 ): Promise<T> {
   if (!run) return send();
   const attempt = run.nextAttempt(), start = performance.now();
@@ -85,6 +85,10 @@ export async function observeHttp<T extends { status: number; headers?: Readonly
       ...responseDiagnostics(response), reason: ok ? undefined : "http" });
     return response;
   } catch (error) {
+    if (stoppedWhileWaiting?.()) {
+      run.event(stage, "stopped", { ...info, ...run.sampleDevice(), reason: "aborted", attempt, elapsedMs: Math.round(performance.now() - start) });
+      throw error;
+    }
     const diagnosis = diagnoseTransport(error);
     const httpUnconfirmed = (info.transport === "obsidian_http_stream" || info.transport === "android_webview_stream" || info.transport === "openai_background") &&
       (diagnosis.reason === "unknown" || diagnosis.reason === "response_unconfirmed");

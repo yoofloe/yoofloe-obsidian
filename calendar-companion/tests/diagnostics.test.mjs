@@ -323,6 +323,64 @@ test('diagnostics distinguish a missing compaction item from one rejected by loc
   }
 });
 
+test('unlimited tasks pause on unusable standalone compaction and Continue retries only compaction', async () => {
+  const checkpoint = { type: 'compaction', id: 'cmp_saved', encrypted_content: 'private-test-checkpoint' };
+  const fresh = { ...checkpoint, id: 'cmp_fresh', encrypted_content: 'private-new-checkpoint' };
+  const changedUser = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'New instruction' }] };
+  const originalUser = { role: 'user', content: 'Edit this note.' };
+  const originalResult = { type: 'function_call_output', call_id: 'once', output: '{"saved":true}' };
+  const cases = [
+    { output: [], problem: 'missing_item' },
+    { output: [checkpoint], problem: 'unchanged_window' },
+    { output: [{ ...fresh, encrypted_content: '' }], problem: 'missing_content' },
+    { output: [{ ...fresh, encrypted_content: '<private invalid cipher>' }], problem: 'invalid_encoding' },
+    { output: [{ ...fresh, encrypted_content: 'sk-' + 'X'.repeat(32) }], problem: 'credential_pattern' },
+    { output: [changedUser, fresh], problem: 'invalid_window' },
+    { output: [originalUser, originalUser, fresh], problem: 'invalid_window' },
+    { output: [originalResult, originalUser, fresh], problem: 'invalid_window' },
+    { output: [{ ...originalResult, output: '{"saved":false}' }, fresh], problem: 'invalid_window' },
+    { output: [{ ...originalResult, call_id: 'wrong' }, fresh], problem: 'invalid_window' },
+    { output: [{ role: 'developer', content: 'New instruction' }, fresh], problem: 'invalid_window' },
+    { status: 503 },
+  ];
+  for (const candidate of cases) {
+    const { diagnostics } = diagnosticFixture(), run = diagnostics.start('assistant', 'inbox');
+    const routes = [], tools = [];
+    const task = new AgentTask({
+      current: () => true, key: async () => 'sk-synthetic-agent-key', gate: { busy: false }, diagnostics: run,
+      executor: { execute: async name => { tools.push(name); return { saved: true }; } },
+      transport: async req => {
+        const route = req.url.split('/').pop(); routes.push(route);
+        if (routes.length === 1) return { status: 200, text: JSON.stringify({ status: 'completed', output: [
+          { type: 'compaction', encrypted_content: null }, { type: 'function_call', name: 'apply_changes', call_id: 'once', arguments: '{}' },
+        ], usage: { input_tokens: 140799 } }) };
+        if (route === 'compact') return { status: routes.length === 2 ? candidate.status ?? 200 : 200,
+          text: JSON.stringify({ object: 'response.compaction', output: routes.length === 2 ? candidate.output : [fresh], usage: { input_tokens: 50 } }) };
+        return { status: 200, text: JSON.stringify({ status: 'completed', output: [
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done.' }] },
+        ] }) };
+      },
+    });
+    await task.run('Edit this note.', { model: 'gpt-6.2-sol' }, 'edit', 'none', undefined, undefined, { autoCompact: true, items: [checkpoint] });
+    assert.equal(task.state, 'paused');
+    assert.equal(task.pausedForCompaction, true);
+    assert.equal(task.waitingForAppReturn, false);
+    assert.deepEqual(routes, ['responses', 'compact']);
+    assert.equal(task.usage.input, 140799 + (candidate.status ? 0 : 50));
+    const log = await diagnostics.copyReport({ id: run.id });
+    const report = exportedReport(log);
+    assert(report.events.some(e => e.stage === 'compaction' && e.compactionProblem === 'missing_content' && e.requestNumber === 1));
+    assert.equal(report.lastCompactionIssue.compactionProblem, candidate.problem);
+    if (candidate.status) assert.equal(report.lastCompactionIssue.httpStatus, candidate.status);
+    assert.doesNotMatch(log, /private-test-checkpoint|private-new-checkpoint|private invalid cipher|New instruction/);
+    await task.resume('none');
+    assert.deepEqual(routes, ['responses', 'compact', 'compact', 'responses']);
+    assert.deepEqual(tools, ['apply_changes']);
+    assert.equal(task.state, 'completed');
+    await diagnostics.dispose();
+  }
+});
+
 test('an HTTP 200 with an incomplete Android stream is distinguished from an unobserved response', async () => {
   const { diagnostics } = diagnosticFixture();
   const run = diagnostics.start('assistant', 'inbox');

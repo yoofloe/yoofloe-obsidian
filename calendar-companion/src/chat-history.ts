@@ -19,6 +19,7 @@ export interface ChatTurn {
   reference?: SelectionReference;
   referenceSnapshot?: ReferenceSnapshot;
   pausedForInput?: boolean;
+  pausedForCompaction?: boolean;
   pausedForConnection?: boolean;
   pausedForServer?: boolean;
   readCoverage?: ReadCoverage[];
@@ -98,6 +99,7 @@ export function readChat(value: unknown): ChatTurn | null {
     attachments: readAttachments(v.attachments), ...(reference ? { reference } : {}), ...(referenceSnapshot ? { referenceSnapshot } : {}),
     ...(v.pausedForInput === true ? { pausedForInput: true } : {}), ...(v.pausedForConnection === true ? { pausedForConnection: true } : {}),
     ...(v.pausedForServer === true ? { pausedForServer: true } : {}),
+    ...(v.pausedForCompaction === true ? { pausedForCompaction: true } : {}),
     ...(readCoverage ? { readCoverage } : {}),
     transcriptions: count(v.transcriptions), fileWarnings: Array.isArray(v.fileWarnings) ? v.fileWarnings.filter((value): value is string => typeof value === "string").slice(0, 32).map(value => value.slice(0, 500)) : [],
     ...(typeof v.uploadCleanupWarning === "string" ? { uploadCleanupWarning: workText(v.uploadCleanupWarning, 500) } : {}),

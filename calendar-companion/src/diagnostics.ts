@@ -1,4 +1,6 @@
 import { findOpenAiModel } from "./openai-models";
+import { compactionProblems, type CompactionProblem } from "./conversation-context";
+import { backgroundStates, type ResponseState } from "./background-response";
 
 export const DIAGNOSTIC_RETENTION = 7 * 24 * 60 * 60 * 1000;
 const PREFIX = "diagnostics/";
@@ -27,10 +29,10 @@ const reasons = [
   "tool_arguments", "note_reference_unavailable", "read_range",
   "version_conflict", "superseded", "already_executed", "storage", "vault_changed", "user_action",
   "no_verified_reply", "invalid_reply", "expired", "conflict", "not_found", "cancelled", "rejected",
-  "revision_unavailable", "invalid_revision", "session_reopened", "pending_confirmation", "unsupported",
+  "revision_unavailable", "invalid_revision", "session_reopened", "pending_confirmation", "unsupported", "compaction_required",
 ] as const;
 const actions = [
-  "send", "dequeued", "queued", "sending", "applied", "received", "enabled", "reused", "review", "clear", "lookup", "records", "capabilities",
+  "send", "dequeued", "queued", "sending", "applied", "received", "enabled", "reused", "review", "clear", "lookup", "records", "capabilities", "standalone",
   "undo", "status", "manual_import", "app_return", "app_switch_resume", "scan", "publish", "import", "stop",
   "search_notes", "read_outline", "read_notes", "read_next", "apply_changes",
   "create_note", "create_folder", "rename_note", "update_properties", "propose_trash", "save_generated_file",
@@ -69,6 +71,8 @@ export interface DiagnosticDetail {
   inputTokens?: number;
   outputTokens?: number;
   thresholdTokens?: number;
+  compactionProblem?: CompactionProblem;
+  providerStatus?: ResponseState;
   model?: string;
   effort?: string;
   readScope?: string;
@@ -104,7 +108,7 @@ export interface DiagnosticReport {
   updatedAt: number;
   environment: DiagnosticEnvironment;
   outcome: DiagnosticOutcome;
-  nextAction: "wait" | "continue" | "check_response" | "return_to_app" | "raise_limit" | "review" | "check_result" | "none";
+  nextAction: "wait" | "continue" | "check_response" | "retrieve_response" | "return_to_app" | "raise_limit" | "review" | "check_result" | "none";
   events: DiagnosticEvent[];
   omitted: number;
   startEvent?: DiagnosticEvent;
@@ -131,7 +135,7 @@ export interface DiagnosticStorage {
 }
 
 const emptyChanges = (): ChangeSummary => ({ confirmed: 0, pending: 0, reverted: 0 });
-const nextActions = ["wait", "continue", "check_response", "return_to_app", "raise_limit", "review", "check_result", "none"] as const;
+const nextActions = ["wait", "continue", "check_response", "retrieve_response", "return_to_app", "raise_limit", "review", "check_result", "none"] as const;
 const platforms = ["android", "ios", "windows", "macos", "linux", "other"] as const;
 const isIssue = (value: DiagnosticOutcome) => value === "failed" || value === "unconfirmed" || value === "interrupted" || value === "paused";
 const isActive = (value: DiagnosticOutcome) => value === "started" || value === "waiting";
@@ -163,6 +167,7 @@ function detail(input: unknown): DiagnosticDetail {
     httpStatus: integer(v.httpStatus, 100, 599), requestNumber: integer(v.requestNumber, 1), attempt: integer(v.attempt, 1),
     clientId: matching(v.clientId, idPattern), providerId: matching(v.providerId, /^(?:req|resp)_[a-f0-9]{16,80}$/i),
     count: integer(v.count), inputTokens: integer(v.inputTokens), outputTokens: integer(v.outputTokens), thresholdTokens: integer(v.thresholdTokens),
+    compactionProblem: oneOf(compactionProblems, v.compactionProblem), providerStatus: oneOf(backgroundStates, v.providerStatus),
     model: typeof v.model === "string" ? findOpenAiModel(v.model)?.id ?? "custom" : undefined,
     effort: oneOf(["default", "none", "low", "medium", "high", "xhigh", "max"], v.effort),
     readScope: oneOf(["current", "folder", "vault", "none"], v.readScope),
@@ -447,6 +452,7 @@ const nextLabel: Record<DiagnosticReport["nextAction"], string> = {
   wait: "Wait for the running task or the app reply.",
   continue: "Use Continue in the same active task.",
   check_response: "Choose Continue to retrieve the existing OpenAI response.",
+  retrieve_response: "Use Retrieve saved response in this conversation to check the original OpenAI result.",
   return_to_app: "Return to Obsidian with a connection to continue the active task.",
   raise_limit: "Increase the total request limit, then use Continue in the same task.",
   review: "Review the task status and saved changes before sending again.",
@@ -463,7 +469,8 @@ export function formatDiagnostics(input: DiagnosticReport, storageUnconfirmed = 
   const failure = report.lastFailure ?? [...events].reverse().find(event => isIssue(event.outcome));
   const date = (time: number) => new Date(time).toISOString();
   const describe = (event?: DiagnosticEvent) => event ? [human(event.stage), event.action && human(event.action), human(event.outcome),
-    event.reason && human(event.reason), event.reference, event.errorCode, event.httpStatus && "HTTP " + event.httpStatus,
+    event.reason && human(event.reason), event.compactionProblem && human(event.compactionProblem),
+    event.providerStatus && "OpenAI " + human(event.providerStatus), event.reference, event.errorCode, event.httpStatus && "HTTP " + event.httpStatus,
     event.requestNumber && "request " + event.requestNumber,
     event.inputTokens !== undefined && (event.inputTokens > 0 || event.stage === "input_tokens" || event.stage === "model_request") &&
       event.inputTokens + " input tokens",
